@@ -1,0 +1,124 @@
+{
+  "insights": {
+    "loading_dashboard": "ダッシュボードを読み込み中...",
+    "tab_overview": "概要",
+    "tab_performance": "パフォーマンス",
+    "tab_income": "収入",
+    "back_to_allocation": "割り当てに戻る",
+    "target_allocation": "ターゲット割り当て",
+    "back_to_overview": "概要に戻る",
+    "rebalance": "リバランス",
+    "no_target_selected": "ターゲットが選択されていません",
+    "no_target_selected_description": "現在の比較のためのターゲット割り当てを作成します意図した重量に対する重量。",
+    "set_target_allocation": "目標を設定割り当て",
+    "chart_classes": "クラス",
+    "chart_regions": "リージョン",
+    "chart_sectors": "セクター",
+    "explorer": {
+      "lens_allocation": "割り当て",
+      "lens_accounts": "アカウント",
+      "lens_sectors": "セクター",
+      "lens_regions": "リージョン",
+      "lens_risk": "リスク",
+      "lens_security": "セキュリティタイプ",
+      "lens_currency": "通貨",
+      "unit_categories": "カテゴリ",
+      "unit_accounts": "アカウント",
+      "unit_sectors": "セクター",
+      "unit_regions": "地域",
+      "unit_levels": "レベル",
+      "unit_types": "タイプ",
+      "unit_currencies": "通貨",
+      "unit_groups": "グループ",
+      "other_units": "その他{{unit}}",
+      "breakdown": "内訳",
+      "top_units": "トップ {{unit}}",
+      "show_less": "一部表示",
+      "show_all": "すべて表示"
+    },
+    "rails": {
+      "target_allocation": "ターゲット割り当て",
+      "details": "詳細",
+      "suggested_moves": "提案された動き",
+      "all_in_range": "ターゲット範囲内のすべてのカテゴリ — リバランスなし必要",
+      "add": "追加",
+      "trim": "トリム",
+      "inside_target_range": "ターゲット範囲内",
+      "outside_range": "範囲外 {{count}} 最大ギャップ {{gap}}",
+      "tolerance": "許容値 {{tolerance}}",
+      "current": "現在の",
+      "target": "ターゲット",
+      "no_target_yet": "目標配分はまだありません",
+      "compare_weights": "現在のウェイトと意図したポートフォリオを比較します。",
+      "set_target_allocation": "目標配分を設定"
+    },
+    "value_strip": {
+      "portfolio_value": "ポートフォリオ価値",
+      "cash_balance": "現金残高",
+      "invested": "投資",
+      "book_cost": "帳簿費用",
+      "no_cash_balance": "現金残高なし",
+      "of_portfolio": "のポートフォリオ {{percent}}",
+      "available_cash": "利用可能な現金",
+      "holdings_count_one": "{{count}} 保有",
+      "holdings_count_other": "{{count}} 保有",
+      "accounts_count_one": "{{count}} 口座",
+      "accounts_count_other": "{{count}} 口座"
+    }
+  },
+  "networth": {
+    "failed_to_load": "純資産の読み込みに失敗しました",
+    "stale_valuations_tooltip": "古い評価額 (90+ days):",
+    "days_ago": "{{count}}日前",
+    "no_history_data": "履歴データはありません",
+    "breakdown": "内訳",
+    "no_assets_found": "アセットが見つかりません。",
+    "add_first_asset": "最初のアセットを追加",
+    "update_valuations": "評価を更新",
+    "assets_count_one": "{{count}} アセット",
+    "assets_count_other": "{{count}}資産",
+    "not_updated_over_90_days": "90 日以上更新されていません。",
+    "chart": {
+      "net_worth": "純資産",
+      "net_worth_label": "純資産:",
+      "assets_label": "資産:",
+      "liabilities_label": "負債:"
+    },
+    "breakdown_table": {
+      "change_over": "切り替え {{period}}",
+      "assets": "資産",
+      "category": "カテゴリ",
+      "value": "価値",
+      "delta_period": "Δ {{period}}",
+      "liabilities": "負債",
+      "net_worth": "純資産"
+    },
+    "category_sheet": {
+      "over_period": "{{period}}",
+      "trend_period": "トレンド · {{period}}",
+      "items": "アイテム"
+    },
+    "trend": {
+      "not_enough_history": "履歴が不十分"
+    },
+    "momentum": {
+      "title": "勢い",
+      "all_time": "全期間",
+      "vs_prior": "前との比較 {{period}}",
+      "beat_prior": "前期間を上回った",
+      "behind_prior": "前期間を下回った",
+      "now": "現在"
+    },
+    "velocity": {
+      "monthly_pace": "月次ペース",
+      "over_months_one": "{{count}} か月以上",
+      "over_months_other": "{{count}} か月以上",
+      "trailing_pace": "· {{multiple}}× 直近 12 か月ペース",
+      "drivers_of_change": "の変化の原動力 {{period}}",
+      "market_returns": "市場収益",
+      "contributions": "寄付",
+      "equity_built": "株式構築",
+      "per_month": "/月"
+    }
+  }
+}

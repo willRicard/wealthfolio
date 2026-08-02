@@ -13,6 +13,7 @@ src/i18n/
     en/<ns>.json # source language (canonical keys)
     fr/<ns>.json
     de/<ns>.json
+    ja/<ns>.json
 ```
 
 Namespaces (one JSON file each): `common`, `dashboard`, `holdings`, `activity`,
@@ -42,7 +43,7 @@ browser-detected. It is chosen during onboarding and in Settings → General, an
 persisted through the normal settings pipeline (stored per-device, like `theme`
 and `baseCurrency` — device-sync is not enabled for it). The settings provider
 applies it via `i18n.changeLanguage()` on load and on change. Default is `en`;
-missing keys in fr/de fall back to `en`.
+missing keys in translated locales fall back to `en`.
 
 ## Maintenance (i18next-cli)
 

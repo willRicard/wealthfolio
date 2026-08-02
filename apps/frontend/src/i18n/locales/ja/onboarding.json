@@ -1,0 +1,96 @@
+{
+  "buttons": {
+    "continue": "続行",
+    "subscribeConnect": "購読と接続",
+    "getStarted": "開始"
+  },
+  "steps": {
+    "chooseMode": {
+      "subtitle": "ポートフォリオを追跡する 2 つの方法。",
+      "holdings": {
+        "title": "保有",
+        "subtitle": "価値追跡",
+        "badge": "低メンテナンスの追跡に最適。",
+        "features": {
+          "netWorth": "純資産と配分",
+          "unrealizedPnl": "価値と未実現損益",
+          "priceBased": "価格ベースのパフォーマンス",
+          "fastSetup": "高速かつ軽量のセットアップ"
+        },
+        "limit": "制限: トランザクションベースのTWR/IRRなし。",
+        "note": "注: 保有/ポジションの維持が必要。"
+      },
+      "transactions": {
+        "title": "トランザクション",
+        "subtitle": "パフォーマンス追跡",
+        "badge": "フルパフォーマンスに最適分析。",
+        "features": {
+          "totalReturn": "長期にわたるトータルリターン",
+          "attribution": "利益とキャッシュフローの帰属",
+          "completeView": "最も完全なパフォーマンスビュー",
+          "brokerSync": "ブローカー同期またはCSVインポートに最適"
+        },
+        "limit": "制限: すべてのトランザクションの追跡が必要。",
+        "note": "注: ブローカーと同期されている場合は自動化されます。"
+      },
+      "footnote": "を使用できます。アカウントごとにモードが異なります。",
+      "learnMore": "詳細"
+    },
+    "preferences": {
+      "subtitle": "開始するには、いくつかの設定",
+      "currencyLabel": "通貨",
+      "timezoneLabel": "タイムゾーン",
+      "other": "その他",
+      "selectCurrency": "通貨を選択",
+      "selectTimezone": "タイムゾーンを選択",
+      "searchCurrenciesPlaceholder": "通貨を検索...",
+      "searchTimezonesPlaceholder": "検索タイムゾーン...",
+      "noCurrenciesFound": "通貨が見つかりません",
+      "noTimezonesFound": "タイムゾーンが見つかりません",
+      "currencyRequired": "基本通貨を選択してください。",
+      "timezoneRequired": "タイムゾーンを選択してください。",
+      "languageLabel": "言語"
+    }
+  },
+  "appearance": {
+    "subtitle": "カスタマイズしてくださいエクスペリエンス",
+    "themeLabel": "テーマ",
+    "fontLabel": "フォント",
+    "themeLight": "ライト",
+    "themeDark": "ダーク",
+    "themeSystem": "システム",
+    "themeLightPreviewAlt": "ライトテーマのプレビュー",
+    "themeDarkPreviewAlt": "ダークテーマのプレビュー",
+    "themeSystemPreviewAlt": "システム テーマのプレビュー",
+    "fontSample": "明確に投資します。",
+    "fonts": {
+      "monoLabel": "モノ",
+      "monoDescription": "テクニカル&正確",
+      "sansLabel": "サンズ",
+      "sansDescription": "クリーン&モダン",
+      "serifLabel": "セリフ",
+      "serifDescription": "クラシック&エレガント"
+    },
+    "navigationLabel": "ナビゲーション"
+  },
+  "connect": {
+    "optional": "オプション",
+    "title": "Wealthfolio Connect",
+    "subtitle": "データをプライベートに保ちながらブローカーを自動的に同期します。",
+    "learnMore": "Connect の詳細",
+    "features": {
+      "brokerageSync": {
+        "title": "仲介同期",
+        "description": "アカウントと取引をローカルに自動同期データベース。"
+      },
+      "deviceSync": {
+        "title": "デバイス同期",
+        "description": "エンドツーエンド暗号化により、すべてのデバイス間でデータベースの同期を維持します。"
+      },
+      "householdView": {
+        "title": "世帯ビュー",
+        "description": "選択したアカウントを家族と共有し、集約されたビューを一緒に表示します。"
+      }
+    }
+  }
+}
