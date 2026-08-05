@@ -9,8 +9,7 @@ use crate::portfolio::economic_events::{
     ActivityEconomicsResolver, BasisStatus, EconomicEventEffect, EconomicEventKind,
     TransferBoundary,
 };
-use crate::quotes::QuoteServiceTrait;
-use crate::utils::occ_symbol::looks_like_occ_symbol;
+use crate::quotes::{QuoteServiceTrait, SparseAssetMarketFacts};
 use crate::utils::time_utils::{activity_date_in_tz, parse_user_timezone_or_default, user_today};
 use crate::valuation::ValuationServiceTrait;
 
@@ -556,6 +555,12 @@ impl PerformanceService {
         let mut samples = Vec::new();
         let mut warnings = Vec::new();
         let mut not_applicable_reasons = Vec::new();
+        // Benign low-base/dormant-dust exclusions are tracked separately from
+        // `not_applicable_reasons`. A dormant gap (e.g. rounding dust that sits
+        // between a full withdrawal and a later refund) must pause TWR
+        // compounding without nulling the headline; only genuinely-fatal
+        // reasons belong in `not_applicable_reasons`.
+        let mut low_base_exclusions: Vec<String> = Vec::new();
         let mut chain_started = false;
         let mut warned_partial_value_coverage = false;
 
@@ -627,10 +632,42 @@ impl PerformanceService {
             }
 
             let twr_denominator = prev_value + flow.inflow;
-            if !chain_started && (prev_value <= Decimal::ZERO || twr_denominator < Decimal::ONE) {
-                if prev_value > Decimal::ZERO && twr_denominator < Decimal::ONE {
-                    not_applicable_reasons.push(format!(
-                        "TWR unavailable for {}: denominator {} is below 1 base currency unit before the return chain starts.",
+
+            // Only a NEAR-ZERO POSITIVE denominator (0 <= denom < 1) is a benign
+            // dormant/dust day that merely pauses compounding. A NEGATIVE
+            // denominator (opening value + inflow < 0) is a genuine data issue
+            // and must stay fatal — it nulls the headline exactly like a
+            // negative portfolio value, rather than being silently paused.
+            let denom_is_benign_low_base =
+                twr_denominator >= Decimal::ZERO && twr_denominator < Decimal::ONE;
+
+            // A negative denominator is fatal only where it was before: once the
+            // chain has started, or on a pre-chain day whose opening value is
+            // positive. A pre-chain day with a non-positive opening value is
+            // skipped silently (the `!chain_started` branch below), matching the
+            // long-standing behavior — otherwise junk history before the account
+            // is first funded would permanently null the headline, which is the
+            // failure mode this change set out to remove.
+            if twr_denominator < Decimal::ZERO && (chain_started || prev_value > Decimal::ZERO) {
+                not_applicable_reasons.push(format!(
+                    "TWR unavailable for {} because the return denominator (opening value + inflow) is negative. Review the underlying transactions, prices, and cash balances.",
+                    curr_point.valuation_date
+                ));
+                samples.push((
+                    curr_point.valuation_date,
+                    DailyReturnSample {
+                        twr: Decimal::ZERO,
+                        cumulative_twr_to_date: cumulative_twr_factor - Decimal::ONE,
+                        excluded_from_compounding: true,
+                    },
+                ));
+                continue;
+            }
+
+            if !chain_started && (prev_value <= Decimal::ZERO || denom_is_benign_low_base) {
+                if prev_value > Decimal::ZERO && denom_is_benign_low_base {
+                    low_base_exclusions.push(format!(
+                        "TWR compounding paused for {}: denominator {} is below 1 base currency unit before the return chain starts.",
                         curr_point.valuation_date, twr_denominator
                     ));
                 }
@@ -645,14 +682,14 @@ impl PerformanceService {
 
             chain_started = true;
 
-            let excluded_from_compounding = twr_denominator < Decimal::ONE;
+            let excluded_from_compounding = denom_is_benign_low_base;
             let twr = if excluded_from_compounding {
                 let reason = format!(
-                    "TWR unavailable for {}: denominator {} is below 1 base currency unit.",
+                    "TWR compounding paused for {}: denominator {} is below 1 base currency unit; treated as a dormant/dust day.",
                     curr_point.valuation_date, twr_denominator
                 );
-                warn!("{}", reason);
-                not_applicable_reasons.push(reason);
+                debug!("{}", reason);
+                low_base_exclusions.push(reason);
                 Decimal::ZERO
             } else {
                 let numerator = curr_value + flow.outflow - prev_value - flow.inflow;
@@ -677,8 +714,18 @@ impl PerformanceService {
             );
             None
         } else if !not_applicable_reasons.is_empty() {
+            // Only genuinely-fatal reasons (unknown external flow, unavailable
+            // valuation coverage, negative value) reach `not_applicable_reasons`.
+            // Benign low-base/dormant exclusions live in `low_base_exclusions`
+            // and must not null the headline TWR.
             None
         } else {
+            if !low_base_exclusions.is_empty() {
+                debug!(
+                    "TWR compounding paused across {} low-base/dormant day(s); headline computed from the compounded active sub-periods.",
+                    low_base_exclusions.len()
+                );
+            }
             Some(cumulative_twr_factor - Decimal::ONE)
         };
 
@@ -1859,28 +1906,74 @@ impl PerformanceService {
         let mut warnings = Vec::new();
         let mut warned_invalid_groups = HashSet::new();
         let mut warned_unresolved_activities = HashSet::new();
-        let transfer_asset_ids: HashSet<String> = transfer_activities
+        let mut transfer_requests: Vec<(String, NaiveDate)> = transfer_activities
             .iter()
-            .filter_map(|activity| activity.asset_id.clone())
+            .filter_map(|activity| {
+                let asset_id = activity.asset_id.as_ref()?.clone();
+                let activity_date = self.activity_local_date(activity);
+                (activity_date >= start_date && activity_date <= end_date)
+                    .then_some((asset_id, activity_date))
+            })
+            .collect::<HashSet<_>>()
+            .into_iter()
             .collect();
-        let mut transfer_quotes_by_key = HashMap::new();
-        if !transfer_asset_ids.is_empty() {
+        transfer_requests.sort();
+        let transfer_market_facts = if transfer_requests.is_empty() {
+            SparseAssetMarketFacts::default()
+        } else {
             match self
                 .quote_service
-                .get_quotes_in_range_filled(&transfer_asset_ids, start_date, end_date)
+                .get_sparse_asset_market_facts(&transfer_requests)
             {
-                Ok(quotes) => {
-                    for quote in quotes {
-                        transfer_quotes_by_key
-                            .insert((quote.asset_id.clone(), quote.timestamp.date_naive()), quote);
+                Ok(facts) => facts,
+                Err(e) => {
+                    return AttributionEffectSet {
+                        effects: Vec::new(),
+                        warnings: vec![format!(
+                            "Transfer FX attribution is incomplete because transfer market facts could not be loaded: {}",
+                            e
+                        )],
+                        complete: false,
+                    };
+                }
+            }
+        };
+        let mut transfer_multipliers_by_asset_id = HashMap::new();
+        for (asset_id, _) in &transfer_requests {
+            if transfer_multipliers_by_asset_id.contains_key(asset_id) {
+                continue;
+            }
+            let multiplier = match transfer_market_facts.assets_by_id.get(asset_id) {
+                Some(asset) => {
+                    let multiplier = asset.contract_multiplier();
+                    if multiplier > Decimal::ZERO {
+                        multiplier
+                    } else {
+                        warnings.push(format!(
+                            "Asset {} has a non-positive contract multiplier; transfer attribution used 1.",
+                            asset_id
+                        ));
+                        Decimal::ONE
                     }
                 }
-                Err(e) => warnings.push(format!(
-                    "Transfer FX attribution will use degraded flow values because transfer-date quotes could not be loaded: {}",
-                    e
-                )),
-            }
+                None => {
+                    warnings.push(format!(
+                        "Asset {} was unavailable; transfer attribution used contract multiplier 1.",
+                        asset_id
+                    ));
+                    Decimal::ONE
+                }
+            };
+            transfer_multipliers_by_asset_id.insert(asset_id.clone(), multiplier);
         }
+        let multiplier_for = |activity: &Activity| {
+            activity
+                .asset_id
+                .as_ref()
+                .and_then(|asset_id| transfer_multipliers_by_asset_id.get(asset_id))
+                .copied()
+                .unwrap_or(Decimal::ONE)
+        };
 
         for activity in &transfer_activities {
             if !scope_account_ids.contains(&activity.account_id) {
@@ -1954,22 +2047,26 @@ impl PerformanceService {
             }
 
             let in_quote = pair.transfer_in.asset_id.as_ref().and_then(|asset_id| {
-                transfer_quotes_by_key.get(&(asset_id.clone(), transfer_in_date))
+                transfer_market_facts
+                    .quotes_by_request
+                    .get(&(asset_id.clone(), transfer_in_date))
             });
             let out_quote = pair.transfer_out.asset_id.as_ref().and_then(|asset_id| {
-                transfer_quotes_by_key.get(&(asset_id.clone(), transfer_out_date))
+                transfer_market_facts
+                    .quotes_by_request
+                    .get(&(asset_id.clone(), transfer_out_date))
             });
             let in_economics = ActivityEconomicsResolver::compile_activity_with_unit_multiplier(
                 &pair.transfer_in,
                 in_quote,
                 TransferBoundary::External,
-                Self::attribution_unit_multiplier(&pair.transfer_in),
+                multiplier_for(&pair.transfer_in),
             );
             let out_economics = ActivityEconomicsResolver::compile_activity_with_unit_multiplier(
                 &pair.transfer_out,
                 out_quote,
                 TransferBoundary::External,
-                Self::attribution_unit_multiplier(&pair.transfer_out),
+                multiplier_for(&pair.transfer_out),
             );
             if in_economics.performance_flow_value.is_zero()
                 && out_economics.performance_flow_value.is_zero()
@@ -2192,18 +2289,6 @@ impl PerformanceService {
                 (Decimal::ZERO, Decimal::ZERO, activity.tax_amt())
             }
             _ => (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
-        }
-    }
-
-    fn attribution_unit_multiplier(activity: &Activity) -> Decimal {
-        if activity
-            .asset_id
-            .as_deref()
-            .is_some_and(looks_like_occ_symbol)
-        {
-            Decimal::new(100, 0)
-        } else {
-            Decimal::ONE
         }
     }
 
@@ -3177,7 +3262,9 @@ impl PerformanceService {
         effect_seed
             .warnings
             .extend(scoped_unrealized_effects.warnings);
-        effect_seed.effects.extend(scoped_transfer_effects.effects);
+        if scoped_transfer_effects.complete {
+            effect_seed.effects.extend(scoped_transfer_effects.effects);
+        }
         effect_seed
             .warnings
             .extend(scoped_transfer_effects.warnings);
@@ -5044,8 +5131,8 @@ impl PerformanceServiceTrait for PerformanceService {
 mod tests {
     use super::*;
     use crate::assets::{
-        Asset, AssetKind, AssetRepositoryTrait, NewAsset, ProviderProfile, QuoteMode,
-        UpdateAssetProfile,
+        Asset, AssetKind, AssetRepositoryTrait, InstrumentType, NewAsset, ProviderProfile,
+        QuoteMode, UpdateAssetProfile,
     };
     use crate::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
     use crate::lots::{AssetLotView, LotClosure};
@@ -5322,6 +5409,62 @@ mod tests {
             _as_of: NaiveDate,
         ) -> Result<HashMap<String, Quote>> {
             Ok(HashMap::new())
+        }
+
+        fn get_sparse_asset_market_facts(
+            &self,
+            requests: &[(String, NaiveDate)],
+        ) -> Result<SparseAssetMarketFacts> {
+            let option_id = "AAPL240119C00150000";
+            if requests
+                .iter()
+                .any(|(asset_id, _)| asset_id == "SPARSE-FACTS-ERROR")
+            {
+                return Err(errors::Error::Repository(
+                    "sparse market facts unavailable".to_string(),
+                ));
+            }
+            let mut facts = SparseAssetMarketFacts::default();
+            if requests.iter().any(|(asset_id, _)| asset_id == option_id) {
+                facts.assets_by_id.insert(
+                    option_id.to_string(),
+                    Asset {
+                        id: option_id.to_string(),
+                        kind: AssetKind::Investment,
+                        quote_ccy: "USD".to_string(),
+                        instrument_type: Some(InstrumentType::Option),
+                        quote_mode: QuoteMode::Market,
+                        created_at: Utc::now().naive_utc(),
+                        updated_at: Utc::now().naive_utc(),
+                        ..Default::default()
+                    },
+                );
+            }
+            for (asset_id, requested_date) in requests {
+                if asset_id != option_id {
+                    continue;
+                }
+                let timestamp = requested_date.and_hms_opt(12, 0, 0).unwrap().and_utc();
+                facts.quotes_by_request.insert(
+                    (asset_id.clone(), *requested_date),
+                    Quote {
+                        id: format!("quote-{option_id}"),
+                        asset_id: asset_id.clone(),
+                        timestamp,
+                        open: dec!(5),
+                        high: dec!(5),
+                        low: dec!(5),
+                        close: dec!(5),
+                        adjclose: dec!(5),
+                        volume: Decimal::ZERO,
+                        currency: "USD".to_string(),
+                        data_source: "TEST".to_string(),
+                        created_at: timestamp,
+                        notes: None,
+                    },
+                );
+            }
+            Ok(facts)
         }
 
         fn get_latest_quotes_snapshot(
@@ -6421,6 +6564,8 @@ mod tests {
             currency: "USD".to_string(),
             base_currency: "USD".to_string(),
             fx_rate_to_base: "1".to_string(),
+            fx_rate_to_account: None,
+            account_currency: None,
             cost_basis_method: "FIFO".to_string(),
             split_ratio: "1".to_string(),
             is_closed: true,
@@ -7598,6 +7743,184 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transfer_pair_fx_attribution_loads_quote_for_period_start_leg() {
+        let mut transfer_out = test_activity(
+            "transfer-out-at-start",
+            "from-acct",
+            ActivityType::TransferOut,
+            "2026-05-01",
+        );
+        transfer_out.asset_id = Some("AAPL240119C00150000".to_string());
+        transfer_out.quantity = Some(dec!(2));
+        transfer_out.unit_price = None;
+        transfer_out.amount = None;
+        transfer_out.currency = "USD".to_string();
+        transfer_out.source_group_id = Some("transfer-pair-at-start".to_string());
+
+        let mut transfer_in = test_activity(
+            "transfer-in-after-start",
+            "to-acct",
+            ActivityType::TransferIn,
+            "2026-05-02",
+        );
+        transfer_in.asset_id = Some("AAPL240119C00150000".to_string());
+        transfer_in.quantity = Some(dec!(2));
+        transfer_in.unit_price = None;
+        transfer_in.amount = None;
+        transfer_in.currency = "CAD".to_string();
+        transfer_in.source_group_id = Some("transfer-pair-at-start".to_string());
+
+        let performance_service = PerformanceService::new(
+            Arc::new(TestValuationService::new(Vec::new())),
+            Arc::new(TestQuoteService),
+        )
+        .with_activity_repository(
+            Arc::new(TestActivityRepository::new(vec![transfer_out, transfer_in])),
+            Arc::new(TestFxService),
+        );
+        let result = PerformanceService::build_result(
+            "scope:transfer-boundary".to_string(),
+            "USD".to_string(),
+            Some(date("2026-05-01")),
+            Some(date("2026-05-02")),
+            ReturnMethod::ValueReturn,
+            PerformanceReturns {
+                twr: None,
+                annualized_twr: None,
+                irr: None,
+                annualized_irr: None,
+                value_return: None,
+                annualized_value_return: None,
+            },
+            PerformanceAttribution::default(),
+            PerformanceService::empty_risk(),
+            PerformanceDataQuality {
+                status: DataQualityStatus::Ok,
+                warnings: Vec::new(),
+                not_applicable_reasons: Vec::new(),
+            },
+            Vec::new(),
+            false,
+            false,
+        );
+
+        let effects = performance_service
+            .collect_scoped_transfer_pair_attribution_event_effects(
+                &result,
+                &["from-acct".to_string(), "to-acct".to_string()],
+            )
+            .await;
+
+        assert!(effects.complete);
+        assert!(effects.effects.is_empty());
+        assert!(effects.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn transfer_pair_fx_attribution_is_incomplete_when_market_facts_fail() {
+        let mut transfer_in = test_activity(
+            "transfer-with-market-fact-error",
+            "acct",
+            ActivityType::TransferIn,
+            "2026-05-02",
+        );
+        transfer_in.asset_id = Some("SPARSE-FACTS-ERROR".to_string());
+        transfer_in.quantity = Some(dec!(1));
+
+        let performance_service = PerformanceService::new(
+            Arc::new(TestValuationService::new(Vec::new())),
+            Arc::new(TestQuoteService),
+        )
+        .with_activity_repository(
+            Arc::new(TestActivityRepository::new(vec![transfer_in])),
+            Arc::new(TestFxService),
+        );
+        let result = PerformanceService::build_result(
+            "scope:market-fact-error".to_string(),
+            "USD".to_string(),
+            Some(date("2026-05-01")),
+            Some(date("2026-05-02")),
+            ReturnMethod::ValueReturn,
+            PerformanceReturns {
+                twr: None,
+                annualized_twr: None,
+                irr: None,
+                annualized_irr: None,
+                value_return: None,
+                annualized_value_return: None,
+            },
+            PerformanceAttribution::default(),
+            PerformanceService::empty_risk(),
+            PerformanceDataQuality {
+                status: DataQualityStatus::Ok,
+                warnings: Vec::new(),
+                not_applicable_reasons: Vec::new(),
+            },
+            Vec::new(),
+            false,
+            false,
+        );
+
+        let effects = performance_service
+            .collect_scoped_transfer_pair_attribution_event_effects(&result, &["acct".to_string()])
+            .await;
+
+        assert!(!effects.complete);
+        assert!(effects.effects.is_empty());
+        assert_eq!(effects.warnings.len(), 1);
+        assert!(effects.warnings[0].contains("market facts could not be loaded"));
+    }
+
+    #[tokio::test]
+    async fn scoped_performance_reports_partial_quality_when_transfer_market_facts_fail() {
+        let mut start = valuation("2026-05-01", dec!(1000), dec!(1000), dec!(1000), dec!(1000));
+        start.account_currency = "USD".to_string();
+        start.base_currency = "USD".to_string();
+        let mut end = valuation("2026-05-02", dec!(1000), dec!(1000), dec!(1000), dec!(1000));
+        end.account_currency = "USD".to_string();
+        end.base_currency = "USD".to_string();
+
+        let mut transfer_in = test_activity(
+            "transfer-with-public-market-fact-error",
+            "acct",
+            ActivityType::TransferIn,
+            "2026-05-02",
+        );
+        transfer_in.asset_id = Some("SPARSE-FACTS-ERROR".to_string());
+        transfer_in.quantity = Some(dec!(1));
+
+        let performance_service = PerformanceService::new(
+            Arc::new(TestValuationService::new(vec![start, end])),
+            Arc::new(TestQuoteService),
+        )
+        .with_activity_repository(
+            Arc::new(TestActivityRepository::new(vec![transfer_in])),
+            Arc::new(TestFxService),
+        );
+
+        let result = performance_service
+            .calculate_performance_history_for_accounts(
+                "scope:market-fact-error",
+                &["acct".to_string()],
+                "USD",
+                &HashMap::new(),
+                &HashMap::new(),
+                Some(date("2026-05-01")),
+                Some(date("2026-05-02")),
+            )
+            .await
+            .expect("market-fact failure should return a degraded result");
+
+        assert_eq!(result.data_quality.status, DataQualityStatus::Partial);
+        assert!(result
+            .data_quality
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("market facts could not be loaded")));
+        assert_eq!(attribution_pnl(&result), Decimal::ZERO);
+    }
+
+    #[tokio::test]
     async fn paired_transfer_with_external_metadata_emits_conflict_diagnostic() {
         let mut start = valuation("2026-05-01", dec!(1000), dec!(1000), dec!(1000), dec!(1000));
         start.account_currency = "USD".to_string();
@@ -8720,7 +9043,7 @@ mod tests {
     }
 
     #[test]
-    fn twr_tiny_denominator_before_chain_makes_result_not_applicable() {
+    fn twr_tiny_denominator_before_chain_pauses_without_nulling_headline() {
         let mut history = vec![
             valuation(
                 "2026-05-01",
@@ -8748,12 +9071,250 @@ mod tests {
         )
         .expect("performance should compute");
 
-        assert!(result.returns.twr.is_none());
-        assert!(result
+        // Option B: a sub-1 denominator before the chain starts is benign. The
+        // chain starts on 2026-05-03 (denominator 0.5 + 1.5 = 2 >= 1) with a
+        // zero-move, so the headline is Some(0), not None, and the benign
+        // exclusion never appears in not_applicable_reasons.
+        assert_eq!(result.returns.twr.unwrap(), Decimal::ZERO);
+        assert!(!result
             .data_quality
             .not_applicable_reasons
             .iter()
             .any(|reason| reason.contains("below 1 base currency unit")));
+    }
+
+    #[test]
+    fn twr_negative_denominator_nulls_headline_as_fatal() {
+        // A NEGATIVE TWR denominator (prev_value + inflow < 0) is a genuine data
+        // issue, not a benign dormant/dust day. This mirrors the tiny-denominator
+        // setup, but the middle day's inflow is negative enough to drive the
+        // denominator below zero. Even though a later day (2026-05-03) would
+        // otherwise start the chain, the negative day must null the headline
+        // (fatal) — exactly as before the low-base-exclusion change.
+        let mut history = vec![
+            valuation(
+                "2026-05-01",
+                dec!(0.5),
+                dec!(0.5),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            valuation(
+                "2026-05-02",
+                dec!(0.5),
+                dec!(0.5),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            valuation("2026-05-03", dec!(2), dec!(2), Decimal::ZERO, Decimal::ZERO),
+        ];
+        // Window (05-01 -> 05-02): denominator 0.5 + (-1) = -0.5 < 0 -> FATAL.
+        history[1].external_inflow_base = dec!(-1);
+        // Window (05-02 -> 05-03): denominator 0.5 + 1.5 = 2 would start the chain.
+        history[2].external_inflow_base = dec!(1.5);
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            true,
+        )
+        .expect("performance should compute");
+
+        // Negative denominator is fatal: the headline TWR is nulled ...
+        assert!(result.returns.twr.is_none());
+        // ... routed to not_applicable_reasons (fatal), not the benign
+        // "below 1 base currency unit" low-base bucket.
+        assert!(result
+            .data_quality
+            .not_applicable_reasons
+            .iter()
+            .any(|reason| reason.contains("denominator") && reason.contains("negative")));
+        assert!(!result
+            .data_quality
+            .not_applicable_reasons
+            .iter()
+            .any(|reason| reason.contains("below 1 base currency unit")));
+    }
+
+    #[test]
+    fn twr_negative_denominator_before_chain_with_nonpositive_value_is_skipped_not_fatal() {
+        // A negative denominator on a day whose OPENING value is not positive,
+        // before the return chain has started, is junk history from before the
+        // account was first funded. It was silently skipped historically and
+        // must stay skipped: nulling the headline here would resurrect the
+        // "dormant junk history poisons the headline" failure mode that the
+        // low-base exclusion change exists to remove. Only a negative
+        // denominator with a positive opening value, or one after the chain has
+        // started, is a genuine data issue (see the test above).
+        let mut history = vec![
+            // Zero start.
+            valuation(
+                "2026-05-01",
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Opening value 0, negative inflow -> denominator -1 (< 0) while
+            // prev_value == 0. Pre-chain and non-positive opening: skip.
+            valuation(
+                "2026-05-02",
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Funded with 100 (zero-move boundary: 100 - 0 - 100 = 0).
+            valuation(
+                "2026-05-03",
+                dec!(100),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Grows +10% on a quiet day: the chain's only active sub-period.
+            valuation(
+                "2026-05-04",
+                dec!(110),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+        ];
+        history[1].external_inflow_base = dec!(-1);
+        history[1].external_flow_source = ExternalFlowSource::CashAmount;
+        history[2].external_inflow_base = dec!(100);
+        history[2].external_flow_source = ExternalFlowSource::CashAmount;
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            true,
+        )
+        .expect("performance should compute");
+
+        // Headline survives and reflects the single active sub-period (+10%).
+        assert_eq!(result.returns.twr.unwrap().round_dp(4), dec!(0.1));
+        // The skipped pre-funding day contributed no fatal TWR denominator
+        // reason. (A separate zero-starting-value reason is expected here and
+        // does not null the TWR headline.)
+        assert!(!result
+            .data_quality
+            .not_applicable_reasons
+            .iter()
+            .any(|reason| reason.contains("denominator") && reason.contains("negative")));
+    }
+
+    #[test]
+    fn twr_dormant_dust_gap_pauses_but_does_not_null_headline() {
+        // Timeline: funded from zero, grows +10%, fully transferred out leaving
+        // rounding dust (~0.0027), sits dormant for several days, then refunded
+        // and grows +25%. The dormant dust days have a sub-1 denominator and are
+        // excluded from compounding, but under Option B they must only PAUSE the
+        // chain — the headline TWR should compound the two active sub-periods:
+        // (1 + 0.10) * (1 + 0.25) - 1 = 0.375.
+        let mut history = vec![
+            // Zero start.
+            valuation(
+                "2026-05-01",
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Funded with 100.
+            valuation(
+                "2026-05-02",
+                dec!(100),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Grows +10% (quiet day).
+            valuation(
+                "2026-05-03",
+                dec!(110),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Fully transferred out, leaving 0.0027 dust (zero-move boundary:
+            // 0.0027 + 109.9973 - 110 - 0 = 0).
+            valuation(
+                "2026-05-04",
+                dec!(0.0027),
+                dec!(-9.9973),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Dormant dust days (denominator 0.0027 < 1 -> excluded/paused).
+            valuation(
+                "2026-05-05",
+                dec!(0.0027),
+                dec!(-9.9973),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            valuation(
+                "2026-05-06",
+                dec!(0.0027),
+                dec!(-9.9973),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            valuation(
+                "2026-05-07",
+                dec!(0.0027),
+                dec!(-9.9973),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Refunded with 200 (zero-move boundary:
+            // 200.0027 - 0.0027 - 200 = 0).
+            valuation(
+                "2026-06-01",
+                dec!(200.0027),
+                dec!(190.0027),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            // Grows +25% (quiet day): 50.000675 / 200.0027 = 0.25.
+            valuation(
+                "2026-06-02",
+                dec!(250.003375),
+                dec!(190.0027),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+        ];
+        history[1].external_inflow_base = dec!(100);
+        history[1].external_flow_source = ExternalFlowSource::CashAmount;
+        history[3].external_outflow_base = dec!(109.9973);
+        history[3].external_flow_source = ExternalFlowSource::CashAmount;
+        history[7].external_inflow_base = dec!(200);
+        history[7].external_flow_source = ExternalFlowSource::CashAmount;
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            true,
+        )
+        .expect("performance should compute");
+
+        // Headline is present and equals the compounded active sub-periods.
+        assert!(result.returns.twr.is_some());
+        assert_eq!(result.returns.twr.unwrap().round_dp(4), dec!(0.375));
+        // The dormant dust days did not poison the headline.
+        assert!(!result
+            .data_quality
+            .not_applicable_reasons
+            .iter()
+            .any(|reason| reason.contains("below 1 base currency unit")));
+        // Chart output still renders the cumulative series to the same value.
+        assert_eq!(result.series.last().unwrap().value.round_dp(4), dec!(0.375));
     }
 
     #[test]

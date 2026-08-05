@@ -293,6 +293,14 @@ pub struct LotRecord {
     pub base_currency: String,
     /// FX rate from lot currency to base currency at acquisition.
     pub fx_rate_to_base: String,
+    /// FX rate from the lot currency to the account currency at acquisition,
+    /// when known. Persisted so the open-lot book reproduces account-currency
+    /// cost basis exactly on an append-only rebuild (no market-FX fallback).
+    /// `None` for same-currency lots or lots written before this column existed.
+    pub fx_rate_to_account: Option<String>,
+    /// Account currency that `fx_rate_to_account` converts into. `None`
+    /// whenever `fx_rate_to_account` is `None`.
+    pub account_currency: Option<String>,
     /// Cost-basis method used when this generated lot row was rebuilt.
     pub cost_basis_method: String,
 
@@ -441,6 +449,8 @@ pub fn extract_lot_records_with_cost_basis_method(
                 currency: position.currency.clone(),
                 base_currency: snapshot.currency.clone(),
                 fx_rate_to_base: Decimal::ONE.to_string(),
+                fx_rate_to_account: lot.fx_rate_to_account.map(|rate| rate.to_string()),
+                account_currency: lot.account_currency.clone(),
                 cost_basis_method: cost_basis_method.clone(),
                 split_ratio: lot.effective_split_ratio().to_string(),
                 is_closed: false,
@@ -453,6 +463,104 @@ pub fn extract_lot_records_with_cost_basis_method(
     }
 
     records
+}
+
+/// Reconstructs an in-memory [`crate::portfolio::snapshot::Lot`] from a
+/// persisted [`LotRecord`].
+///
+/// The `lots` table is the source of truth for a lot's *open* state, so the
+/// in-memory lot's remaining fields (`quantity`, `cost_basis`) come from the
+/// record's `remaining_*` columns, while immutable acquisition-side values
+/// (`original_quantity`, `acquisition_price`, allocated fee/tax) come from
+/// their immutable columns. Base FX is preserved from `fx_rate_to_base`.
+///
+/// The account-FX book (`fx_rate_to_account`, `account_currency`) is restored
+/// from the persisted `lots.fx_rate_to_account` / `lots.account_currency`
+/// columns, so an append-only rebuild reproduces the same account-currency cost
+/// basis as a full rebuild for multi-currency accounts (no market-FX fallback).
+///
+/// `fx_rate_to_position` is not retained per-lot and stays `None`; it only
+/// records the activity→position conversion for the audit trail and affects no
+/// monetary total (quantity, cost basis, valuation, and realized P&L all flow
+/// through `remaining_quantity` / `remaining_cost_basis` / `fx_rate_to_base`).
+///
+/// `acquisition_fees` / `acquisition_taxes` are set to the immutable allocated
+/// amounts (equal to `original_acquisition_fees` / `original_acquisition_taxes`).
+/// The table stores only the immutable allocation, not the running
+/// proportionally-reduced remainder. This is exact for any lot not partially
+/// consumed before it was persisted, and only affects the fee/tax *memo*
+/// breakdown (never a monetary total: quantity, cost basis, valuation and
+/// realized P&L all flow through `remaining_quantity` / `remaining_cost_basis`).
+pub fn lot_record_to_snapshot_lot(
+    position_id: &str,
+    record: LotRecord,
+) -> crate::portfolio::snapshot::Lot {
+    // Diagnostics below name the lot and the offending column but never the
+    // stored value: these columns carry quantities, cost basis, unit price,
+    // fees and taxes, and financial data must not reach the logs. The lot id
+    // is enough to locate the row.
+    let acquisition_local_date = NaiveDate::parse_from_str(&record.open_date, "%Y-%m-%d").ok();
+    if acquisition_local_date.is_none() {
+        log::warn!(
+            "Lot {} has an unparseable open_date; falling back to the current time. \
+             The hydrated lot's acquisition date will be wrong.",
+            record.id
+        );
+    }
+    let acquisition_date = acquisition_local_date
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .map(|naive| naive.and_utc())
+        .unwrap_or_else(Utc::now);
+
+    let split_ratio = match Decimal::from_str(&record.split_ratio) {
+        Ok(ratio) if !ratio.is_zero() => ratio,
+        _ => {
+            log::warn!(
+                "Lot {} has an invalid split_ratio; defaulting to 1.",
+                record.id
+            );
+            Decimal::ONE
+        }
+    };
+
+    let lot_id = record.id.clone();
+    let parse = |field: &str, value: &str| {
+        Decimal::from_str(value).unwrap_or_else(|_| {
+            log::warn!(
+                "Lot {} has an unparseable {}; defaulting to 0.",
+                lot_id,
+                field
+            );
+            Decimal::ZERO
+        })
+    };
+    let fees = parse("fee_allocated", &record.fee_allocated);
+    let taxes = parse("tax_allocated", &record.tax_allocated);
+
+    crate::portfolio::snapshot::Lot {
+        id: record.id,
+        position_id: position_id.to_string(),
+        acquisition_date,
+        acquisition_local_date,
+        quantity: parse("remaining_quantity", &record.remaining_quantity),
+        original_quantity: parse("original_quantity", &record.original_quantity),
+        cost_basis: parse("remaining_cost_basis", &record.remaining_cost_basis),
+        acquisition_price: parse("cost_per_unit", &record.cost_per_unit),
+        acquisition_fees: fees,
+        original_acquisition_fees: fees,
+        acquisition_taxes: taxes,
+        original_acquisition_taxes: taxes,
+        fx_rate_to_position: None,
+        fx_rate_to_account: record
+            .fx_rate_to_account
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok()),
+        account_currency: record.account_currency,
+        fx_rate_to_base: Decimal::from_str(&record.fx_rate_to_base).ok(),
+        base_currency: Some(record.base_currency),
+        source_activity_id: record.open_activity_id,
+        split_ratio,
+    }
 }
 
 /// Checks that the lot quantities extracted from a snapshot are consistent with
@@ -485,13 +593,22 @@ pub fn check_lot_quantity_consistency(
             .copied()
             .unwrap_or(Decimal::ZERO);
         if lot_qty != position.quantity {
+            // Name the account, the asset and the failure class, but never the
+            // quantities themselves: holdings sizes are financial data and must
+            // not reach the logs. The two classes are worth distinguishing
+            // because they have different causes — an empty lot book points at
+            // extraction or seeding, while a non-empty disagreement points at
+            // drift between the two representations.
+            let detail = if lot_qty.is_zero() {
+                "no lots extracted while the position is non-empty"
+            } else {
+                "extracted lot quantities disagree with the position"
+            };
             log::error!(
-                "CRITICAL: lot quantity mismatch for account {} asset {}: \
-                 lots sum to {}, position reports {}",
+                "CRITICAL: lot quantity mismatch for account {} asset {}: {}.",
                 snapshot.account_id,
                 asset_id,
-                lot_qty,
-                position.quantity
+                detail
             );
             mismatches += 1;
         }
@@ -945,6 +1062,8 @@ mod tests {
             currency: "USD".to_string(),
             base_currency: "USD".to_string(),
             fx_rate_to_base: "1".to_string(),
+            fx_rate_to_account: None,
+            account_currency: None,
             cost_basis_method: "FIFO".to_string(),
             split_ratio: "1".to_string(),
             is_closed: false,

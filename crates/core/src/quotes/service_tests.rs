@@ -459,6 +459,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_stale_provider_quote_is_also_seeded_for_gap_fill() {
+        let store = MockQuoteStore::new();
+        let symbol = "ETF:PROVIDER";
+        let start = date(2026, 3, 1);
+        let end = date(2026, 3, 1);
+        let stale_quote_date = start - Duration::days(45);
+
+        store.add_quote(Quote {
+            data_source: "YAHOO".to_string(),
+            ..create_quote(symbol, stale_quote_date, dec!(98.76))
+        });
+
+        let lookback_start = start - Duration::days(30);
+        let mut all_quotes = store
+            .get_quotes_in_range(symbol, lookback_start, end)
+            .unwrap();
+        assert!(all_quotes.is_empty());
+
+        let symbols = HashSet::from([symbol.to_string()]);
+        append_historical_seed_quotes(&store, &symbols, start, &HashMap::new(), &mut all_quotes)
+            .unwrap();
+
+        let filled_quotes = fill_missing_quotes(&all_quotes, &symbols, start, end);
+        assert_eq!(filled_quotes.len(), 1);
+        assert_eq!(filled_quotes[0].close, dec!(98.76));
+        assert_eq!(filled_quotes[0].data_source, "YAHOO");
+        assert_eq!(filled_quotes[0].timestamp.date_naive(), start);
+    }
+
     // =========================================================================
     // CRITICAL: Gap Filling Tests
     // =========================================================================

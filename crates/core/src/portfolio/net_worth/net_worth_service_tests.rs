@@ -366,6 +366,16 @@ impl QuoteServiceTrait for MockMarketDataRepository {
         Ok(HashMap::new())
     }
 
+    fn get_sparse_asset_market_facts(
+        &self,
+        _requests: &[(String, NaiveDate)],
+    ) -> Result<crate::quotes::SparseAssetMarketFacts> {
+        Err(crate::errors::Error::Unexpected(
+            "MockMarketDataRepository::get_sparse_asset_market_facts should not be called"
+                .to_string(),
+        ))
+    }
+
     fn get_latest_quotes_snapshot(
         &self,
         asset_ids: &[String],
@@ -921,6 +931,8 @@ fn create_test_position(
         last_updated: Utc::now(),
         is_alternative: false,
         contract_multiplier: Decimal::ONE,
+        cost_basis_account: None,
+        cost_basis_base: None,
     }
 }
 

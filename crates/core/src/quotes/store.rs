@@ -14,8 +14,8 @@
 //! The `Quote` struct uses `asset_id: String` which stores the canonical asset identifier.
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
-use std::collections::HashMap;
+use chrono::{NaiveDate, TimeZone, Utc};
+use std::collections::{HashMap, HashSet};
 
 use super::model::{LatestQuotePair, Quote};
 use super::types::{AssetId, Day, QuoteSource};
@@ -261,6 +261,39 @@ pub trait QuoteStore: Send + Sync {
         symbols: &[String],
         as_of: NaiveDate,
     ) -> Result<HashMap<String, Quote>>;
+
+    /// Gets the latest quote on or before each requested asset/date pair.
+    ///
+    /// Storage backends should override this with a sparse batch query. The
+    /// default keeps test and alternative stores correct without materializing
+    /// every calendar day between requested dates.
+    fn get_latest_quotes_for_asset_dates(
+        &self,
+        requests: &[(String, NaiveDate)],
+    ) -> Result<HashMap<(String, NaiveDate), Quote>> {
+        let mut assets_by_date: HashMap<NaiveDate, HashSet<String>> = HashMap::new();
+        for (asset_id, requested_date) in requests {
+            assets_by_date
+                .entry(*requested_date)
+                .or_default()
+                .insert(asset_id.clone());
+        }
+
+        let mut result = HashMap::new();
+        for (requested_date, asset_ids) in assets_by_date {
+            let mut asset_ids: Vec<String> = asset_ids.into_iter().collect();
+            asset_ids.sort();
+            for (asset_id, mut quote) in self.get_latest_quotes_as_of(&asset_ids, requested_date)? {
+                quote.timestamp = Utc.from_utc_datetime(
+                    &requested_date
+                        .and_hms_opt(12, 0, 0)
+                        .expect("a valid date always has noon"),
+                );
+                result.insert((asset_id, requested_date), quote);
+            }
+        }
+        Ok(result)
+    }
 
     /// Gets the latest and previous quotes for multiple symbols.
     ///

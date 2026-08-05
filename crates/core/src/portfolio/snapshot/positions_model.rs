@@ -8,6 +8,7 @@ use std::default::Default;
 use crate::activities::Activity;
 
 use crate::constants::QUANTITY_THRESHOLD;
+use crate::fx::currency::normalize_currency_code;
 
 use crate::errors::{CalculatorError, Result};
 use crate::portfolio::economic_events::BasisStatus;
@@ -17,6 +18,61 @@ pub fn is_quantity_significant(quantity: &Decimal) -> bool {
     let threshold =
         Decimal::from_str_radix(QUANTITY_THRESHOLD, 10).unwrap_or_else(|_| Decimal::new(1, 8));
     quantity.abs() >= threshold
+}
+
+/// Sum a position's cost basis in `target_currency` from its materialized
+/// lots, anchoring each lot to its acquisition-date FX (stored lot rate
+/// preferred). `fx_fallback` supplies an acquisition-date market rate for a lot
+/// that has no stored rate to `target_currency`; returning `None` from it
+/// signals the rate is unavailable.
+///
+/// Mirrors `valuation_calculator::calculate_cost_basis_in_currency`'s per-lot
+/// logic **exactly** so the value is byte-identical to valuation's lot walk:
+///   * skip only zero-cost lots (not zero-quantity);
+///   * prefer the lot's stored acquisition FX (`Lot::stored_fx_rate_to`);
+///   * otherwise multiply by the fallback acquisition-date rate.
+///
+/// Returns `None` when the position has no materialized lots (valuation keeps
+/// its valuation-date-FX fallback for those) or when any required
+/// acquisition-date FX rate is unavailable, so a scalar is derived only when it
+/// can be trusted.
+///
+/// Called from the write-time precompute
+/// ([`HoldingsCalculator::precompute_position_cost_basis`]), which passes a
+/// fallback backed by the FX service. `fx_fallback` stays a parameter so a
+/// caller without an FX service can pass one that always returns `None` and get
+/// a scalar derived purely from the per-lot stored FX.
+pub fn compute_position_cost_basis_from_lots<F>(
+    position: &Position,
+    target_currency: &str,
+    mut fx_fallback: F,
+) -> Option<Decimal>
+where
+    F: FnMut(&str, &str, NaiveDate) -> Option<Decimal>,
+{
+    if position.lots.is_empty() {
+        return None;
+    }
+
+    let position_currency = normalize_currency_code(&position.currency);
+    let target = normalize_currency_code(target_currency);
+    let mut total = Decimal::ZERO;
+
+    for lot in &position.lots {
+        if lot.cost_basis.is_zero() {
+            continue;
+        }
+        if let Some(rate) = lot.stored_fx_rate_to(target) {
+            total += lot.cost_basis * rate;
+            continue;
+        }
+
+        let acquisition_date = lot.acquisition_date_key();
+        let rate = fx_fallback(position_currency, target, acquisition_date)?;
+        total += lot.cost_basis * rate;
+    }
+
+    Some(total)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -33,7 +89,17 @@ pub struct Position {
     /// The currency of the asset and the cost basis values (e.g., "USD", "EUR"). Set by the first acquisition activity.
     pub currency: String,
     pub inception_date: DateTime<Utc>,
-    #[serde(default)]
+    /// Open tax lots for this position.
+    ///
+    /// `#[serde(skip_serializing)]` stops newly written snapshot JSON from
+    /// embedding the lots (STEP 2 of the holdings_snapshots bloat fix). The
+    /// normalized `lots` table is the source of truth for lot detail; valuation
+    /// reads the precomputed `cost_basis_*` scalars instead of walking lots.
+    ///
+    /// `#[serde(default)]` is retained so (a) snapshots serialized before STEP 2
+    /// that still carry `lots` in their JSON keep deserializing their lots, and
+    /// (b) new snapshots (no `lots` key) deserialize `lots` as empty.
+    #[serde(default, skip_serializing)]
     pub lots: VecDeque<Lot>,
     pub created_at: DateTime<Utc>,
     pub last_updated: DateTime<Utc>,
@@ -45,6 +111,18 @@ pub struct Position {
     /// Defaults to 1 for non-derivative positions and for snapshots created before this field existed.
     #[serde(default = "default_multiplier")]
     pub contract_multiplier: Decimal,
+    /// Precomputed cost basis of all lots in the ACCOUNT currency, converted at
+    /// each lot's acquisition-date FX (stored lot rate preferred, else
+    /// acquisition-date market FX). Populated at snapshot write time so
+    /// valuation can read a scalar instead of walking `lots`. `None` for
+    /// snapshots serialized before this field existed and for positions with no
+    /// materialized lots; consumers fall back to walking `lots` in that case.
+    #[serde(default)]
+    pub cost_basis_account: Option<Decimal>,
+    /// Precomputed cost basis of all lots in the app BASE currency, converted at
+    /// each lot's acquisition-date FX. See [`Position::cost_basis_account`].
+    #[serde(default)]
+    pub cost_basis_base: Option<Decimal>,
 }
 
 fn default_multiplier() -> Decimal {
@@ -67,6 +145,8 @@ impl Default for Position {
             last_updated: Utc::now(),
             is_alternative: false,
             contract_multiplier: Decimal::ONE,
+            cost_basis_account: None,
+            cost_basis_base: None,
         }
     }
 }
@@ -346,6 +426,8 @@ impl Position {
             last_updated: date,
             is_alternative: false,
             contract_multiplier: Decimal::ONE,
+            cost_basis_account: None,
+            cost_basis_base: None,
         }
     }
 
@@ -372,6 +454,8 @@ impl Position {
             last_updated: date,
             is_alternative,
             contract_multiplier,
+            cost_basis_account: None,
+            cost_basis_base: None,
         }
     }
 
@@ -1384,5 +1468,70 @@ mod tests {
         assert_eq!(position.quantity, dec!(-2));
         assert_eq!(position.total_cost_basis, dec!(-200));
         assert_eq!(position.average_cost, dec!(100));
+    }
+
+    #[test]
+    fn position_lots_are_skipped_on_serialize_but_still_deserialize_from_old_json() {
+        // A position carrying one open lot.
+        let mut position = test_position();
+        position
+            .add_lot_values(
+                "buy-1".to_string(),
+                dec!(10),
+                dec!(100),
+                dec!(1),
+                dec!(0),
+                Utc.with_ymd_and_hms(2025, 1, 2, 12, 0, 0).unwrap(),
+                None,
+                Some("buy-1".to_string()),
+                book_basis(),
+            )
+            .unwrap();
+        assert!(!position.lots.is_empty());
+
+        // STEP 2: serialized JSON must NOT embed the lots key.
+        let json = serde_json::to_string(&position).unwrap();
+        assert!(
+            !json.contains("\"lots\""),
+            "serialized position must omit the lots key, got: {json}"
+        );
+
+        // A newly-serialized position round-trips with empty lots
+        // (skip_serializing on write + serde default on read).
+        let reloaded: Position = serde_json::from_str(&json).unwrap();
+        assert!(reloaded.lots.is_empty());
+
+        // Backward compat: an OLD JSON string that DOES contain lots still
+        // populates them. skip_serializing only affects serialization; the
+        // retained #[serde(default)] leaves deserialization untouched.
+        let old_json = r#"{
+            "id": "POS-OPT-acc_1",
+            "accountId": "acc_1",
+            "assetId": "OPT",
+            "quantity": "10",
+            "averageCost": "100",
+            "totalCostBasis": "1000",
+            "currency": "USD",
+            "inceptionDate": "2025-01-02T12:00:00Z",
+            "lots": [
+                {
+                    "id": "buy-1",
+                    "positionId": "POS-OPT-acc_1",
+                    "acquisitionDate": "2025-01-02T12:00:00Z",
+                    "quantity": "10",
+                    "costBasis": "1000",
+                    "acquisitionPrice": "100",
+                    "acquisitionFees": "0",
+                    "fxRateToPosition": null
+                }
+            ],
+            "createdAt": "2025-01-02T12:00:00Z",
+            "lastUpdated": "2025-01-02T12:00:00Z"
+        }"#;
+        let old: Position = serde_json::from_str(old_json).unwrap();
+        assert_eq!(old.lots.len(), 1);
+        assert_eq!(old.lots[0].id, "buy-1");
+        assert_eq!(old.lots[0].quantity, dec!(10));
+        assert_eq!(old.lots[0].cost_basis, dec!(1000));
     }
 }

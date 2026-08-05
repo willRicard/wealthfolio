@@ -227,6 +227,36 @@ impl HoldingsCalculator {
 }
 
 impl HoldingsCalculator {
+    /// Precompute a position's cost basis in `target_currency` at acquisition-date
+    /// FX, mirroring `valuation_calculator::calculate_cost_basis_in_currency`'s
+    /// per-lot logic **exactly** so the persisted scalar is byte-identical to the
+    /// value valuation derives by walking `lots`:
+    ///   * skip only zero-cost lots (not zero-quantity), matching valuation;
+    ///   * prefer the lot's stored acquisition FX (`stored_fx_rate_to`);
+    ///   * otherwise multiply by the acquisition-date market rate
+    ///     (`amount * get_exchange_rate_for_date`, identical to how valuation
+    ///     prefetches forward `(position_currency, target)` pairs and multiplies).
+    ///
+    /// Returns `None` when the position has no materialized lots (valuation keeps
+    /// its valuation-date-FX fallback for those) or when any acquisition-date FX
+    /// rate is unavailable (valuation then walks lots and surfaces the same
+    /// error), so the scalar is written only when it can be trusted.
+    pub(super) fn precompute_position_cost_basis(
+        &self,
+        position: &Position,
+        target_currency: &str,
+    ) -> Option<Decimal> {
+        crate::portfolio::snapshot::compute_position_cost_basis_from_lots(
+            position,
+            target_currency,
+            |from, to, acquisition_date| {
+                self.fx_service
+                    .get_exchange_rate_for_date(from, to, acquisition_date)
+                    .ok()
+            },
+        )
+    }
+
     /// Book cost basis of a position in the account currency, anchored to each
     /// lot's acquisition-date FX (stored rate preferred). Falls back to the
     /// position aggregate when no lots are materialized.

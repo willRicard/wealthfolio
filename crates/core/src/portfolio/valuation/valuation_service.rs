@@ -13,7 +13,7 @@ use crate::portfolio::performance::{
     classify_flow_for_scope, classify_transfer_boundary_for_account_scope, is_external_transfer,
     FlowType, PerformanceScope,
 };
-use crate::portfolio::snapshot::{AccountStateSnapshot, Position, SnapshotServiceTrait};
+use crate::portfolio::snapshot::{Position, SnapshotServiceTrait};
 use crate::portfolio::valuation::valuation_calculator::calculate_valuation_with_price_factors;
 use crate::portfolio::valuation::valuation_model::{
     DailyAccountValuation, ExternalFlowSource, NegativeBalanceInfo, ValuationStatus,
@@ -29,13 +29,14 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Instant;
 
 use super::DailyFxRateMap;
 
 static VALUATION_SERVICE_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 const SCOPED_HISTORY_CACHE_LIMIT_PER_MODE: usize = 128;
+const SCOPED_HISTORY_IN_FLIGHT_LIMIT: usize = SCOPED_HISTORY_CACHE_LIMIT_PER_MODE * 2;
 
 fn parse_decimal_lossy(value: &str) -> Decimal {
     Decimal::from_str(value).unwrap_or(Decimal::ZERO)
@@ -184,6 +185,7 @@ pub struct ValuationService {
     lot_repository: Option<Arc<dyn LotRepositoryTrait>>,
     timezone: Arc<RwLock<String>>,
     scoped_history_cache: Arc<RwLock<HashMap<ScopedValuationCacheKey, Vec<DailyAccountValuation>>>>,
+    scoped_history_in_flight: Arc<Mutex<HashMap<ScopedValuationCacheKey, Weak<Mutex<()>>>>>,
     service_instance_id: u64,
 }
 
@@ -230,46 +232,35 @@ struct QuoteAdjustedSplitEvent {
 }
 
 #[derive(Clone, Debug, Default)]
-struct TransferMultiplierContext {
-    by_account_asset_date: HashMap<(String, String, NaiveDate), Decimal>,
-    by_account_asset: HashMap<(String, String), Decimal>,
+struct TransferMarketFacts {
+    quotes_by_request: HashMap<(String, NaiveDate), Quote>,
+    multipliers_by_asset_id: HashMap<String, Decimal>,
 }
 
-impl TransferMultiplierContext {
-    fn add_snapshot(&mut self, snapshot: &AccountStateSnapshot) {
-        for (asset_id, position) in &snapshot.positions {
-            if position.contract_multiplier <= Decimal::ZERO {
-                continue;
-            }
-            self.by_account_asset_date.insert(
-                (
-                    snapshot.account_id.clone(),
-                    asset_id.clone(),
-                    snapshot.snapshot_date,
-                ),
-                position.contract_multiplier,
-            );
-            self.by_account_asset.insert(
-                (snapshot.account_id.clone(), asset_id.clone()),
-                position.contract_multiplier,
-            );
-        }
-    }
-
-    fn multiplier_for(&self, activity: &Activity, activity_date: NaiveDate) -> Decimal {
-        let Some(asset_id) = activity.asset_id.as_ref() else {
-            return Decimal::ONE;
-        };
-        self.by_account_asset_date
-            .get(&(activity.account_id.clone(), asset_id.clone(), activity_date))
-            .or_else(|| {
-                self.by_account_asset
-                    .get(&(activity.account_id.clone(), asset_id.clone()))
-            })
+impl TransferMarketFacts {
+    fn multiplier_for(&self, activity: &Activity) -> Decimal {
+        activity
+            .asset_id
+            .as_ref()
+            .and_then(|asset_id| self.multipliers_by_asset_id.get(asset_id))
             .copied()
-            .filter(|multiplier| *multiplier > Decimal::ZERO)
             .unwrap_or(Decimal::ONE)
     }
+}
+
+struct ScopedFlowInputs {
+    scope_account_ids: HashSet<String>,
+    timezone: chrono_tz::Tz,
+    merged_activities: Vec<Activity>,
+    external_transfer_resolution: TransferPairResolution,
+    internal_transfer_resolution: TransferPairResolution,
+    market_facts: TransferMarketFacts,
+    removed_lot_basis_by_activity: HashMap<String, Decimal>,
+}
+
+struct ScopedFlowMaps {
+    external_flows_by_date: HashMap<NaiveDate, DailyFlowAmounts>,
+    internal_adjustments_by_date: HashMap<NaiveDate, (Decimal, Decimal)>,
 }
 
 impl ValuationService {
@@ -290,6 +281,7 @@ impl ValuationService {
             lot_repository: None,
             timezone: Arc::new(RwLock::new(String::new())),
             scoped_history_cache: Arc::new(RwLock::new(HashMap::new())),
+            scoped_history_in_flight: Arc::new(Mutex::new(HashMap::new())),
             service_instance_id: VALUATION_SERVICE_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed),
         }
     }
@@ -329,6 +321,89 @@ impl ValuationService {
             cache.retain(|key, _| key.mode != mode);
         }
         cache.insert(cache_key, aggregate.to_vec());
+    }
+
+    fn scoped_history_cache_get(
+        &self,
+        cache_key: &ScopedValuationCacheKey,
+    ) -> Option<Vec<DailyAccountValuation>> {
+        self.scoped_history_cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(cache_key)
+            .cloned()
+    }
+
+    fn acquire_scoped_history_in_flight(
+        &self,
+        cache_key: &ScopedValuationCacheKey,
+    ) -> Option<Arc<Mutex<()>>> {
+        let mut registry = self
+            .scoped_history_in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        registry.retain(|_, in_flight| in_flight.strong_count() > 0);
+
+        if let Some(in_flight) = registry.get(cache_key).and_then(Weak::upgrade) {
+            return Some(in_flight);
+        }
+        if registry.len() >= SCOPED_HISTORY_IN_FLIGHT_LIMIT {
+            return None;
+        }
+
+        let in_flight = Arc::new(Mutex::new(()));
+        registry.insert(cache_key.clone(), Arc::downgrade(&in_flight));
+        Some(in_flight)
+    }
+
+    fn release_scoped_history_in_flight(
+        &self,
+        cache_key: &ScopedValuationCacheKey,
+        in_flight: &Arc<Mutex<()>>,
+    ) {
+        let mut registry = self
+            .scoped_history_in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let is_same_entry = registry
+            .get(cache_key)
+            .and_then(Weak::upgrade)
+            .is_some_and(|registered| Arc::ptr_eq(&registered, in_flight));
+        if is_same_entry && Arc::strong_count(in_flight) == 1 {
+            registry.remove(cache_key);
+        }
+    }
+
+    fn with_scoped_history_single_flight<F>(
+        &self,
+        cache_key: ScopedValuationCacheKey,
+        calculate: F,
+    ) -> CoreResult<Vec<DailyAccountValuation>>
+    where
+        F: FnOnce() -> CoreResult<Vec<DailyAccountValuation>>,
+    {
+        if let Some(cached) = self.scoped_history_cache_get(&cache_key) {
+            return Ok(cached);
+        }
+
+        let Some(in_flight) = self.acquire_scoped_history_in_flight(&cache_key) else {
+            // All registered keys are active. Bypass coalescing instead of evicting
+            // a live mutex and allowing duplicate work for its existing waiters.
+            return calculate();
+        };
+
+        // These synchronous waiters occupy blocking-pool threads. All production
+        // entry points invoke scoped performance work through spawn_blocking.
+        let guard = in_flight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let result = match self.scoped_history_cache_get(&cache_key) {
+            Some(cached) => Ok(cached),
+            None => calculate(),
+        };
+        drop(guard);
+        self.release_scoped_history_in_flight(&cache_key, &in_flight);
+        result
     }
 
     fn position_requires_price_quote(position: &Position) -> bool {
@@ -784,50 +859,6 @@ impl ValuationService {
     fn activity_is_outflow(activity: &Activity) -> bool {
         let effective_type = activity.effective_type();
         effective_type == ACTIVITY_TYPE_WITHDRAWAL || effective_type == ACTIVITY_TYPE_TRANSFER_OUT
-    }
-
-    fn transfer_multiplier_context_for_accounts(
-        &self,
-        account_ids: &[String],
-        start_date_opt: Option<NaiveDate>,
-        end_date_opt: Option<NaiveDate>,
-    ) -> CoreResult<TransferMultiplierContext> {
-        let snapshot_start_date_opt = Self::transfer_multiplier_snapshot_start(start_date_opt);
-        let mut context = TransferMultiplierContext::default();
-        for account_id in account_ids {
-            let snapshots = self
-                .snapshot_service
-                .get_daily_holdings_snapshots(account_id, snapshot_start_date_opt, end_date_opt)
-                .map_err(|e| {
-                    CoreError::Calculation(CalculatorError::Calculation(format!(
-                        "Failed snapshot fetch for transfer economics account {}: {}",
-                        account_id, e
-                    )))
-                })?;
-            for snapshot in snapshots {
-                context.add_snapshot(&snapshot);
-            }
-        }
-        Ok(context)
-    }
-
-    fn transfer_multiplier_snapshot_start(start_date_opt: Option<NaiveDate>) -> Option<NaiveDate> {
-        start_date_opt.map(|start_date| start_date - Duration::days(1))
-    }
-
-    fn has_posted_security_transfer_in_range(
-        activities: &[Activity],
-        timezone: chrono_tz::Tz,
-        start_date_opt: Option<NaiveDate>,
-        end_date_opt: Option<NaiveDate>,
-    ) -> bool {
-        activities.iter().any(|activity| {
-            if !activity.is_posted() || !Self::is_security_transfer_activity(activity) {
-                return false;
-            }
-            let activity_date = time_utils::activity_date_in_tz(activity.activity_date, timezone);
-            Self::activity_date_in_range(activity_date, start_date_opt, end_date_opt)
-        })
     }
 
     fn activity_flow_amount_base(
@@ -1314,15 +1345,14 @@ impl ValuationService {
         }
     }
 
-    fn transfer_quotes_by_asset_date(
+    fn transfer_market_facts_for_activities(
         &self,
         activities: &[Activity],
         timezone: chrono_tz::Tz,
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
-    ) -> CoreResult<HashMap<(String, NaiveDate), Quote>> {
-        let mut asset_ids = HashSet::new();
-        let mut dates = Vec::new();
+    ) -> CoreResult<TransferMarketFacts> {
+        let mut requests = HashSet::new();
 
         for activity in activities {
             if !activity.is_posted() || !Self::is_security_transfer_activity(activity) {
@@ -1339,53 +1369,67 @@ impl ValuationService {
                 .as_ref()
                 .filter(|asset_id| !asset_id.is_empty())
             {
-                asset_ids.insert(asset_id.clone());
-                dates.push(activity_date);
+                requests.insert((asset_id.clone(), activity_date));
             }
         }
 
-        if asset_ids.is_empty() || dates.is_empty() {
-            return Ok(HashMap::new());
+        if requests.is_empty() {
+            return Ok(TransferMarketFacts::default());
         }
 
-        let start_date = dates
-            .iter()
-            .min()
-            .copied()
-            .expect("non-empty dates has min");
-        let end_date = dates
-            .iter()
-            .max()
-            .copied()
-            .expect("non-empty dates has max");
-
-        let quotes = self
+        let mut requests: Vec<(String, NaiveDate)> = requests.into_iter().collect();
+        requests.sort();
+        let sparse_facts = self
             .quote_service
-            .get_quotes_in_range_filled(&asset_ids, start_date, end_date)?;
-        let mut quotes_by_key = HashMap::with_capacity(quotes.len());
-        for quote in quotes {
-            quotes_by_key.insert(
-                (quote.asset_id.clone(), quote.timestamp.date_naive()),
-                quote,
-            );
+            .get_sparse_asset_market_facts(&requests)?;
+
+        let mut asset_ids: Vec<String> = requests
+            .iter()
+            .map(|(asset_id, _)| asset_id.clone())
+            .collect();
+        asset_ids.dedup();
+        let mut multipliers_by_asset_id = HashMap::with_capacity(asset_ids.len());
+        for asset_id in asset_ids {
+            let multiplier = match sparse_facts.assets_by_id.get(&asset_id) {
+                Some(asset) => {
+                    let multiplier = asset.contract_multiplier();
+                    if multiplier > Decimal::ZERO {
+                        multiplier
+                    } else {
+                        warn!(
+                            "Asset '{}' has a non-positive contract multiplier; using 1 for transfer economics.",
+                            asset_id
+                        );
+                        Decimal::ONE
+                    }
+                }
+                None => {
+                    warn!(
+                        "Asset '{}' was not found while loading transfer economics; using contract multiplier 1.",
+                        asset_id
+                    );
+                    Decimal::ONE
+                }
+            };
+            multipliers_by_asset_id.insert(asset_id, multiplier);
         }
 
-        Ok(quotes_by_key)
+        Ok(TransferMarketFacts {
+            quotes_by_request: sparse_facts.quotes_by_request,
+            multipliers_by_asset_id,
+        })
     }
 
-    fn account_external_flows_by_date(
+    fn prepare_scoped_flow_inputs(
         &self,
         account_ids: &[String],
         base_currency: &str,
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
-    ) -> CoreResult<Option<HashMap<NaiveDate, DailyFlowAmounts>>> {
+    ) -> CoreResult<Option<ScopedFlowInputs>> {
         let Some(activity_repository) = &self.activity_repository else {
             return Ok(None);
         };
-        if account_ids.is_empty() {
-            return Ok(Some(HashMap::new()));
-        }
 
         let scope_account_ids: HashSet<String> = account_ids.iter().cloned().collect();
         let timezone = {
@@ -1410,30 +1454,23 @@ impl ValuationService {
                 start_utc,
                 end_exclusive_utc,
             )?;
-        let all_activities = Self::merge_activities_by_id(scoped_activities, transfer_activities);
-        let transfer_resolution = TransferPairResolution::from_activities(&all_activities);
-        let transfer_quotes_by_key = self.transfer_quotes_by_asset_date(
-            &all_activities,
+        // The two consumers intentionally retain their existing activity populations:
+        // external-flow recomputation sees the scoped rows plus touching transfers,
+        // while internal correction only resolves the touching-transfer population.
+        let internal_transfer_resolution =
+            TransferPairResolution::from_activities(&transfer_activities);
+        let merged_activities =
+            Self::merge_activities_by_id(scoped_activities, transfer_activities);
+        let external_transfer_resolution =
+            TransferPairResolution::from_activities(&merged_activities);
+        let market_facts = self.transfer_market_facts_for_activities(
+            &merged_activities,
             timezone,
             start_date_opt,
             end_date_opt,
         )?;
-        let transfer_multiplier_context = if Self::has_posted_security_transfer_in_range(
-            &all_activities,
-            timezone,
-            start_date_opt,
-            end_date_opt,
-        ) {
-            self.transfer_multiplier_context_for_accounts(
-                account_ids,
-                start_date_opt,
-                end_date_opt,
-            )?
-        } else {
-            TransferMultiplierContext::default()
-        };
         let removed_lot_basis_by_activity = match Self::disposal_query_bounds_from_activities(
-            &all_activities,
+            &merged_activities,
             timezone,
             start_date_opt,
             end_date_opt,
@@ -1448,15 +1485,35 @@ impl ValuationService {
             None => HashMap::new(),
         };
 
+        Ok(Some(ScopedFlowInputs {
+            scope_account_ids,
+            timezone,
+            merged_activities,
+            external_transfer_resolution,
+            internal_transfer_resolution,
+            market_facts,
+            removed_lot_basis_by_activity,
+        }))
+    }
+
+    fn external_flows_from_scoped_inputs(
+        &self,
+        inputs: &ScopedFlowInputs,
+        base_currency: &str,
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> CoreResult<HashMap<NaiveDate, DailyFlowAmounts>> {
         let mut flows_by_date: HashMap<NaiveDate, DailyFlowAmounts> = HashMap::new();
-        for activity in all_activities
+        for activity in inputs
+            .merged_activities
             .iter()
-            .filter(|activity| scope_account_ids.contains(&activity.account_id))
+            .filter(|activity| inputs.scope_account_ids.contains(&activity.account_id))
         {
             if !activity.is_posted() {
                 continue;
             }
-            let activity_date = time_utils::activity_date_in_tz(activity.activity_date, timezone);
+            let activity_date =
+                time_utils::activity_date_in_tz(activity.activity_date, inputs.timezone);
             if !Self::activity_date_in_range(activity_date, start_date_opt, end_date_opt) {
                 continue;
             }
@@ -1465,21 +1522,27 @@ impl ValuationService {
             let transfer_boundary = if effective_type == ACTIVITY_TYPE_TRANSFER_IN
                 || effective_type == ACTIVITY_TYPE_TRANSFER_OUT
             {
-                if let Some(pair) = transfer_resolution.pair_for_activity(&activity.id) {
+                if let Some(pair) = inputs
+                    .external_transfer_resolution
+                    .pair_for_activity(&activity.id)
+                {
                     classify_transfer_boundary_for_account_scope(
                         activity,
-                        &scope_account_ids,
+                        &inputs.scope_account_ids,
                         pair.counterparty_account_id(&activity.id),
                     )
                 } else {
-                    if let Some(group) =
-                        transfer_resolution.invalid_group_for_activity(&activity.id)
+                    if let Some(group) = inputs
+                        .external_transfer_resolution
+                        .invalid_group_for_activity(&activity.id)
                     {
                         warn!(
                             "Invalid transfer group {} ({}) includes activity {}; marking scoped flow as unknown.",
                             group.group_id, group.reason, activity.id
                         );
-                    } else if transfer_resolution.is_ungrouped_transfer(&activity.id)
+                    } else if inputs
+                        .external_transfer_resolution
+                        .is_ungrouped_transfer(&activity.id)
                         && !is_external_transfer(activity)
                     {
                         warn!(
@@ -1505,10 +1568,12 @@ impl ValuationService {
             }
 
             let quote = activity.asset_id.as_ref().and_then(|asset_id| {
-                transfer_quotes_by_key.get(&(asset_id.clone(), activity_date))
+                inputs
+                    .market_facts
+                    .quotes_by_request
+                    .get(&(asset_id.clone(), activity_date))
             });
-            let unit_multiplier =
-                transfer_multiplier_context.multiplier_for(activity, activity_date);
+            let unit_multiplier = inputs.market_facts.multiplier_for(activity);
             let economics = Self::resolve_activity_economics_for_boundary_with_unit_multiplier(
                 activity,
                 quote,
@@ -1540,7 +1605,11 @@ impl ValuationService {
                 economics.performance_flow_source
             };
             let flow_source = if flow_source == ExternalFlowSource::RemovedLotBasisFallback {
-                match removed_lot_basis_by_activity.get(&activity.id).copied() {
+                match inputs
+                    .removed_lot_basis_by_activity
+                    .get(&activity.id)
+                    .copied()
+                {
                     Some(removed_basis_base) if !removed_basis_base.is_zero() => {
                         amount_base = removed_basis_base.abs();
                         if transfer_boundary == TransferBoundary::Unknown {
@@ -1566,75 +1635,35 @@ impl ValuationService {
             );
         }
 
-        Ok(Some(flows_by_date))
+        Ok(flows_by_date)
     }
 
-    fn scoped_internal_transfer_flow_adjustments_by_date(
+    fn internal_transfer_adjustments_from_scoped_inputs(
         &self,
-        account_ids: &[String],
+        inputs: &ScopedFlowInputs,
         base_currency: &str,
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
-    ) -> CoreResult<Option<HashMap<NaiveDate, (Decimal, Decimal)>>> {
-        let Some(activity_repository) = &self.activity_repository else {
-            return Ok(None);
-        };
-        if account_ids.is_empty() {
-            return Ok(Some(HashMap::new()));
-        }
-
-        let scope_account_ids: HashSet<String> = account_ids.iter().cloned().collect();
-        let timezone = {
-            let timezone_guard = self.timezone.read().unwrap();
-            time_utils::parse_user_timezone_or_default(&timezone_guard)
-        };
-        let (start_utc, end_exclusive_utc) =
-            Self::activity_query_utc_bounds(start_date_opt, end_date_opt);
-        let transfer_activities = activity_repository
-            .get_transfer_activities_touching_account_ids_in_date_range(
-                account_ids,
-                start_utc,
-                end_exclusive_utc,
-            )?;
-        let transfer_resolution = TransferPairResolution::from_activities(&transfer_activities);
-        let transfer_quotes_by_key = self.transfer_quotes_by_asset_date(
-            &transfer_activities,
-            timezone,
-            start_date_opt,
-            end_date_opt,
-        )?;
-        let transfer_multiplier_context = if Self::has_posted_security_transfer_in_range(
-            &transfer_activities,
-            timezone,
-            start_date_opt,
-            end_date_opt,
-        ) {
-            self.transfer_multiplier_context_for_accounts(
-                account_ids,
-                start_date_opt,
-                end_date_opt,
-            )?
-        } else {
-            TransferMultiplierContext::default()
-        };
-
+    ) -> CoreResult<HashMap<NaiveDate, (Decimal, Decimal)>> {
         let mut adjustments_by_date: HashMap<NaiveDate, (Decimal, Decimal)> = HashMap::new();
-        for pair in transfer_resolution.pairs() {
-            if !pair.both_accounts_in_scope(&scope_account_ids) {
+        for pair in inputs.internal_transfer_resolution.pairs() {
+            if !pair.both_accounts_in_scope(&inputs.scope_account_ids) {
                 continue;
             }
 
             for activity in [&pair.transfer_in, &pair.transfer_out] {
                 let activity_date =
-                    time_utils::activity_date_in_tz(activity.activity_date, timezone);
+                    time_utils::activity_date_in_tz(activity.activity_date, inputs.timezone);
                 if !Self::activity_date_in_range(activity_date, start_date_opt, end_date_opt) {
                     continue;
                 }
                 let quote = activity.asset_id.as_ref().and_then(|asset_id| {
-                    transfer_quotes_by_key.get(&(asset_id.clone(), activity_date))
+                    inputs
+                        .market_facts
+                        .quotes_by_request
+                        .get(&(asset_id.clone(), activity_date))
                 });
-                let unit_multiplier =
-                    transfer_multiplier_context.multiplier_for(activity, activity_date);
+                let unit_multiplier = inputs.market_facts.multiplier_for(activity);
                 let amount_base = self.activity_flow_amount_base(
                     activity,
                     quote,
@@ -1652,7 +1681,70 @@ impl ValuationService {
             }
         }
 
-        Ok(Some(adjustments_by_date))
+        Ok(adjustments_by_date)
+    }
+
+    fn scoped_flow_maps_by_date(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> CoreResult<Option<ScopedFlowMaps>> {
+        if account_ids.is_empty() {
+            return Ok(Some(ScopedFlowMaps {
+                external_flows_by_date: HashMap::new(),
+                internal_adjustments_by_date: HashMap::new(),
+            }));
+        }
+        let Some(inputs) = self.prepare_scoped_flow_inputs(
+            account_ids,
+            base_currency,
+            start_date_opt,
+            end_date_opt,
+        )?
+        else {
+            return Ok(None);
+        };
+        let external_flows_by_date = self.external_flows_from_scoped_inputs(
+            &inputs,
+            base_currency,
+            start_date_opt,
+            end_date_opt,
+        )?;
+        let internal_adjustments_by_date = self.internal_transfer_adjustments_from_scoped_inputs(
+            &inputs,
+            base_currency,
+            start_date_opt,
+            end_date_opt,
+        )?;
+        Ok(Some(ScopedFlowMaps {
+            external_flows_by_date,
+            internal_adjustments_by_date,
+        }))
+    }
+
+    fn account_external_flows_by_date(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> CoreResult<Option<HashMap<NaiveDate, DailyFlowAmounts>>> {
+        if account_ids.is_empty() {
+            return Ok(Some(HashMap::new()));
+        }
+        let Some(inputs) = self.prepare_scoped_flow_inputs(
+            account_ids,
+            base_currency,
+            start_date_opt,
+            end_date_opt,
+        )?
+        else {
+            return Ok(None);
+        };
+        self.external_flows_from_scoped_inputs(&inputs, base_currency, start_date_opt, end_date_opt)
+            .map(Some)
     }
 }
 
@@ -2008,7 +2100,7 @@ impl ValuationServiceTrait for ValuationService {
             .valuation_repository
             .get_max_calculated_at_for_accounts(account_ids, start_date_opt, end_date_opt)?
             .unwrap_or_default();
-        let mut cache_key = ScopedValuationCacheKey {
+        let cache_key = ScopedValuationCacheKey {
             service_instance_id: self.service_instance_id,
             mode: ScopedValuationHistoryMode::PerformanceFlows,
             scope_id: scope_id.to_string(),
@@ -2018,78 +2110,65 @@ impl ValuationServiceTrait for ValuationService {
             end_date: end_date_opt,
             max_calculated_at,
         };
+        let single_flight_key = cache_key.clone();
+        self.with_scoped_history_single_flight(single_flight_key, || {
+            let mut cache_key = cache_key;
+            let records = self
+                .valuation_repository
+                .get_historical_valuations_for_accounts(
+                    account_ids,
+                    start_date_opt,
+                    end_date_opt,
+                )?;
 
-        if let Some(cached) = self
-            .scoped_history_cache
-            .read()
-            .unwrap()
-            .get(&cache_key)
-            .cloned()
-        {
-            return Ok(cached);
-        }
-
-        let records = self
-            .valuation_repository
-            .get_historical_valuations_for_accounts(account_ids, start_date_opt, end_date_opt)?;
-
-        let loaded_max_calculated_at = records
-            .iter()
-            .map(|valuation| valuation.calculated_at.to_rfc3339())
-            .max()
-            .unwrap_or_default();
-        if loaded_max_calculated_at != cache_key.max_calculated_at {
-            cache_key.max_calculated_at = loaded_max_calculated_at;
-            if let Some(cached) = self
-                .scoped_history_cache
-                .read()
-                .unwrap()
-                .get(&cache_key)
-                .cloned()
-            {
-                return Ok(cached);
+            let loaded_max_calculated_at = records
+                .iter()
+                .map(|valuation| valuation.calculated_at.to_rfc3339())
+                .max()
+                .unwrap_or_default();
+            if loaded_max_calculated_at != cache_key.max_calculated_at {
+                cache_key.max_calculated_at = loaded_max_calculated_at;
+                if let Some(cached) = self.scoped_history_cache_get(&cache_key) {
+                    return Ok(cached);
+                }
             }
-        }
 
-        let mut histories_by_account: HashMap<String, Vec<DailyAccountValuation>> =
-            HashMap::with_capacity(account_ids.len());
-        for record in records {
-            histories_by_account
-                .entry(record.account_id.clone())
-                .or_default()
-                .push(record);
-        }
-        let histories = account_ids
-            .iter()
-            .map(|account_id| histories_by_account.remove(account_id).unwrap_or_default())
-            .collect();
+            let mut histories_by_account: HashMap<String, Vec<DailyAccountValuation>> =
+                HashMap::with_capacity(account_ids.len());
+            for record in records {
+                histories_by_account
+                    .entry(record.account_id.clone())
+                    .or_default()
+                    .push(record);
+            }
+            let histories = account_ids
+                .iter()
+                .map(|account_id| histories_by_account.remove(account_id).unwrap_or_default())
+                .collect();
 
-        let internal_transfer_flow_adjustments_by_date = self
-            .scoped_internal_transfer_flow_adjustments_by_date(
+            let scoped_flow_maps = self.scoped_flow_maps_by_date(
                 account_ids,
                 base_currency,
                 start_date_opt,
                 end_date_opt,
             )?;
-        let external_flows_by_date = self.account_external_flows_by_date(
-            account_ids,
-            base_currency,
-            start_date_opt,
-            end_date_opt,
-        )?;
 
-        let aggregate = Self::aggregate_scoped_valuations(
-            scope_id,
-            account_ids,
-            base_currency,
-            histories,
-            external_flows_by_date.as_ref(),
-            internal_transfer_flow_adjustments_by_date.as_ref(),
-        )?;
+            let aggregate = Self::aggregate_scoped_valuations(
+                scope_id,
+                account_ids,
+                base_currency,
+                histories,
+                scoped_flow_maps
+                    .as_ref()
+                    .map(|maps| &maps.external_flows_by_date),
+                scoped_flow_maps
+                    .as_ref()
+                    .map(|maps| &maps.internal_adjustments_by_date),
+            )?;
 
-        self.insert_scoped_history_cache(cache_key, &aggregate);
-
-        Ok(aggregate)
+            self.insert_scoped_history_cache(cache_key, &aggregate);
+            Ok(aggregate)
+        })
     }
 
     fn get_historical_valuation_totals_for_accounts(
@@ -2104,7 +2183,7 @@ impl ValuationServiceTrait for ValuationService {
             .valuation_repository
             .get_max_calculated_at_for_accounts(account_ids, start_date_opt, end_date_opt)?
             .unwrap_or_default();
-        let mut cache_key = ScopedValuationCacheKey {
+        let cache_key = ScopedValuationCacheKey {
             service_instance_id: self.service_instance_id,
             mode: ScopedValuationHistoryMode::TotalsOnly,
             scope_id: scope_id.to_string(),
@@ -2114,62 +2193,52 @@ impl ValuationServiceTrait for ValuationService {
             end_date: end_date_opt,
             max_calculated_at,
         };
+        let single_flight_key = cache_key.clone();
+        self.with_scoped_history_single_flight(single_flight_key, || {
+            let mut cache_key = cache_key;
+            let records = self
+                .valuation_repository
+                .get_historical_valuations_for_accounts(
+                    account_ids,
+                    start_date_opt,
+                    end_date_opt,
+                )?;
 
-        if let Some(cached) = self
-            .scoped_history_cache
-            .read()
-            .unwrap()
-            .get(&cache_key)
-            .cloned()
-        {
-            return Ok(cached);
-        }
-
-        let records = self
-            .valuation_repository
-            .get_historical_valuations_for_accounts(account_ids, start_date_opt, end_date_opt)?;
-
-        let loaded_max_calculated_at = records
-            .iter()
-            .map(|valuation| valuation.calculated_at.to_rfc3339())
-            .max()
-            .unwrap_or_default();
-        if loaded_max_calculated_at != cache_key.max_calculated_at {
-            cache_key.max_calculated_at = loaded_max_calculated_at;
-            if let Some(cached) = self
-                .scoped_history_cache
-                .read()
-                .unwrap()
-                .get(&cache_key)
-                .cloned()
-            {
-                return Ok(cached);
+            let loaded_max_calculated_at = records
+                .iter()
+                .map(|valuation| valuation.calculated_at.to_rfc3339())
+                .max()
+                .unwrap_or_default();
+            if loaded_max_calculated_at != cache_key.max_calculated_at {
+                cache_key.max_calculated_at = loaded_max_calculated_at;
+                if let Some(cached) = self.scoped_history_cache_get(&cache_key) {
+                    return Ok(cached);
+                }
             }
-        }
 
-        let mut histories_by_account: HashMap<String, Vec<DailyAccountValuation>> =
-            HashMap::with_capacity(account_ids.len());
-        for record in records {
-            histories_by_account
-                .entry(record.account_id.clone())
-                .or_default()
-                .push(record);
-        }
-        let histories = account_ids
-            .iter()
-            .map(|account_id| histories_by_account.remove(account_id).unwrap_or_default())
-            .collect();
+            let mut histories_by_account: HashMap<String, Vec<DailyAccountValuation>> =
+                HashMap::with_capacity(account_ids.len());
+            for record in records {
+                histories_by_account
+                    .entry(record.account_id.clone())
+                    .or_default()
+                    .push(record);
+            }
+            let histories = account_ids
+                .iter()
+                .map(|account_id| histories_by_account.remove(account_id).unwrap_or_default())
+                .collect();
 
-        let aggregate = Self::aggregate_scoped_valuation_totals(
-            scope_id,
-            account_ids,
-            base_currency,
-            histories,
-        )?;
+            let aggregate = Self::aggregate_scoped_valuation_totals(
+                scope_id,
+                account_ids,
+                base_currency,
+                histories,
+            )?;
 
-        self.insert_scoped_history_cache(cache_key, &aggregate);
-
-        Ok(aggregate)
+            self.insert_scoped_history_cache(cache_key, &aggregate);
+            Ok(aggregate)
+        })
     }
 
     fn get_historical_valuations_by_account(
@@ -2230,7 +2299,7 @@ impl ValuationServiceTrait for ValuationService {
 mod tests {
     use super::*;
     use crate::activities::ActivityStatus;
-    use crate::portfolio::snapshot::SnapshotSource;
+    use crate::portfolio::snapshot::{AccountStateSnapshot, SnapshotSource};
     use chrono::{DateTime, Utc};
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
@@ -3331,52 +3400,6 @@ mod tests {
             economics.performance_flow_source,
             ExternalFlowSource::Unknown
         );
-    }
-
-    #[test]
-    fn transfer_multiplier_snapshot_fetch_starts_before_requested_window() {
-        let requested_start = date("2026-06-02");
-
-        assert_eq!(
-            ValuationService::transfer_multiplier_snapshot_start(Some(requested_start)),
-            Some(date("2026-06-01"))
-        );
-        assert_eq!(
-            ValuationService::transfer_multiplier_snapshot_start(None),
-            None
-        );
-    }
-
-    #[test]
-    fn transfer_multiplier_context_is_needed_only_for_security_transfers_in_range() {
-        let cash_transfer =
-            transfer_activity(ACTIVITY_TYPE_TRANSFER_IN, None, None, None, Some(dec!(250)));
-        let security_transfer = transfer_activity(
-            ACTIVITY_TYPE_TRANSFER_IN,
-            Some("AAPL"),
-            Some(dec!(10)),
-            Some(dec!(8)),
-            None,
-        );
-
-        assert!(!ValuationService::has_posted_security_transfer_in_range(
-            &[cash_transfer],
-            chrono_tz::UTC,
-            None,
-            None,
-        ));
-        assert!(ValuationService::has_posted_security_transfer_in_range(
-            std::slice::from_ref(&security_transfer),
-            chrono_tz::UTC,
-            None,
-            None,
-        ));
-        assert!(!ValuationService::has_posted_security_transfer_in_range(
-            &[security_transfer],
-            chrono_tz::UTC,
-            Some(date("2026-06-02")),
-            None,
-        ));
     }
 
     #[test]

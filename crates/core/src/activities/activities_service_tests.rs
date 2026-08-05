@@ -16,6 +16,7 @@ mod tests {
     use crate::errors::{DatabaseError, Error, Result};
     use crate::events::{DomainEvent, MockDomainEventSink};
     use crate::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
+    use crate::lots::{AssetLotView, LotClosure, LotDisposal, LotRecord, LotRepositoryTrait};
     use crate::portfolio::economic_events::BasisStatus;
     use crate::portfolio::performance::{PerformanceService, PerformanceServiceTrait};
     use crate::portfolio::snapshot::{
@@ -36,7 +37,9 @@ mod tests {
     use rust_decimal_macros::dec;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
-    use std::sync::{Arc, Mutex, RwLock};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier, Mutex, RwLock};
+    use std::time::Duration;
 
     // --- Mock AccountService ---
     #[derive(Clone)]
@@ -633,6 +636,13 @@ mod tests {
             Ok(HashMap::new())
         }
 
+        fn get_sparse_asset_market_facts(
+            &self,
+            _requests: &[(String, NaiveDate)],
+        ) -> Result<crate::quotes::SparseAssetMarketFacts> {
+            Ok(crate::quotes::SparseAssetMarketFacts::default())
+        }
+
         fn get_latest_quotes_snapshot(
             &self,
             asset_ids: &[String],
@@ -963,6 +973,16 @@ mod tests {
             _as_of: chrono::NaiveDate,
         ) -> Result<HashMap<String, Quote>> {
             Ok(HashMap::new())
+        }
+
+        fn get_sparse_asset_market_facts(
+            &self,
+            _requests: &[(String, NaiveDate)],
+        ) -> Result<crate::quotes::SparseAssetMarketFacts> {
+            Err(Error::Unexpected(
+                "RecordingQuoteService::get_sparse_asset_market_facts should not be called"
+                    .to_string(),
+            ))
         }
 
         fn get_latest_quotes_snapshot(
@@ -1688,13 +1708,30 @@ mod tests {
     #[derive(Clone)]
     struct MockValuationRepository {
         valuations: Arc<Mutex<Vec<DailyAccountValuation>>>,
+        scoped_history_load_calls: Arc<AtomicUsize>,
+        scoped_history_failures_remaining: Arc<AtomicUsize>,
+        scoped_history_load_delay: Duration,
     }
 
     impl MockValuationRepository {
         fn new(valuations: Vec<DailyAccountValuation>) -> Self {
             Self {
                 valuations: Arc::new(Mutex::new(valuations)),
+                scoped_history_load_calls: Arc::new(AtomicUsize::new(0)),
+                scoped_history_failures_remaining: Arc::new(AtomicUsize::new(0)),
+                scoped_history_load_delay: Duration::ZERO,
             }
+        }
+
+        fn with_scoped_history_load_behavior(mut self, delay: Duration, failures: usize) -> Self {
+            self.scoped_history_load_delay = delay;
+            self.scoped_history_failures_remaining
+                .store(failures, Ordering::SeqCst);
+            self
+        }
+
+        fn scoped_history_load_calls(&self) -> usize {
+            self.scoped_history_load_calls.load(Ordering::SeqCst)
         }
 
         fn in_range(
@@ -1762,6 +1799,27 @@ mod tests {
             start_date: Option<NaiveDate>,
             end_date: Option<NaiveDate>,
         ) -> Result<Vec<DailyAccountValuation>> {
+            self.scoped_history_load_calls
+                .fetch_add(1, Ordering::SeqCst);
+            if !self.scoped_history_load_delay.is_zero() {
+                std::thread::sleep(self.scoped_history_load_delay);
+            }
+            if self
+                .scoped_history_failures_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    if remaining > 0 {
+                        Some(remaining - 1)
+                    } else {
+                        None
+                    }
+                })
+                .is_ok()
+            {
+                return Err(Error::Repository(
+                    "intentional scoped history load failure".to_string(),
+                ));
+            }
+
             let account_ids: HashSet<&str> = account_ids.iter().map(String::as_str).collect();
             let mut rows: Vec<_> = self
                 .valuations
@@ -1774,6 +1832,24 @@ mod tests {
                 .collect();
             Self::sort_valuations(&mut rows);
             Ok(rows)
+        }
+
+        fn get_max_calculated_at_for_accounts(
+            &self,
+            account_ids: &[String],
+            start_date: Option<NaiveDate>,
+            end_date: Option<NaiveDate>,
+        ) -> Result<Option<String>> {
+            let account_ids: HashSet<&str> = account_ids.iter().map(String::as_str).collect();
+            Ok(self
+                .valuations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|valuation| account_ids.contains(valuation.account_id.as_str()))
+                .filter(|valuation| Self::in_range(valuation, start_date, end_date))
+                .map(|valuation| valuation.calculated_at.to_rfc3339())
+                .max())
         }
 
         fn load_latest_valuation_date(&self, _account_id: &str) -> Result<Option<NaiveDate>> {
@@ -1808,6 +1884,93 @@ mod tests {
             _account_ids: &[String],
         ) -> Result<Vec<NegativeBalanceInfo>> {
             Ok(Vec::new())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct MockLotRepository {
+        disposals: Vec<LotDisposal>,
+    }
+
+    #[async_trait]
+    impl LotRepositoryTrait for MockLotRepository {
+        async fn replace_lots_for_account(
+            &self,
+            _account_id: &str,
+            _lots: &[LotRecord],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_open_lots_for_account(&self, _account_id: &str) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_open_lots(&self) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_as_of_date(
+            &self,
+            _account_ids: &[String],
+            _date: NaiveDate,
+        ) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots_for_account(&self, _account_id: &str) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_for_asset(&self, _asset_id: &str) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_asset_lot_view(
+            &self,
+            _asset_id: &str,
+            _include_snapshot_positions: bool,
+        ) -> Result<Vec<AssetLotView>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots(&self) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn sync_lots_for_account(
+            &self,
+            _account_id: &str,
+            _open_lots: &[LotRecord],
+            _closures: &[LotClosure],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_lot_disposals_for_accounts_in_date_range_sync(
+            &self,
+            account_ids: &[String],
+            start_date_exclusive: NaiveDate,
+            end_date_inclusive: NaiveDate,
+        ) -> Result<Vec<LotDisposal>> {
+            Ok(self
+                .disposals
+                .iter()
+                .filter(|disposal| account_ids.contains(&disposal.account_id))
+                .filter(|disposal| {
+                    NaiveDate::parse_from_str(&disposal.disposal_date, "%Y-%m-%d")
+                        .is_ok_and(|date| date > start_date_exclusive && date <= end_date_inclusive)
+                })
+                .cloned()
+                .collect())
+        }
+
+        async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>> {
+            Ok(HashMap::new())
+        }
+
+        fn count_lots(&self) -> Result<i64> {
+            Ok(0)
         }
     }
 
@@ -1876,6 +2039,118 @@ mod tests {
         ) -> Result<()> {
             unimplemented!()
         }
+    }
+
+    fn scoped_valuation_service(
+        valuation_repository: Arc<MockValuationRepository>,
+    ) -> Arc<ValuationService> {
+        Arc::new(ValuationService::new(
+            Arc::new(RwLock::new("USD".to_string())),
+            valuation_repository,
+            Arc::new(MockSnapshotService),
+            Arc::new(MockQuoteService),
+            Arc::new(MockFxService::new()),
+        ))
+    }
+
+    #[test]
+    fn identical_concurrent_scoped_histories_share_one_cold_load() {
+        let valuation_repository = Arc::new(
+            MockValuationRepository::new(vec![create_daily_valuation(
+                "acct",
+                "2026-05-01",
+                dec!(100),
+                dec!(100),
+                dec!(100),
+                dec!(100),
+            )])
+            .with_scoped_history_load_behavior(Duration::from_millis(50), 0),
+        );
+        let valuation_service = scoped_valuation_service(Arc::clone(&valuation_repository));
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = Vec::new();
+
+        for _ in 0..2 {
+            let valuation_service = Arc::clone(&valuation_service);
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                valuation_service.get_historical_valuation_totals_for_accounts(
+                    "scope:single-flight",
+                    &["acct".to_string()],
+                    "USD",
+                    Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                    Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                )
+            }));
+        }
+
+        barrier.wait();
+        for handle in handles {
+            let result = handle
+                .join()
+                .expect("scoped history worker should not panic");
+            assert_eq!(result.expect("scoped history should load").len(), 1);
+        }
+        assert_eq!(valuation_repository.scoped_history_load_calls(), 1);
+    }
+
+    #[test]
+    fn failed_single_flight_is_not_cached_and_waiter_retries() {
+        let valuation_repository = Arc::new(
+            MockValuationRepository::new(vec![create_daily_valuation(
+                "acct",
+                "2026-05-01",
+                dec!(100),
+                dec!(100),
+                dec!(100),
+                dec!(100),
+            )])
+            .with_scoped_history_load_behavior(Duration::from_millis(50), 1),
+        );
+        let valuation_service = scoped_valuation_service(Arc::clone(&valuation_repository));
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = Vec::new();
+
+        for _ in 0..2 {
+            let valuation_service = Arc::clone(&valuation_service);
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                valuation_service.get_historical_valuation_totals_for_accounts(
+                    "scope:single-flight-retry",
+                    &["acct".to_string()],
+                    "USD",
+                    Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                    Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                )
+            }));
+        }
+
+        barrier.wait();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .expect("scoped history worker should not panic")
+            })
+            .collect();
+        assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(valuation_repository.scoped_history_load_calls(), 2);
+
+        let cached = valuation_service
+            .get_historical_valuation_totals_for_accounts(
+                "scope:single-flight-retry",
+                &["acct".to_string()],
+                "USD",
+                Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+            )
+            .expect("successful retry should be cached");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(valuation_repository.scoped_history_load_calls(), 2);
     }
 
     // Helper to create a test account
@@ -7792,6 +8067,234 @@ mod tests {
         assert_eq!(performance.attribution.distributions, Decimal::ZERO);
         assert_eq!(performance.attribution.fx_effect, dec!(-2));
         assert_eq!(performance.attribution.residual, Decimal::ZERO);
+    }
+
+    #[test]
+    fn scoped_flow_pipeline_uses_removed_lot_basis_for_unquoted_cross_scope_outbound_pair() {
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let mut transfer_out =
+            create_stored_activity("removed-lot-transfer", "acc-1", Some("AAPL"));
+        transfer_out.activity_type = "TRANSFER_OUT".to_string();
+        transfer_out.activity_date = parse_test_activity_datetime("2026-05-02");
+        transfer_out.quantity = Some(dec!(10));
+        transfer_out.unit_price = None;
+        transfer_out.amount = None;
+        transfer_out.source_group_id = Some("removed-lot-pair".to_string());
+        transfer_out.metadata = Some(json!({ "flow": { "is_external": false } }));
+        activity_repository.add_activity(transfer_out);
+
+        let mut transfer_in =
+            create_stored_activity("removed-lot-counterparty", "acc-2", Some("AAPL"));
+        transfer_in.activity_type = "TRANSFER_IN".to_string();
+        transfer_in.activity_date = parse_test_activity_datetime("2026-05-02");
+        transfer_in.quantity = Some(dec!(10));
+        transfer_in.unit_price = None;
+        transfer_in.amount = None;
+        transfer_in.source_group_id = Some("removed-lot-pair".to_string());
+        transfer_in.metadata = Some(json!({ "flow": { "is_external": false } }));
+        activity_repository.add_activity(transfer_in);
+
+        let valuation_repository = Arc::new(MockValuationRepository::new(vec![
+            create_daily_valuation(
+                "acc-1",
+                "2026-05-01",
+                dec!(1000),
+                Decimal::ZERO,
+                dec!(1000),
+                dec!(1000),
+            ),
+            create_daily_valuation(
+                "acc-1",
+                "2026-05-02",
+                dec!(750),
+                Decimal::ZERO,
+                dec!(750),
+                dec!(750),
+            ),
+        ]));
+        let lot_repository = Arc::new(MockLotRepository {
+            disposals: vec![LotDisposal {
+                id: "disposal-1".to_string(),
+                lot_id: "lot-1".to_string(),
+                account_id: "acc-1".to_string(),
+                asset_id: "AAPL".to_string(),
+                disposal_activity_id: "removed-lot-transfer".to_string(),
+                disposal_date: "2026-05-02".to_string(),
+                quantity: "10".to_string(),
+                proceeds: "0".to_string(),
+                cost_basis: "250".to_string(),
+                realized_pnl: "-250".to_string(),
+                proceeds_base: "0".to_string(),
+                cost_basis_base: "250".to_string(),
+                realized_pnl_base: "-250".to_string(),
+                currency: "USD".to_string(),
+                base_currency: "USD".to_string(),
+                fx_rate_to_base: "1".to_string(),
+                cost_basis_method: "FIFO".to_string(),
+                created_at: "2026-05-02T00:00:00Z".to_string(),
+            }],
+        });
+        let account_ids = vec!["acc-1".to_string()];
+        let valuation_service = ValuationService::new(
+            Arc::new(RwLock::new("USD".to_string())),
+            valuation_repository,
+            Arc::new(MockSnapshotService),
+            Arc::new(MockQuoteService),
+            Arc::new(MockFxService::new()),
+        )
+        .with_activity_repository(
+            activity_repository,
+            Arc::new(RwLock::new("UTC".to_string())),
+        )
+        .with_lot_repository(lot_repository);
+
+        let scoped = valuation_service
+            .get_historical_valuations_for_accounts(
+                "scope:removed-lot",
+                &account_ids,
+                "USD",
+                Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()),
+            )
+            .expect("scoped flow calculation should use removed-lot evidence");
+
+        assert_eq!(scoped[1].external_inflow_base, Decimal::ZERO);
+        assert_eq!(scoped[1].external_outflow_base, dec!(250));
+        assert_eq!(
+            scoped[1].external_flow_source,
+            ExternalFlowSource::RemovedLotBasisFallback
+        );
+    }
+
+    #[test]
+    fn scoped_flow_pipeline_preserves_same_day_external_flow_and_floors_internal_adjustments() {
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut deposit = create_stored_activity("external-deposit", "acc-in", None);
+        deposit.activity_type = "DEPOSIT".to_string();
+        deposit.activity_date = parse_test_activity_datetime("2026-05-02");
+        deposit.quantity = None;
+        deposit.unit_price = None;
+        deposit.amount = Some(dec!(50));
+        deposit.metadata = None;
+        activity_repository.add_activity(deposit);
+
+        for (suffix, date) in [("same-day", "2026-05-02"), ("floor", "2026-05-03")] {
+            let group_id = format!("internal-{suffix}");
+            let mut transfer_out =
+                create_stored_activity(&format!("out-{suffix}"), "acc-out", None);
+            transfer_out.activity_type = "TRANSFER_OUT".to_string();
+            transfer_out.activity_date = parse_test_activity_datetime(date);
+            transfer_out.amount = Some(dec!(100));
+            transfer_out.source_group_id = Some(group_id.clone());
+            transfer_out.metadata = Some(json!({ "flow": { "is_external": false } }));
+
+            let mut transfer_in = create_stored_activity(&format!("in-{suffix}"), "acc-in", None);
+            transfer_in.activity_type = "TRANSFER_IN".to_string();
+            transfer_in.activity_date = parse_test_activity_datetime(date);
+            transfer_in.amount = Some(dec!(100));
+            transfer_in.source_group_id = Some(group_id);
+            transfer_in.metadata = Some(json!({ "flow": { "is_external": false } }));
+
+            activity_repository.add_activity(transfer_out);
+            activity_repository.add_activity(transfer_in);
+        }
+
+        let mut out_day_two = create_daily_valuation(
+            "acc-out",
+            "2026-05-02",
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        );
+        out_day_two.external_outflow_base = dec!(100);
+        out_day_two.external_flow_source = ExternalFlowSource::ActivityDerived;
+        let mut in_day_two = create_daily_valuation(
+            "acc-in",
+            "2026-05-02",
+            dec!(150),
+            Decimal::ZERO,
+            dec!(150),
+            dec!(150),
+        );
+        in_day_two.external_inflow_base = dec!(150);
+        in_day_two.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut out_day_three = create_daily_valuation(
+            "acc-out",
+            "2026-05-03",
+            dec!(-100),
+            Decimal::ZERO,
+            dec!(-100),
+            dec!(-100),
+        );
+        out_day_three.external_outflow_base = dec!(90);
+        out_day_three.external_flow_source = ExternalFlowSource::ActivityDerived;
+        let mut in_day_three = create_daily_valuation(
+            "acc-in",
+            "2026-05-03",
+            dec!(250),
+            Decimal::ZERO,
+            dec!(250),
+            dec!(250),
+        );
+        in_day_three.external_inflow_base = dec!(90);
+        in_day_three.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let valuation_repository = Arc::new(MockValuationRepository::new(vec![
+            create_daily_valuation(
+                "acc-out",
+                "2026-05-01",
+                dec!(100),
+                Decimal::ZERO,
+                dec!(100),
+                dec!(100),
+            ),
+            out_day_two,
+            out_day_three,
+            create_daily_valuation(
+                "acc-in",
+                "2026-05-01",
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            in_day_two,
+            in_day_three,
+        ]));
+        let account_ids = vec!["acc-out".to_string(), "acc-in".to_string()];
+        let valuation_service = ValuationService::new(
+            Arc::new(RwLock::new("USD".to_string())),
+            valuation_repository,
+            Arc::new(MockSnapshotService),
+            Arc::new(MockQuoteService),
+            Arc::new(MockFxService::new()),
+        )
+        .with_activity_repository(
+            activity_repository,
+            Arc::new(RwLock::new("UTC".to_string())),
+        );
+
+        let scoped = valuation_service
+            .get_historical_valuations_for_accounts(
+                "scope:mixed-flow-days",
+                &account_ids,
+                "USD",
+                Some(NaiveDate::from_ymd_opt(2026, 5, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 3).unwrap()),
+            )
+            .expect("scoped flow calculation should preserve precedence and correction rules");
+
+        assert_eq!(scoped[1].external_inflow_base, dec!(50));
+        assert_eq!(scoped[1].external_outflow_base, Decimal::ZERO);
+        assert_eq!(
+            scoped[1].external_flow_source,
+            ExternalFlowSource::CashAmount
+        );
+        assert_eq!(scoped[2].external_inflow_base, Decimal::ZERO);
+        assert_eq!(scoped[2].external_outflow_base, Decimal::ZERO);
     }
 
     #[tokio::test]

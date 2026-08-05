@@ -105,6 +105,20 @@ pub fn run_migrations(db_path: &str) -> Result<()> {
         }
     }
 
+    // Refresh query planner statistics only when migrations were actually
+    // applied. `run_pending_migrations` returns the list of applied versions;
+    // an empty list means the schema was already current, so running ANALYZE
+    // (which rewrites sqlite_stat1) on every startup would be wasted work.
+    if migration_result
+        .as_ref()
+        .map(|applied| !applied.is_empty())
+        .unwrap_or(false)
+    {
+        connection
+            .batch_execute("ANALYZE;")
+            .unwrap_or_else(|e| warn!("ANALYZE after migration failed: {}", e));
+    }
+
     // Flush WAL to main DB file before pool creation
     connection
         .batch_execute("PRAGMA wal_checkpoint(TRUNCATE);")
@@ -173,6 +187,46 @@ mod migration_tests {
             .get_result::<CountRow>(conn)
             .unwrap()
             .count
+    }
+
+    #[test]
+    fn asset_multiplier_rebuild_clears_only_derived_valuations() {
+        let mut conn = SqliteConnection::establish(":memory:").unwrap();
+        conn.batch_execute(
+            "
+            CREATE TABLE daily_account_valuation (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+            CREATE TABLE holdings_snapshots (
+                id TEXT PRIMARY KEY NOT NULL,
+                source TEXT NOT NULL
+            );
+            INSERT INTO daily_account_valuation (id) VALUES ('valuation1');
+            INSERT INTO holdings_snapshots (id, source) VALUES ('manual1', 'MANUAL_ENTRY');
+            INSERT INTO holdings_snapshots (id, source) VALUES ('broker1', 'BROKER_IMPORTED');
+            ",
+        )
+        .unwrap();
+
+        conn.batch_execute(include_str!(
+            "../../migrations/2026-08-02-000001_reclaim_storage/up.sql"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM daily_account_valuation"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots"
+            ),
+            2
+        );
     }
 
     #[test]
@@ -298,6 +352,262 @@ mod migration_tests {
             1
         );
     }
+
+    #[test]
+    fn reset_derived_read_models_migration_drops_calculated_and_preserves_source() {
+        let mut conn = SqliteConnection::establish(":memory:").unwrap();
+        conn.batch_execute(
+            "
+            PRAGMA foreign_keys = OFF;
+
+            CREATE TABLE accounts (
+                id TEXT PRIMARY KEY NOT NULL,
+                tracking_mode TEXT NOT NULL
+            );
+
+            CREATE TABLE holdings_snapshots (
+                id TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL,
+                source TEXT NOT NULL
+            );
+
+            CREATE TABLE daily_account_valuation (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+
+            CREATE TABLE lot_disposals (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+
+            -- Minimal lots table WITHOUT the new columns; the migration ALTERs
+            -- them in, so this proves the ADD COLUMN statements run.
+            CREATE TABLE lots (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+
+            -- Relational mirror of the snapshot positions. Migrations run with
+            -- foreign_keys OFF, so the migration must delete orphans itself
+            -- rather than relying on ON DELETE CASCADE.
+            CREATE TABLE snapshot_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id TEXT NOT NULL REFERENCES holdings_snapshots(id) ON DELETE CASCADE,
+                asset_id TEXT NOT NULL
+            );
+
+            -- One TRANSACTIONS account (replayed) and one HOLDINGS account
+            -- (source data, not replayed).
+            INSERT INTO accounts (id, tracking_mode) VALUES ('accT', 'TRANSACTIONS');
+            INSERT INTO accounts (id, tracking_mode) VALUES ('accH', 'HOLDINGS');
+
+            -- CALCULATED on a TRANSACTIONS account -> deleted.
+            INSERT INTO holdings_snapshots (id, account_id, source) VALUES ('snapCalcT', 'accT', 'CALCULATED');
+            -- CALCULATED on a HOLDINGS account -> converted to MANUAL_ENTRY (kept).
+            INSERT INTO holdings_snapshots (id, account_id, source) VALUES ('snapCalcH', 'accH', 'CALCULATED');
+            -- Source snapshots -> preserved untouched.
+            INSERT INTO holdings_snapshots (id, account_id, source) VALUES ('snapManual', 'accT', 'MANUAL_ENTRY');
+            INSERT INTO holdings_snapshots (id, account_id, source) VALUES ('snapCsv', 'accT', 'CSV_IMPORT');
+            INSERT INTO holdings_snapshots (id, account_id, source) VALUES ('snapBroker', 'accH', 'BROKER_IMPORTED');
+
+            INSERT INTO daily_account_valuation (id) VALUES ('val1');
+            INSERT INTO lot_disposals (id) VALUES ('disp1');
+            INSERT INTO lots (id) VALUES ('lot1');
+
+            -- Position rows for a snapshot that gets deleted (orphaned), for a
+            -- snapshot that is converted and kept, and for a preserved source
+            -- snapshot.
+            INSERT INTO snapshot_positions (snapshot_id, asset_id) VALUES ('snapCalcT', 'AAPL');
+            INSERT INTO snapshot_positions (snapshot_id, asset_id) VALUES ('snapCalcH', 'AAPL');
+            INSERT INTO snapshot_positions (snapshot_id, asset_id) VALUES ('snapManual', 'AAPL');
+            ",
+        )
+        .unwrap();
+
+        conn.batch_execute(include_str!(
+            "../../migrations/2026-07-04-000001_reset_derived_read_models/up.sql"
+        ))
+        .unwrap();
+
+        // No CALCULATED snapshots remain: the TRANSACTIONS one was deleted and
+        // the HOLDINGS one was converted.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots WHERE source = 'CALCULATED'"
+            ),
+            0
+        );
+        // TRANSACTIONS CALCULATED snapshot deleted outright.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots WHERE id = 'snapCalcT'"
+            ),
+            0
+        );
+        // HOLDINGS CALCULATED snapshot converted to MANUAL_ENTRY, not deleted.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots \
+                 WHERE id = 'snapCalcH' AND source = 'MANUAL_ENTRY'"
+            ),
+            1
+        );
+        // Source snapshots preserved with unchanged source values.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots \
+                 WHERE id = 'snapManual' AND source = 'MANUAL_ENTRY'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots \
+                 WHERE id = 'snapCsv' AND source = 'CSV_IMPORT'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots \
+                 WHERE id = 'snapBroker' AND source = 'BROKER_IMPORTED'"
+            ),
+            1
+        );
+        // Exactly the four non-CALCULATED rows survive.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots"
+            ),
+            4
+        );
+
+        // Generated read models emptied.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM daily_account_valuation"
+            ),
+            0
+        );
+        assert_eq!(
+            count(&mut conn, "SELECT COUNT(*) AS count FROM lot_disposals"),
+            0
+        );
+        assert_eq!(count(&mut conn, "SELECT COUNT(*) AS count FROM lots"), 0);
+
+        // Position rows orphaned by the snapshot delete are removed. Migrations
+        // run with foreign_keys OFF, so no CASCADE fires and the migration must
+        // clean these up explicitly.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM snapshot_positions WHERE snapshot_id = 'snapCalcT'"
+            ),
+            0,
+            "positions of a deleted CALCULATED snapshot must not be left orphaned"
+        );
+        // Rows whose snapshot survived are untouched (converted or preserved).
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM snapshot_positions WHERE snapshot_id = 'snapCalcH'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM snapshot_positions WHERE snapshot_id = 'snapManual'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM snapshot_positions"
+            ),
+            2
+        );
+
+        // Additive account-FX columns were created on lots.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM pragma_table_info('lots') \
+                 WHERE name = 'fx_rate_to_account'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM pragma_table_info('lots') \
+                 WHERE name = 'account_currency'"
+            ),
+            1
+        );
+    }
+
+    /// The full embedded migration chain must apply cleanly on a fresh database.
+    ///
+    /// This is the guard for the `VACUUM` migration: SQLite refuses `VACUUM`
+    /// inside a transaction, and Diesel wraps migrations in one unless the
+    /// migration directory carries `metadata.toml` with
+    /// `run_in_transaction = false`. If that file is missing, renamed, or not
+    /// honored by `embed_migrations!`, this test fails with "cannot VACUUM from
+    /// within a transaction" rather than shipping a migration that bricks
+    /// startup.
+    #[test]
+    fn full_embedded_migration_chain_applies_including_vacuum() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("chain.db");
+        let db_path = db_path.to_str().unwrap();
+
+        run_migrations(db_path).expect("embedded migration chain must apply");
+
+        // Re-running is a no-op: every migration is recorded as applied.
+        run_migrations(db_path).expect("re-running migrations must be a no-op");
+
+        let mut conn = SqliteConnection::establish(db_path).unwrap();
+
+        // The redundant quote index is dropped, while the unique index and the
+        // (asset_id, source, day) index the latest-quote batch query needs both
+        // survive.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM sqlite_master \
+                 WHERE type = 'index' AND name = 'idx_quotes_asset_day'"
+            ),
+            0,
+            "the redundant (asset_id, day) prefix index must be dropped"
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'index' \
+                 AND name IN ('uq_quotes_asset_day_source', 'idx_quotes_asset_source_day')"
+            ),
+            2,
+            "the unique index and the source-ordered index must be preserved"
+        );
+
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM __diesel_schema_migrations \
+                 WHERE version = '20260802000001'"
+            ),
+            1,
+            "the VACUUM migration must be recorded as applied exactly once"
+        );
+    }
 }
 
 fn create_backup_filename(timestamp: chrono::DateTime<Local>) -> String {
@@ -348,11 +658,11 @@ pub fn create_backup_path(app_data_dir: &str) -> Result<String> {
 }
 
 pub fn backup_database_to_file(app_data_dir: &str, backup_path: &str) -> Result<()> {
-    let db_path = get_db_path(app_data_dir);
+    let source_db_path = &get_db_path(app_data_dir);
 
     info!(
         "Creating database backup from {} to {}",
-        db_path, backup_path
+        source_db_path, backup_path
     );
 
     if let Some(parent) = Path::new(backup_path).parent() {
@@ -369,7 +679,7 @@ pub fn backup_database_to_file(app_data_dir: &str, backup_path: &str) -> Result<
         })?;
     }
 
-    let source_conn = RusqliteConnection::open(&db_path).map_err(|e| {
+    let source_conn = RusqliteConnection::open(source_db_path).map_err(|e| {
         error!("Failed to open source database for backup: {}", e);
         Error::Database(DatabaseError::BackupFailed(e.to_string()))
     })?;

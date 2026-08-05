@@ -454,6 +454,22 @@ mod tests {
     }
 
     #[test]
+    fn test_plan_portfolio_job_device_sync_pull_complete_recalculates_all_accounts() {
+        let events = vec![DomainEvent::device_sync_pull_complete()];
+
+        let config = plan_portfolio_job(&events, "UTC").expect("device sync should plan a job");
+
+        assert!(config.account_ids.is_none());
+        assert!(config.since_date.is_none());
+        assert!(matches!(config.snapshot_mode, SnapshotRecalcMode::Full));
+        assert!(matches!(config.valuation_mode, ValuationRecalcMode::Full));
+        assert!(matches!(
+            config.market_sync_mode,
+            MarketSyncMode::Incremental { asset_ids: None }
+        ));
+    }
+
+    #[test]
     fn test_plan_portfolio_job_asset_classifications_changed_does_not_trigger_recalc() {
         let events = vec![DomainEvent::asset_classifications_changed(
             vec!["asset-1".to_string()],

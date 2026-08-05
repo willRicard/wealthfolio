@@ -292,6 +292,13 @@ pub struct NoQuoteReason {
     pub message: String,
 }
 
+/// Request-local assets and sparse quotes used by transfer economics.
+#[derive(Debug, Clone, Default)]
+pub struct SparseAssetMarketFacts {
+    pub assets_by_id: HashMap<String, Asset>,
+    pub quotes_by_request: HashMap<(String, NaiveDate), Quote>,
+}
+
 /// Unified trait for all quote operations.
 #[async_trait]
 pub trait QuoteServiceTrait: Send + Sync {
@@ -311,6 +318,12 @@ pub trait QuoteServiceTrait: Send + Sync {
         symbols: &[String],
         as_of: chrono::NaiveDate,
     ) -> Result<HashMap<String, Quote>>;
+
+    /// Loads each requested asset once and resolves only the requested quote dates.
+    fn get_sparse_asset_market_facts(
+        &self,
+        requests: &[(String, NaiveDate)],
+    ) -> Result<SparseAssetMarketFacts>;
 
     /// Get latest quotes with backend-computed staleness metadata.
     fn get_latest_quotes_snapshot(
@@ -961,6 +974,49 @@ where
         }
 
         Ok(quotes)
+    }
+
+    fn get_sparse_asset_market_facts(
+        &self,
+        requests: &[(String, NaiveDate)],
+    ) -> Result<SparseAssetMarketFacts> {
+        let mut requests: Vec<(String, NaiveDate)> = requests
+            .iter()
+            .filter(|(asset_id, _)| !asset_id.is_empty())
+            .cloned()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        requests.sort();
+
+        if requests.is_empty() {
+            return Ok(SparseAssetMarketFacts::default());
+        }
+
+        let mut asset_ids: Vec<String> = requests
+            .iter()
+            .map(|(asset_id, _)| asset_id.clone())
+            .collect();
+        asset_ids.dedup();
+
+        let assets = self.asset_repo.list_by_asset_ids(&asset_ids)?;
+        let assets_by_id: HashMap<String, Asset> = assets
+            .into_iter()
+            .map(|asset| (asset.id.clone(), asset))
+            .collect();
+        let mut quotes_by_request = self
+            .quote_store
+            .get_latest_quotes_for_asset_dates(&requests)?;
+        for ((asset_id, _), quote) in quotes_by_request.iter_mut() {
+            if let Some(asset) = assets_by_id.get(asset_id) {
+                reconcile_quote_currency(quote, asset);
+            }
+        }
+
+        Ok(SparseAssetMarketFacts {
+            assets_by_id,
+            quotes_by_request,
+        })
     }
 
     fn get_latest_quotes_snapshot(
@@ -2332,7 +2388,8 @@ pub(crate) fn append_historical_seed_quotes<Q: QuoteStore>(
         .collect();
 
     // For symbols without a pre-start seed in the lookback window, fetch the
-    // latest quote before start. Preserves manual quote carry-forward when stale.
+    // latest quote before start regardless of source. This preserves general
+    // historical carry-forward, including stale manual quotes.
     for symbol in symbols {
         if symbols_with_seed_quotes.contains(symbol) {
             continue;
@@ -2460,6 +2517,7 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal_macros::dec;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -3087,6 +3145,7 @@ mod tests {
         assets: HashMap<String, Asset>,
         reactivated: Arc<Mutex<Vec<String>>>,
         deactivated: Arc<Mutex<Vec<String>>>,
+        list_by_asset_ids_calls: Arc<AtomicUsize>,
     }
 
     #[async_trait]
@@ -3123,6 +3182,7 @@ mod tests {
         }
 
         fn list_by_asset_ids(&self, asset_ids: &[String]) -> Result<Vec<Asset>> {
+            self.list_by_asset_ids_calls.fetch_add(1, Ordering::Relaxed);
             Ok(asset_ids
                 .iter()
                 .filter_map(|asset_id| self.assets.get(asset_id).cloned())
@@ -3561,6 +3621,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sparse_market_facts_load_assets_once_for_all_requested_dates() -> Result<()> {
+        let asset_id = "asset_1".to_string();
+        let list_by_asset_ids_calls = Arc::new(AtomicUsize::new(0));
+        let asset = Asset {
+            id: asset_id.clone(),
+            kind: AssetKind::Investment,
+            quote_mode: QuoteMode::Market,
+            quote_ccy: "USD".to_string(),
+            instrument_type: Some(InstrumentType::Option),
+            ..Default::default()
+        };
+        let asset_repo = PositionStatusAssetRepository {
+            assets: HashMap::from([(asset_id.clone(), asset)]),
+            reactivated: Arc::new(Mutex::new(Vec::new())),
+            deactivated: Arc::new(Mutex::new(Vec::new())),
+            list_by_asset_ids_calls: Arc::clone(&list_by_asset_ids_calls),
+        };
+        let service = QuoteService::new(
+            Arc::new(NoopQuoteStore),
+            Arc::new(MockSyncStateStore {
+                provider_sync_stats: vec![],
+                with_errors: vec![],
+                states: Arc::new(Mutex::new(HashMap::new())),
+            }),
+            Arc::new(MockProviderSettingsStore { providers: vec![] }),
+            Arc::new(asset_repo),
+            Arc::new(NoopActivityRepository),
+            Arc::new(MockSecretStore),
+        )
+        .await?;
+
+        let facts = service.get_sparse_asset_market_facts(&[
+            (
+                asset_id.clone(),
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+            ),
+            (
+                asset_id.clone(),
+                NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            ),
+        ])?;
+
+        assert_eq!(list_by_asset_ids_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(facts.assets_by_id.len(), 1);
+        assert!(facts.assets_by_id.contains_key(&asset_id));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_update_position_status_creates_sync_state_for_open_inactive_asset() {
         let asset_id = "asset_1".to_string();
         let asset = Asset {
@@ -3576,6 +3685,7 @@ mod tests {
             assets: HashMap::from([(asset_id.clone(), asset)]),
             reactivated: Arc::clone(&reactivated),
             deactivated: Arc::clone(&deactivated),
+            list_by_asset_ids_calls: Arc::new(AtomicUsize::new(0)),
         };
         let states = Arc::new(Mutex::new(HashMap::new()));
         let sync_state_store = Arc::new(MockSyncStateStore {
@@ -3627,6 +3737,7 @@ mod tests {
             assets: HashMap::from([(asset_id.clone(), asset)]),
             reactivated: Arc::clone(&reactivated),
             deactivated: Arc::new(Mutex::new(Vec::new())),
+            list_by_asset_ids_calls: Arc::new(AtomicUsize::new(0)),
         };
         let states = Arc::new(Mutex::new(HashMap::new()));
         let service = QuoteService::new(
@@ -3688,6 +3799,7 @@ mod tests {
             assets: HashMap::from([(asset_id.clone(), asset)]),
             reactivated: Arc::new(Mutex::new(Vec::new())),
             deactivated: Arc::new(Mutex::new(Vec::new())),
+            list_by_asset_ids_calls: Arc::new(AtomicUsize::new(0)),
         };
         let service = QuoteService::new(
             Arc::new(NoopQuoteStore),
@@ -3752,6 +3864,7 @@ mod tests {
             assets: HashMap::from([(asset_id.clone(), asset)]),
             reactivated: Arc::new(Mutex::new(Vec::new())),
             deactivated: Arc::clone(&deactivated),
+            list_by_asset_ids_calls: Arc::new(AtomicUsize::new(0)),
         };
         let service = QuoteService::new(
             Arc::new(NoopQuoteStore),

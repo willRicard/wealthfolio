@@ -199,6 +199,16 @@ mod tests {
             Ok(HashMap::new())
         }
 
+        fn get_sparse_asset_market_facts(
+            &self,
+            _requests: &[(String, NaiveDate)],
+        ) -> Result<crate::quotes::SparseAssetMarketFacts> {
+            Err(Error::Unexpected(
+                "MockMarketDataService::get_sparse_asset_market_facts should not be called"
+                    .to_string(),
+            ))
+        }
+
         fn get_latest_quotes_snapshot(
             &self,
             asset_ids: &[String],

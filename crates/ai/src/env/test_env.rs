@@ -51,7 +51,8 @@ use wealthfolio_core::{
     },
     quotes::{
         LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport, QuoteServiceTrait,
-        QuoteSyncState, SymbolSearchResult, SymbolSyncPlan, SyncMode, SyncResult,
+        QuoteSyncState, SparseAssetMarketFacts, SymbolSearchResult, SymbolSyncPlan, SyncMode,
+        SyncResult,
     },
     secrets::SecretStore,
     settings::{Settings, SettingsServiceTrait, SettingsUpdate},
@@ -1076,6 +1077,15 @@ impl QuoteServiceTrait for MockQuoteService {
         _as_of: chrono::NaiveDate,
     ) -> CoreResult<HashMap<String, Quote>> {
         Ok(HashMap::new())
+    }
+
+    fn get_sparse_asset_market_facts(
+        &self,
+        _requests: &[(String, NaiveDate)],
+    ) -> CoreResult<SparseAssetMarketFacts> {
+        Err(CoreError::Unexpected(
+            "MockQuoteService::get_sparse_asset_market_facts should not be called".to_string(),
+        ))
     }
 
     fn get_latest_quotes_snapshot(
