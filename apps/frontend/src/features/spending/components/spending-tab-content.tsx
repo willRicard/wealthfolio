@@ -371,10 +371,11 @@ export default function SpendingTabContent() {
     isLoading,
     isError: reportErrored,
     refetch: refetchReport,
-  } = useSpendingReport(reportReq);
+  } = useSpendingReport(reportReq, true, baseCurrency);
   const { data: priorReport, isLoading: isPriorLoading } = useSpendingReport(
     priorReportReq,
     /* enabled */ priorRangeForReport !== undefined,
+    baseCurrency,
   );
   const { data: activities = [], isError: activitiesErrored } = useCashActivities(
     {
@@ -439,7 +440,7 @@ export default function SpendingTabContent() {
     () => rangeToReportRequest(budgetMonthRange, appTimezone),
     [budgetMonthRange, appTimezone],
   );
-  const { data: monthReport } = useSpendingReport(monthReportReq);
+  const { data: monthReport } = useSpendingReport(monthReportReq, true, baseCurrency);
   const budgetMonthActivityRange = useMemo(
     () => ({
       from: formatDateISO(budgetMonthRange.from),
@@ -469,7 +470,7 @@ export default function SpendingTabContent() {
       endDate: zonedCalendarDateBoundaryToDate(historyEnd, "end", appTimezone).toISOString(),
     };
   }, [budgetMonthKey, appTimezone, todayParts]);
-  const { data: historyReport } = useSpendingReport(historyReportReq);
+  const { data: historyReport } = useSpendingReport(historyReportReq, true, baseCurrency);
 
   const historicalDailyAvg = useMemo(() => {
     const total = historyReport?.current.outflow ?? 0;
@@ -488,6 +489,7 @@ export default function SpendingTabContent() {
   // activity's currency (the pre-FX behavior) would mislabel multi-currency
   // accounts. Single-currency users see the same number either way.
   const currency = baseCurrency;
+  const whereItWentCurrency = report?.currency ?? currency;
   const dashboardInsightHref = useMemo(() => {
     const preferDashboardPeriod = shouldPreferDashboardPeriod({
       persistedInsightPeriod,
@@ -1037,7 +1039,7 @@ export default function SpendingTabContent() {
                   <CategoryTreemapMono
                     rows={categoryRows}
                     total={totalSpending + totalSaved}
-                    currency={currency}
+                    currency={whereItWentCurrency}
                     themeColor={theme.deep}
                     hasNoIncludedAccounts={hasNoIncludedAccounts}
                     savingsHref={dashboardInsightHref.cashflow}
@@ -1046,7 +1048,7 @@ export default function SpendingTabContent() {
                   <CategoryRankedBar
                     rows={categoryRows}
                     total={totalSpending + totalSaved}
-                    currency={currency}
+                    currency={whereItWentCurrency}
                     themeColor={theme.deep}
                     groupRows={budget?.computed.groupRows ?? []}
                     hasNoIncludedAccounts={hasNoIncludedAccounts}
