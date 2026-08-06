@@ -151,6 +151,8 @@ impl CashActivityService {
                 let transfer_link_status = transfer_link_status_for(&a, &transfer_link_resolution);
                 CashActivity {
                     activity: a,
+                    base_amount: None,
+                    base_currency: None,
                     cash_flow_bucket,
                     assignments,
                     splits,
@@ -417,6 +419,8 @@ impl CashActivityService {
                 let transfer_link_status = transfer_link_status_for(&a, &transfer_link_resolution);
                 CashActivity {
                     activity: a,
+                    base_amount: None,
+                    base_currency: None,
                     cash_flow_bucket,
                     assignments,
                     splits,
@@ -480,6 +484,8 @@ impl CashActivityService {
                     transfer_link_status_for(&activity, &transfer_link_resolution);
                 CashActivity {
                     activity,
+                    base_amount: None,
+                    base_currency: None,
                     cash_flow_bucket,
                     assignments,
                     splits,
@@ -805,6 +811,39 @@ impl CashActivityService {
         }
 
         Ok(activity)
+    }
+}
+
+/// Populate application-base display amounts without replacing the native
+/// activity amount/currency. Failed conversions stay unset so UI callers can
+/// fall back to the honest native value.
+pub fn populate_base_amounts(
+    activities: &mut [CashActivity],
+    fx: &dyn wealthfolio_core::fx::FxServiceTrait,
+    base_currency: &str,
+    as_of: chrono::NaiveDate,
+) {
+    for item in activities {
+        let Some(amount) = item.activity.amount else {
+            continue;
+        };
+        let from_currency = item.activity.currency.as_str();
+        if from_currency.is_empty() {
+            continue;
+        }
+        match fx.convert_currency_for_date(amount, from_currency, base_currency, as_of) {
+            Ok(converted) => {
+                item.base_amount = Some(converted);
+                item.base_currency = Some(base_currency.to_string());
+            }
+            Err(error) => log::warn!(
+                "cash activity FX conversion {}→{} on {} failed ({}); retaining native display",
+                from_currency,
+                base_currency,
+                as_of,
+                error,
+            ),
+        }
     }
 }
 

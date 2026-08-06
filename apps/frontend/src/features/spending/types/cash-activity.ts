@@ -74,6 +74,9 @@ export interface CashActivitySearchRequest {
  * the spending feature.
  */
 export interface CashActivity extends Activity {
+  /** Amount converted by the list API to the application's base currency. */
+  baseAmount?: string | null;
+  baseCurrency?: string | null;
   cashFlowBucket: CashFlowBucket;
   assignments: ActivityTaxonomyAssignment[];
   splits: ActivitySplit[];
