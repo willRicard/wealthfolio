@@ -16,7 +16,8 @@ use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
 };
 use wealthfolio_spending::cash_activities::{
-    CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
+    populate_base_amounts, CashActivity, CashActivityFilter, CashActivitySearchRequest,
+    CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, ImportPresetResult, NewCategorizationRule,
@@ -137,11 +138,26 @@ pub async fn list_cash_activities(
     if !spending_enabled(&state).await? {
         return Ok(Vec::new());
     }
-    state
+    let filter = filter.unwrap_or_default();
+    let fx_as_of = filter
+        .end_date
+        .as_deref()
+        .and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok())
+        .map(|date| date.date_naive())
+        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let mut activities = state
         .cash_activity_service()
-        .list(filter.unwrap_or_default())
+        .list(filter)
         .await
-        .map_err(|e| format!("Failed to list cash activities: {}", e))
+        .map_err(|e| format!("Failed to list cash activities: {}", e))?;
+    let base_currency = state.get_base_currency();
+    populate_base_amounts(
+        &mut activities,
+        state.fx_service().as_ref(),
+        &base_currency,
+        fx_as_of,
+    );
+    Ok(activities)
 }
 
 #[tauri::command]

@@ -21,7 +21,8 @@ use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
 };
 use wealthfolio_spending::cash_activities::{
-    CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
+    populate_base_amounts, CashActivity, CashActivityFilter, CashActivitySearchRequest,
+    CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
@@ -122,7 +123,20 @@ async fn list_cash_activities(
         return Ok(Json(Vec::new()));
     }
     let filter = parse_cash_activity_filter(raw_query)?;
-    let activities = state.cash_activity_service.list(filter).await?;
+    let fx_as_of = filter
+        .end_date
+        .as_deref()
+        .and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok())
+        .map(|date| date.date_naive())
+        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let mut activities = state.cash_activity_service.list(filter).await?;
+    let base_currency = state.base_currency.read().unwrap().clone();
+    populate_base_amounts(
+        &mut activities,
+        state.fx_service.as_ref(),
+        &base_currency,
+        fx_as_of,
+    );
     Ok(Json(activities))
 }
 

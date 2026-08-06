@@ -10,7 +10,7 @@ pub use model::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
     CashActivitySortField, CashActivityStatusFilter, SortDirection,
 };
-pub use service::CashActivityService;
+pub use service::{populate_base_amounts, CashActivityService};
 pub use traits::CashActivityServiceTrait;
 
 /// The activity_type values considered spending activities by the spending module.

@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::activity_assignments::ActivityTaxonomyAssignment;
@@ -124,6 +125,16 @@ pub enum TransferLinkStatus {
 pub struct CashActivity {
     #[serde(flatten)]
     pub activity: Activity,
+    /// Activity amount converted to the application's base currency for
+    /// summary-card display. Populated by the list API; search results retain
+    /// native amounts and leave this unset.
+    #[serde(default)]
+    #[serde(with = "wealthfolio_core::utils::decimal_serde::decimal_serde_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_amount: Option<Decimal>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_currency: Option<String>,
     /// Accounting bucket for this activity. Categories label the bucket; they do
     /// not move the activity between Spending, Income, Saving, and Neutral.
     pub cash_flow_bucket: CashFlowBucket,

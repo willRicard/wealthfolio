@@ -5,11 +5,11 @@ import { useTranslation } from "react-i18next";
 
 import { DashboardCard } from "@/components/dashboard-card";
 import { QueryKeys } from "@/lib/query-keys";
-import type { Activity } from "@/lib/types";
 import { cn, formatDateISO } from "@/lib/utils";
 import { PrivacyAmount } from "@wealthfolio/ui";
 
 import { getActivityAssignments } from "../adapters/cash-activities";
+import type { CashActivity } from "../types/cash-activity";
 import {
   getActivitySpendingAmount,
   getEffectiveCashActivityType,
@@ -26,7 +26,7 @@ export function RecentActivityCard({
   currency,
   uncategorizedCount = 0,
 }: {
-  activities: Activity[];
+  activities: CashActivity[];
   accountTypeById?: Map<string, string>;
   categoriesMeta: CategoryMetaMap;
   currency: string;
@@ -150,8 +150,12 @@ export function RecentActivityCard({
                 accountTypeById?.get(a.accountId),
               );
               const isOutflow = spendingAmount > 0;
-              const amount =
+              const nativeAmount =
                 spendingAmount === 0 ? parseFloat(a.amount ?? "0") || 0 : Math.abs(spendingAmount);
+              const parsedBaseAmount = parseFloat(a.baseAmount ?? "");
+              const hasBaseAmount = Number.isFinite(parsedBaseAmount);
+              const amount = hasBaseAmount ? Math.abs(parsedBaseAmount) : nativeAmount;
+              const displayCurrency = hasBaseAmount ? (a.baseCurrency ?? currency) : a.currency;
               const badge = badgeByActivityId.get(a.id);
               const needsReview = a.needsReview || (isOutflow && !badge);
 
@@ -194,7 +198,7 @@ export function RecentActivityCard({
                     )}
                   >
                     {isOutflow ? "−" : "+"}
-                    <PrivacyAmount value={amount} currency={currency} />
+                    <PrivacyAmount value={amount} currency={displayCurrency} />
                   </div>
                 </Link>
               );
