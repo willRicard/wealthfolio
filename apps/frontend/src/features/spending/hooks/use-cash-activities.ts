@@ -31,9 +31,9 @@ import type {
  * single round-trip — see the service doc-comment for why the return shape
  * matches `search()` items.
  */
-export function useCashActivities(filter?: CashActivityFilter) {
+export function useCashActivities(filter?: CashActivityFilter, baseCurrency?: string) {
   return useQuery<CashActivity[], Error>({
-    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, filter ?? null],
+    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, filter ?? null, baseCurrency ?? null],
     queryFn: () => listCashActivities(filter),
   });
 }

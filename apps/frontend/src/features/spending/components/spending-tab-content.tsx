@@ -376,10 +376,13 @@ export default function SpendingTabContent() {
     priorReportReq,
     /* enabled */ priorRangeForReport !== undefined,
   );
-  const { data: activities = [], isError: activitiesErrored } = useCashActivities({
-    startDate: reportReq.startDate,
-    endDate: reportReq.endDate,
-  });
+  const { data: activities = [], isError: activitiesErrored } = useCashActivities(
+    {
+      startDate: reportReq.startDate,
+      endDate: reportReq.endDate,
+    },
+    baseCurrency,
+  );
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
   const { data: budget, isError: budgetErrored } = useBudget();
   const todayParts = useMemo(() => getZonedDateParts(new Date(), appTimezone), [appTimezone]);

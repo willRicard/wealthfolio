@@ -823,6 +823,7 @@ pub fn populate_base_amounts(
     base_currency: &str,
     as_of: chrono::NaiveDate,
 ) {
+    let mut converter_refreshed = false;
     for item in activities {
         let Some(amount) = item.activity.amount else {
             continue;
@@ -831,16 +832,39 @@ pub fn populate_base_amounts(
         if from_currency.is_empty() {
             continue;
         }
-        match fx.convert_currency_for_date(amount, from_currency, base_currency, as_of) {
+        let convert = || {
+            fx.convert_currency_for_date(amount, from_currency, base_currency, as_of)
+                .or_else(|dated_error| {
+                    log::warn!(
+                    "cash activity dated FX conversion {}→{} on {} failed ({}); trying latest rate",
+                    from_currency,
+                    base_currency,
+                    as_of,
+                    dated_error,
+                );
+                    fx.convert_currency(amount, from_currency, base_currency)
+                })
+        };
+        let mut converted = convert();
+        if converted.is_err() && !converter_refreshed {
+            converter_refreshed = true;
+            match fx.initialize() {
+                Ok(()) => converted = convert(),
+                Err(error) => log::warn!(
+                    "cash activity FX cache refresh failed ({}); retaining native display if retry is unavailable",
+                    error,
+                ),
+            }
+        }
+        match converted {
             Ok(converted) => {
                 item.base_amount = Some(converted);
                 item.base_currency = Some(base_currency.to_string());
             }
             Err(error) => log::warn!(
-                "cash activity FX conversion {}→{} on {} failed ({}); retaining native display",
+                "cash activity FX conversion {}→{} failed ({}); retaining native display",
                 from_currency,
                 base_currency,
-                as_of,
                 error,
             ),
         }
@@ -1031,6 +1055,7 @@ mod tests {
         ActivityUpsert, BulkUpsertResult, ImportMapping, ImportTemplate, IncomeData, NewActivity,
         Sort,
     };
+    use wealthfolio_core::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
     use wealthfolio_core::limits::ContributionActivity;
 
     use super::*;
@@ -1075,6 +1100,123 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
+    }
+
+    #[derive(Default)]
+    struct RefreshingFx {
+        initialized: Mutex<bool>,
+    }
+
+    type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
+
+    #[async_trait]
+    impl FxServiceTrait for RefreshingFx {
+        fn initialize(&self) -> CoreResult<()> {
+            *self.initialized.lock().unwrap() = true;
+            Ok(())
+        }
+
+        fn get_historical_rates(&self, _: &str, _: &str, _: i64) -> CoreResult<Vec<ExchangeRate>> {
+            unimplemented!()
+        }
+
+        fn get_latest_exchange_rate(&self, _: &str, _: &str) -> CoreResult<Decimal> {
+            unimplemented!()
+        }
+
+        fn get_exchange_rate_for_date(
+            &self,
+            _: &str,
+            _: &str,
+            _: chrono::NaiveDate,
+        ) -> CoreResult<Decimal> {
+            unimplemented!()
+        }
+
+        fn convert_currency(&self, _: Decimal, from: &str, to: &str) -> CoreResult<Decimal> {
+            assert_eq!((from, to), ("JPY", "USD"));
+            Err(
+                wealthfolio_core::fx::FxError::RateNotFound("latest rate unavailable".into())
+                    .into(),
+            )
+        }
+
+        fn convert_currency_for_date(
+            &self,
+            amount: Decimal,
+            from: &str,
+            to: &str,
+            _: chrono::NaiveDate,
+        ) -> CoreResult<Decimal> {
+            assert_eq!((from, to), ("JPY", "USD"));
+            if *self.initialized.lock().unwrap() {
+                Ok(amount / Decimal::from(100))
+            } else {
+                Err(wealthfolio_core::fx::FxError::RateNotFound("stale FX cache".into()).into())
+            }
+        }
+
+        fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
+            unimplemented!()
+        }
+
+        async fn add_exchange_rate(&self, _: NewExchangeRate) -> CoreResult<ExchangeRate> {
+            unimplemented!()
+        }
+
+        async fn update_exchange_rate(
+            &self,
+            _: &str,
+            _: &str,
+            _: Decimal,
+        ) -> CoreResult<ExchangeRate> {
+            unimplemented!()
+        }
+
+        async fn delete_exchange_rate(&self, _: &str) -> CoreResult<()> {
+            unimplemented!()
+        }
+
+        async fn register_currency_pair(&self, _: &str, _: &str) -> CoreResult<()> {
+            unimplemented!()
+        }
+
+        async fn register_currency_pair_manual(&self, _: &str, _: &str) -> CoreResult<()> {
+            unimplemented!()
+        }
+
+        async fn ensure_fx_pairs(&self, _: Vec<(String, String)>) -> CoreResult<()> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn populate_base_amounts_refreshes_fx_cache_and_serializes_display_fields() {
+        let mut native = activity("WITHDRAWAL");
+        native.currency = "JPY".to_string();
+        let mut activities = vec![CashActivity {
+            activity: native,
+            base_amount: None,
+            base_currency: None,
+            cash_flow_bucket: CashFlowBucket::Spending,
+            assignments: Vec::new(),
+            splits: Vec::new(),
+            event_id: None,
+            transfer_link_status: None,
+        }];
+
+        populate_base_amounts(
+            &mut activities,
+            &RefreshingFx::default(),
+            "USD",
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 7).unwrap(),
+        );
+
+        assert_eq!(activities[0].base_amount, Some(Decimal::ONE));
+        assert_eq!(activities[0].base_currency.as_deref(), Some("USD"));
+        let json = serde_json::to_value(&activities[0]).unwrap();
+        assert_eq!(json["baseAmount"], "1");
+        assert_eq!(json["baseCurrency"], "USD");
     }
 
     #[derive(Default)]
