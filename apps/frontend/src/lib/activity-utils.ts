@@ -49,6 +49,16 @@ export const isCashActivity = (activityType: string): boolean => {
   return !(SYMBOL_REQUIRED_TYPES as readonly string[]).includes(activityType);
 };
 
+/** Whether an activity can explicitly cross the tracked-account performance boundary. */
+export const supportsPerformanceBoundary = (activityType?: string | null): boolean => {
+  const normalizedActivityType = activityType?.trim().toUpperCase();
+  return (
+    normalizedActivityType === ActivityType.CREDIT ||
+    normalizedActivityType === ActivityType.TRANSFER_IN ||
+    normalizedActivityType === ActivityType.TRANSFER_OUT
+  );
+};
+
 /**
  * Determines if an activity is an income activity based on its type
  * @param activityType The activity type to check

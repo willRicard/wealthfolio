@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@wealthfolio/ui/components/ui/button";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
-import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 
 import { checkHoldingsImport } from "@/adapters";
 import { useImportContext } from "../context";
-import { setParsedData, setHoldingsCheckPassed } from "../context/import-actions";
+import { setParsedData, setHoldingsCheckPassed, setIsValidating } from "../context/import-actions";
 import { ImportAlert } from "../components/import-alert";
 import { HoldingsFormat } from "./holdings-mapping-step";
 import {
@@ -14,6 +14,7 @@ import {
   type HoldingsRowResolution,
   parseDateToYMD,
   parseHoldingsSnapshots,
+  parseHoldingsSnapshotsForValidation,
   parseNumericValue,
   type ParseOptions,
 } from "../utils/holdings-import-utils";
@@ -148,6 +149,20 @@ export function HoldingsReviewStep() {
     [headers, parsedRows, fieldMappings, parseOptions, symbolMappings, rowResolutions],
   );
 
+  const validationSnapshots = useMemo(
+    () =>
+      parseHoldingsSnapshotsForValidation(
+        headers,
+        parsedRows,
+        fieldMappings,
+        parseOptions,
+        symbolMappings,
+        undefined,
+        rowResolutions,
+      ),
+    [headers, parsedRows, fieldMappings, parseOptions, symbolMappings, rowResolutions],
+  );
+
   const totalPositions = snapshots.reduce((sum, s) => sum + s.positions.length, 0);
   const totalCashEntries = snapshots.reduce(
     (sum, s) => sum + Object.keys(s.cashBalances).length,
@@ -156,41 +171,58 @@ export function HoldingsReviewStep() {
 
   // Backend check state
   const [checkResult, setCheckResult] = useState<CheckHoldingsImportResult | null>(null);
-  const [checkLoading, setCheckLoading] = useState(false);
+  const [checkLoading, setCheckLoading] = useState(
+    () => Boolean(accountId) && validationSnapshots.length > 0,
+  );
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [checkRetryRevision, setCheckRetryRevision] = useState(0);
 
   useEffect(() => {
-    if (!accountId || snapshots.length === 0) {
+    if (!accountId || validationSnapshots.length === 0) {
+      setCheckLoading(false);
+      setCheckFailed(false);
+      setCheckResult(null);
       dispatch(setHoldingsCheckPassed(false));
+      dispatch(setIsValidating(false));
       return;
     }
 
     let cancelled = false;
+    setCheckResult(null);
+    setCheckFailed(false);
     setCheckLoading(true);
+    dispatch(setIsValidating(true));
     dispatch(setHoldingsCheckPassed(false));
-    checkHoldingsImport(accountId, snapshots)
+    checkHoldingsImport(accountId, validationSnapshots)
       .then((result) => {
         if (cancelled) return;
         setCheckResult(result);
+        setCheckFailed(false);
 
-        // Assets are already resolved in the asset review step,
-        // so only validation errors (bad dates, quantities) block progress.
-        dispatch(setHoldingsCheckPassed(result.validationErrors.length === 0));
+        // Assets are already resolved in the asset review step. A mixed-date
+        // import can continue when at least one complete snapshot group is valid.
+        dispatch(setHoldingsCheckPassed(result.validSnapshotDates.length > 0));
       })
       .catch(() => {
         if (!cancelled) {
           setCheckResult(null);
+          setCheckFailed(true);
           dispatch(setHoldingsCheckPassed(false));
         }
       })
       .finally(() => {
-        if (!cancelled) setCheckLoading(false);
+        if (!cancelled) {
+          setCheckLoading(false);
+          dispatch(setIsValidating(false));
+        }
       });
 
     return () => {
       cancelled = true;
+      dispatch(setIsValidating(false));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, snapshots]);
+  }, [accountId, validationSnapshots, checkRetryRevision]);
 
   // Handle data changes from the grid (quantity, avgCost, currency edits)
   const handleDataChange = useCallback(
@@ -250,10 +282,42 @@ export function HoldingsReviewStep() {
           className="mb-0"
         />
         {checkLoading ? (
-          <Skeleton className="h-[60px] rounded-lg" />
-        ) : checkResult?.validationErrors.length ? (
+          <div role="status" aria-live="polite">
+            <ImportAlert
+              variant="info"
+              size="sm"
+              title={t("activity:import.holdings.validating")}
+              description={t("activity:import.holdings.validatingRows", {
+                count: holdingsRows.length,
+              })}
+              icon={Icons.Spinner}
+              iconClassName="animate-spin"
+              className="mb-0"
+            />
+          </div>
+        ) : checkFailed ? (
           <ImportAlert
             variant="destructive"
+            size="sm"
+            title={t("activity:import.holdings.validationFailed")}
+            description={t("activity:import.holdings.validationFailedDescription")}
+            icon={Icons.AlertTriangle}
+            className="mb-0"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 h-7"
+              onClick={() => setCheckRetryRevision((revision) => revision + 1)}
+            >
+              <Icons.RefreshCw className="mr-2 h-3.5 w-3.5" />
+              {t("activity:import.validationAlert.retry")}
+            </Button>
+          </ImportAlert>
+        ) : checkResult?.validationErrors.length ? (
+          <ImportAlert
+            variant={checkResult.validSnapshotDates.length > 0 ? "warning" : "destructive"}
             size="sm"
             title={t("activity:import.holdings.validationErrors")}
             description={t("activity:import.holdings.validationErrorsCount", {

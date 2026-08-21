@@ -367,6 +367,71 @@ describe("Form Schemas Validation", () => {
         expect(result.error.issues[0].message).toBe("Amount must be greater than 0.");
       }
     });
+
+    it("accepts a cash dividend edit with stored quantity/unitPrice of 0", () => {
+      // Regression: cash records persist quantity=0/unitPrice=0; editing them
+      // must not fail validation on these hidden fields.
+      const result = dividendFormSchema.safeParse({
+        accountId: "acc-123",
+        symbol: "AAPL",
+        activityDate: new Date(),
+        amount: 25.5,
+        quantity: 0,
+        unitPrice: 0,
+        subtype: null,
+        currency: "USD",
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it("requires a positive quantity for asset-backed dividends", () => {
+      const base = {
+        accountId: "acc-123",
+        symbol: "AAPL",
+        activityDate: new Date(),
+        amount: 25.5,
+        unitPrice: 150,
+        subtype: ACTIVITY_SUBTYPES.DRIP,
+        currency: "USD",
+      };
+
+      const zeroQuantity = dividendFormSchema.safeParse({ ...base, quantity: 0 });
+      expect(zeroQuantity.success).toBe(false);
+      if (!zeroQuantity.success) {
+        expect(zeroQuantity.error.issues.map((issue) => issue.message)).toContain(
+          "Received quantity is required.",
+        );
+      }
+
+      const negativeQuantity = dividendFormSchema.safeParse({ ...base, quantity: -1 });
+      expect(negativeQuantity.success).toBe(false);
+      if (!negativeQuantity.success) {
+        expect(negativeQuantity.error.issues.map((issue) => issue.message)).toContain(
+          "Received quantity must be greater than 0.",
+        );
+      }
+    });
+
+    it("rejects a negative FMV per unit for asset-backed dividends", () => {
+      const result = dividendFormSchema.safeParse({
+        accountId: "acc-123",
+        symbol: "AAPL",
+        activityDate: new Date(),
+        amount: 25.5,
+        quantity: 2,
+        unitPrice: -150,
+        subtype: ACTIVITY_SUBTYPES.DRIP,
+        currency: "USD",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.message)).toContain(
+          "FMV per unit must be greater than 0.",
+        );
+      }
+    });
   });
 
   describe("transferFormSchema", () => {
@@ -767,6 +832,70 @@ describe("Form Schemas Validation", () => {
       if (!result.success) {
         expect(result.error.issues.map((issue) => issue.message)).toContain(
           "Withholding tax must be non-negative.",
+        );
+      }
+    });
+
+    it("accepts a cash interest edit with stored quantity/unitPrice of 0", () => {
+      // Regression: cash records persist quantity=0/unitPrice=0; editing them
+      // must not fail validation on these hidden fields.
+      const result = interestFormSchema.safeParse({
+        accountId: "acc-123",
+        activityDate: new Date(),
+        amount: 15.5,
+        quantity: 0,
+        unitPrice: 0,
+        subtype: null,
+        currency: "USD",
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it("requires a positive quantity for staking rewards", () => {
+      const base = {
+        accountId: "acc-123",
+        symbol: "BTC",
+        activityDate: new Date(),
+        amount: 15.5,
+        unitPrice: 100,
+        subtype: ACTIVITY_SUBTYPES.STAKING_REWARD,
+        currency: "USD",
+      };
+
+      const zeroQuantity = interestFormSchema.safeParse({ ...base, quantity: 0 });
+      expect(zeroQuantity.success).toBe(false);
+      if (!zeroQuantity.success) {
+        expect(zeroQuantity.error.issues.map((issue) => issue.message)).toContain(
+          "Received quantity is required.",
+        );
+      }
+
+      const negativeQuantity = interestFormSchema.safeParse({ ...base, quantity: -0.5 });
+      expect(negativeQuantity.success).toBe(false);
+      if (!negativeQuantity.success) {
+        expect(negativeQuantity.error.issues.map((issue) => issue.message)).toContain(
+          "Received quantity must be greater than 0.",
+        );
+      }
+    });
+
+    it("rejects a negative FMV per unit for staking rewards", () => {
+      const result = interestFormSchema.safeParse({
+        accountId: "acc-123",
+        symbol: "BTC",
+        activityDate: new Date(),
+        amount: 15.5,
+        quantity: 0.5,
+        unitPrice: -100,
+        subtype: ACTIVITY_SUBTYPES.STAKING_REWARD,
+        currency: "USD",
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.message)).toContain(
+          "FMV per unit must be greater than 0.",
         );
       }
     });
@@ -1265,6 +1394,27 @@ describe("Form Schemas Validation", () => {
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it("accepts cash dividend/interest edits with stored quantity/unitPrice of 0", () => {
+      // Regression: cash records persist quantity=0/unitPrice=0 (delivered as
+      // truthy "0" strings), so mobile edit defaults feed 0 into the form.
+      // Validation must not reject these hidden fields.
+      for (const activityType of ["DIVIDEND", "INTEREST"]) {
+        const result = newActivitySchema.safeParse({
+          accountId: "acc-123",
+          activityType,
+          activityDate: new Date(),
+          subtype: null,
+          amount: 25,
+          quantity: 0,
+          unitPrice: 0,
+          currency: "USD",
+          exchangeMic: null,
+        });
+
+        expect(result.success).toBe(true);
+      }
     });
 
     it("strips stale tax values from transfer activities", () => {

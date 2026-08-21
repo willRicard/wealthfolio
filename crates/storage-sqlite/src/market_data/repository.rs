@@ -541,7 +541,7 @@ impl QuoteStore for MarketDataRepository {
                 "WITH RankedQuotes AS ( \
                     SELECT \
                         q.*, \
-                        ROW_NUMBER() OVER (PARTITION BY q.asset_id ORDER BY q.day DESC, {priority} ASC) as rn \
+                        ROW_NUMBER() OVER (PARTITION BY q.asset_id ORDER BY q.day DESC, {priority} ASC, q.timestamp DESC) as rn \
                     FROM quotes q WHERE q.asset_id IN ({placeholders}) \
                 ) \
                 SELECT * FROM RankedQuotes WHERE rn = 1 \
@@ -587,7 +587,7 @@ impl QuoteStore for MarketDataRepository {
                 "WITH RankedQuotes AS ( \
                     SELECT \
                         q.*, \
-                        ROW_NUMBER() OVER (PARTITION BY q.asset_id ORDER BY q.day DESC, {priority} ASC) as rn \
+                        ROW_NUMBER() OVER (PARTITION BY q.asset_id ORDER BY q.day DESC, {priority} ASC, q.timestamp DESC) as rn \
                     FROM quotes q \
                     WHERE q.asset_id IN ({placeholders}) AND q.day <= ? \
                 ) \
@@ -612,6 +612,199 @@ impl QuoteStore for MarketDataRepository {
             }
         }
 
+        Ok(result)
+    }
+
+    fn get_latest_quotes_as_of_dates(
+        &self,
+        requests: &[(String, NaiveDate)],
+    ) -> Result<HashMap<String, Quote>> {
+        if requests.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        const ASSET_DATE_BATCH_SIZE: usize = 400;
+        let mut requests: Vec<_> = requests
+            .iter()
+            .filter(|(asset_id, _)| !asset_id.is_empty())
+            .cloned()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        requests.sort();
+
+        let mut conn = get_connection(&self.pool)?;
+        let mut result = HashMap::new();
+        for chunk in requests.chunks(ASSET_DATE_BATCH_SIZE) {
+            let request_values = chunk
+                .iter()
+                .map(|_| "(?, ?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "WITH requested(asset_id, requested_day) AS (VALUES {request_values}), \
+                 SelectedQuotes AS ( \
+                    SELECT requested.asset_id, \
+                           (SELECT q.id FROM quotes q \
+                            WHERE q.asset_id = requested.asset_id \
+                              AND q.day <= requested.requested_day \
+                            ORDER BY q.day DESC, {priority} ASC, q.timestamp DESC \
+                            LIMIT 1) AS quote_id \
+                    FROM requested \
+                 ) \
+                 SELECT q.* FROM SelectedQuotes selected \
+                 JOIN quotes q ON q.id = selected.quote_id \
+                 ORDER BY q.asset_id",
+                priority = SOURCE_PRIORITY_CASE_Q,
+            );
+            let mut query = Box::new(sql_query(sql)).into_boxed::<Sqlite>();
+            for (asset_id, requested_date) in chunk {
+                query = query.bind::<Text, _>(asset_id);
+                query = query.bind::<Text, _>(requested_date.format("%Y-%m-%d").to_string());
+            }
+            for row in query.load::<QuoteDB>(&mut conn).into_core()? {
+                let quote: Quote = row.into();
+                result.insert(quote.asset_id.clone(), quote);
+            }
+        }
+        Ok(result)
+    }
+
+    fn range_batch(
+        &self,
+        asset_ids: &[AssetId],
+        start: Day,
+        end: Day,
+        source: Option<&QuoteSource>,
+    ) -> Result<Vec<Quote>> {
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let start_str = start.date().format("%Y-%m-%d").to_string();
+        let end_str = end.date().format("%Y-%m-%d").to_string();
+        let mut result = Vec::new();
+
+        for chunk in chunk_for_sqlite(asset_ids) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = if source.is_some() {
+                format!(
+                    "SELECT q.* FROM quotes q \
+                     WHERE q.asset_id IN ({placeholders}) \
+                       AND q.day >= ? AND q.day <= ? AND q.source = ? \
+                     ORDER BY q.asset_id, q.day ASC",
+                    placeholders = placeholders
+                )
+            } else {
+                format!(
+                    "WITH RankedQuotes AS ( \
+                        SELECT q.*, \
+                            ROW_NUMBER() OVER (PARTITION BY q.asset_id, q.day ORDER BY {priority} ASC, q.timestamp DESC) as rn \
+                        FROM quotes q \
+                        WHERE q.asset_id IN ({placeholders}) AND q.day >= ? AND q.day <= ? \
+                    ) \
+                    SELECT * FROM RankedQuotes WHERE rn = 1 \
+                    ORDER BY asset_id, day ASC",
+                    priority = SOURCE_PRIORITY_CASE_Q,
+                    placeholders = placeholders
+                )
+            };
+            let mut query = Box::new(sql_query(sql)).into_boxed::<Sqlite>();
+            for asset_id in chunk {
+                query = query.bind::<Text, _>(asset_id.as_str());
+            }
+            query = query
+                .bind::<Text, _>(start_str.clone())
+                .bind::<Text, _>(end_str.clone());
+            if let Some(source) = source {
+                query = query.bind::<Text, _>(source.to_storage_string());
+            }
+            result.extend(
+                query
+                    .load::<QuoteDB>(&mut conn)
+                    .into_core()?
+                    .into_iter()
+                    .map(Quote::from),
+            );
+        }
+
+        result.sort_by(|left, right| {
+            left.asset_id
+                .cmp(&right.asset_id)
+                .then_with(|| left.timestamp.cmp(&right.timestamp))
+        });
+
+        Ok(result)
+    }
+
+    fn range_batch_from_dates(
+        &self,
+        asset_start_dates: &[(AssetId, Day)],
+        end: Day,
+        source: Option<&QuoteSource>,
+    ) -> Result<Vec<Quote>> {
+        if asset_start_dates.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        const ASSET_DATE_BATCH_SIZE: usize = 400;
+        let mut conn = get_connection(&self.pool)?;
+        let end_str = end.date().format("%Y-%m-%d").to_string();
+        let mut result = Vec::new();
+
+        for chunk in asset_start_dates.chunks(ASSET_DATE_BATCH_SIZE) {
+            let request_values = chunk
+                .iter()
+                .map(|_| "(?, ?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = if source.is_some() {
+                format!(
+                    "WITH requested(asset_id, start_day) AS (VALUES {request_values}) \
+                     SELECT q.* FROM quotes q \
+                     JOIN requested r ON r.asset_id = q.asset_id \
+                     WHERE q.day >= r.start_day AND q.day <= ? AND q.source = ? \
+                     ORDER BY q.asset_id, q.day ASC"
+                )
+            } else {
+                format!(
+                    "WITH requested(asset_id, start_day) AS (VALUES {request_values}), \
+                     RankedQuotes AS ( \
+                        SELECT q.*, \
+                            ROW_NUMBER() OVER (PARTITION BY q.asset_id, q.day ORDER BY {priority} ASC, q.timestamp DESC) as rn \
+                        FROM quotes q \
+                        JOIN requested r ON r.asset_id = q.asset_id \
+                        WHERE q.day >= r.start_day AND q.day <= ? \
+                     ) \
+                     SELECT * FROM RankedQuotes WHERE rn = 1 \
+                     ORDER BY asset_id, day ASC",
+                    priority = SOURCE_PRIORITY_CASE_Q,
+                )
+            };
+            let mut query = Box::new(sql_query(sql)).into_boxed::<Sqlite>();
+            for (asset_id, start) in chunk {
+                query = query.bind::<Text, _>(asset_id.as_str());
+                query = query.bind::<Text, _>(start.date().format("%Y-%m-%d").to_string());
+            }
+            query = query.bind::<Text, _>(end_str.clone());
+            if let Some(source) = source {
+                query = query.bind::<Text, _>(source.to_storage_string());
+            }
+            result.extend(
+                query
+                    .load::<QuoteDB>(&mut conn)
+                    .into_core()?
+                    .into_iter()
+                    .map(Quote::from),
+            );
+        }
+
+        result.sort_by(|left, right| {
+            left.asset_id
+                .cmp(&right.asset_id)
+                .then_with(|| left.timestamp.cmp(&right.timestamp))
+        });
         Ok(result)
     }
 
@@ -952,6 +1145,57 @@ impl QuoteStore for MarketDataRepository {
 
         Ok(result)
     }
+
+    fn get_quote_bounds_for_assets_any_source(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<HashMap<String, (NaiveDate, NaiveDate)>> {
+        if asset_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let mut result = HashMap::new();
+
+        #[derive(QueryableByName)]
+        struct QuoteBoundsRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            asset_id: String,
+            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+            min_day: Option<String>,
+            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+            max_day: Option<String>,
+        }
+
+        for chunk in chunk_for_sqlite(asset_ids) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "SELECT asset_id, MIN(day) as min_day, MAX(day) as max_day \
+                 FROM quotes WHERE asset_id IN ({}) GROUP BY asset_id",
+                placeholders
+            );
+            let mut query_builder = Box::new(sql_query(sql)).into_boxed::<Sqlite>();
+            for asset_id in chunk {
+                query_builder = query_builder.bind::<Text, _>(asset_id);
+            }
+
+            let rows: Vec<QuoteBoundsRow> = query_builder
+                .load::<QuoteBoundsRow>(&mut conn)
+                .into_core()?;
+            for row in rows {
+                if let (Some(min_day), Some(max_day)) = (row.min_day, row.max_day) {
+                    if let (Ok(min_date), Ok(max_date)) = (
+                        NaiveDate::parse_from_str(&min_day, "%Y-%m-%d"),
+                        NaiveDate::parse_from_str(&max_day, "%Y-%m-%d"),
+                    ) {
+                        result.insert(row.asset_id, (min_date, max_date));
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 // =============================================================================
@@ -1061,6 +1305,38 @@ mod tests {
             created_at: Utc::now(),
             notes: None,
         }
+    }
+
+    #[tokio::test]
+    async fn quote_bounds_across_sources_use_earliest_and_latest_dates() {
+        let (repo, _temp) = create_test_repository().await;
+        let asset_id = "AAPL";
+        insert_test_asset(&repo, asset_id);
+        let earliest = NaiveDate::from_ymd_opt(2020, 1, 2).unwrap();
+        let latest = NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
+
+        repo.save_quote(&quote_with_source(
+            asset_id,
+            earliest,
+            "MANUAL",
+            Decimal::from(100),
+        ))
+        .await
+        .unwrap();
+        repo.save_quote(&quote_with_source(
+            asset_id,
+            latest,
+            "YAHOO",
+            Decimal::from(200),
+        ))
+        .await
+        .unwrap();
+
+        let bounds = repo
+            .get_quote_bounds_for_assets_any_source(&[asset_id.to_string()])
+            .unwrap();
+
+        assert_eq!(bounds.get(asset_id), Some(&(earliest, latest)));
     }
 
     /// With multiple quotes for the same (asset, day) but different sources,
@@ -1394,6 +1670,137 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn range_batch_matches_single_asset_range_and_source_filtering() {
+        let (repo, _temp) = create_test_repository().await;
+        let day = NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
+        for asset_id in ["BATCH-A", "BATCH-B"] {
+            insert_test_asset(&repo, asset_id);
+            repo.save_quote(&quote_with_source(
+                asset_id,
+                day,
+                "BROKER",
+                Decimal::from(9),
+            ))
+            .await
+            .expect("save broker quote");
+            repo.save_quote(&quote_with_source(
+                asset_id,
+                day,
+                "YAHOO",
+                Decimal::from(10),
+            ))
+            .await
+            .expect("save provider quote");
+        }
+
+        let asset_ids = [AssetId::new("BATCH-B"), AssetId::new("BATCH-A")];
+        let quotes = repo
+            .range_batch(&asset_ids, Day::new(day), Day::new(day), None)
+            .expect("get batch range");
+
+        assert_eq!(quotes.len(), 2);
+        assert_eq!(quotes[0].asset_id, "BATCH-A");
+        assert_eq!(quotes[1].asset_id, "BATCH-B");
+        assert!(quotes
+            .iter()
+            .all(|quote| { quote.data_source == "YAHOO" && quote.close == Decimal::from(10) }));
+
+        let mut expected = Vec::new();
+        for asset_id in &asset_ids {
+            expected.extend(
+                repo.range(asset_id, Day::new(day), Day::new(day), None)
+                    .expect("get single-asset range"),
+            );
+        }
+        expected.sort_by(|left, right| left.asset_id.cmp(&right.asset_id));
+        assert_eq!(quotes, expected);
+
+        let broker = QuoteSource::from_storage_string("BROKER");
+        let broker_quotes = repo
+            .range_batch(&asset_ids, Day::new(day), Day::new(day), Some(&broker))
+            .expect("get source-filtered batch range");
+        assert_eq!(broker_quotes.len(), 2);
+        assert!(broker_quotes
+            .iter()
+            .all(|quote| quote.data_source == "BROKER" && quote.close == Decimal::from(9)));
+    }
+
+    #[tokio::test]
+    async fn asset_specific_batch_ranges_do_not_expand_newer_assets_to_global_start() {
+        let (repo, _temp) = create_test_repository().await;
+        let old_day = NaiveDate::from_ymd_opt(2020, 1, 2).unwrap();
+        let recent_day = NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
+        for asset_id in ["RANGE-OLD", "RANGE-NEW"] {
+            insert_test_asset(&repo, asset_id);
+            repo.save_quote(&quote_with_source(
+                asset_id,
+                old_day,
+                "YAHOO",
+                Decimal::from(10),
+            ))
+            .await
+            .expect("save old quote");
+            repo.save_quote(&quote_with_source(
+                asset_id,
+                recent_day,
+                "YAHOO",
+                Decimal::from(20),
+            ))
+            .await
+            .expect("save recent quote");
+        }
+
+        let quotes = repo
+            .range_batch_from_dates(
+                &[
+                    (AssetId::new("RANGE-OLD"), Day::new(old_day)),
+                    (AssetId::new("RANGE-NEW"), Day::new(recent_day)),
+                ],
+                Day::new(recent_day),
+                None,
+            )
+            .expect("get asset-specific ranges");
+
+        let old_asset_dates: Vec<_> = quotes
+            .iter()
+            .filter(|quote| quote.asset_id == "RANGE-OLD")
+            .map(|quote| quote.timestamp.date_naive())
+            .collect();
+        let new_asset_dates: Vec<_> = quotes
+            .iter()
+            .filter(|quote| quote.asset_id == "RANGE-NEW")
+            .map(|quote| quote.timestamp.date_naive())
+            .collect();
+        assert_eq!(old_asset_dates, vec![old_day, recent_day]);
+        assert_eq!(new_asset_dates, vec![recent_day]);
+    }
+
+    #[tokio::test]
+    async fn asset_specific_seed_query_preserves_the_persisted_quote_date() {
+        let (repo, _temp) = create_test_repository().await;
+        let asset_id = "SEED-DATE";
+        insert_test_asset(&repo, asset_id);
+        let quote_day = NaiveDate::from_ymd_opt(2020, 1, 2).unwrap();
+        let cutoff_day = NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
+        repo.save_quote(&quote_with_source(
+            asset_id,
+            quote_day,
+            "YAHOO",
+            Decimal::from(42),
+        ))
+        .await
+        .expect("save seed quote");
+
+        let quotes = repo
+            .get_latest_quotes_as_of_dates(&[(asset_id.to_string(), cutoff_day)])
+            .expect("get asset-specific seed");
+        let quote = quotes.get(asset_id).expect("seed quote exists");
+
+        assert_eq!(quote.timestamp.date_naive(), quote_day);
+        assert_eq!(quote.close, Decimal::from(42));
+    }
+
+    #[tokio::test]
     async fn latest_quotes_as_of_applies_source_priority_on_cutoff_day() {
         let (repo, _temp) = create_test_repository().await;
         let asset_id = "IEMG";
@@ -1423,6 +1830,31 @@ mod tests {
         let quote = quotes.get(asset_id).expect("quote exists");
         assert_eq!(quote.data_source, "YAHOO");
         assert_eq!(quote.close, Decimal::from(51));
+    }
+
+    #[tokio::test]
+    async fn latest_quotes_as_of_uses_timestamp_for_equal_priority_sources() {
+        let (repo, _temp) = create_test_repository().await;
+        let asset_id = "SEED-TIE";
+        insert_test_asset(&repo, asset_id);
+
+        let day = NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
+        let mut earlier = quote_with_source(asset_id, day, "YAHOO", Decimal::from(51));
+        earlier.timestamp = day.and_hms_opt(12, 0, 0).unwrap().and_utc();
+        let mut later = quote_with_source(asset_id, day, "STOOQ", Decimal::from(52));
+        later.timestamp = day.and_hms_opt(16, 0, 0).unwrap().and_utc();
+
+        repo.save_quote(&earlier)
+            .await
+            .expect("save earlier provider");
+        repo.save_quote(&later).await.expect("save later provider");
+
+        let quotes = repo
+            .get_latest_quotes_as_of(&[asset_id.to_string()], day)
+            .expect("get latest quotes as of");
+        let quote = quotes.get(asset_id).expect("quote exists");
+        assert_eq!(quote.data_source, "STOOQ");
+        assert_eq!(quote.close, Decimal::from(52));
     }
 
     #[tokio::test]

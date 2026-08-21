@@ -9,7 +9,11 @@ use std::collections::VecDeque;
 use std::str::FromStr;
 
 use wealthfolio_core::constants::DECIMAL_PRECISION;
-use wealthfolio_core::portfolio::snapshot::{AccountStateSnapshot, Position, SnapshotSource};
+use wealthfolio_core::portfolio::snapshot::{
+    AccountStateSnapshot, Position, SnapshotMetadata, SnapshotSource,
+};
+
+use crate::errors::StorageError;
 
 /// Database model for account state snapshots
 #[derive(Debug, Clone, Queryable, QueryableByName, Insertable, Serialize, Deserialize)]
@@ -45,14 +49,42 @@ pub struct AccountStateSnapshotDB {
     pub source: String,
 }
 
-// Conversion from DB model to Domain model
-impl From<AccountStateSnapshotDB> for AccountStateSnapshot {
-    fn from(db: AccountStateSnapshotDB) -> Self {
+impl From<&AccountStateSnapshotDB> for SnapshotMetadata {
+    fn from(db: &AccountStateSnapshotDB) -> Self {
+        let object_len = |json: &str| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json)
+                .map(|values| values.len())
+                .unwrap_or_default()
+        };
+
         Self {
             id: db.id.clone(),
+            account_id: db.account_id.clone(),
+            snapshot_date: db.snapshot_date.clone(),
+            source: db.source.clone(),
+            position_count: object_len(&db.positions),
+            cash_currency_count: object_len(&db.cash_balances),
+            cash_total_account_currency: db.cash_total_account_currency.clone(),
+        }
+    }
+}
+
+impl TryFrom<AccountStateSnapshotDB> for AccountStateSnapshot {
+    type Error = StorageError;
+
+    fn try_from(db: AccountStateSnapshotDB) -> Result<Self, Self::Error> {
+        let snapshot_date =
+            NaiveDate::parse_from_str(&db.snapshot_date, "%Y-%m-%d").map_err(|error| {
+                StorageError::SerializationError(format!(
+                    "Invalid snapshot date '{}' for account '{}': {}",
+                    db.snapshot_date, db.account_id, error
+                ))
+            })?;
+
+        Ok(AccountStateSnapshot {
+            id: db.id,
             account_id: db.account_id,
-            snapshot_date: NaiveDate::parse_from_str(&db.snapshot_date, "%Y-%m-%d")
-                .unwrap_or_default(),
+            snapshot_date,
             currency: db.currency,
             positions: serde_json::from_str(&db.positions).unwrap_or_default(),
             cash_balances: serde_json::from_str(&db.cash_balances).unwrap_or_default(),
@@ -77,7 +109,7 @@ impl From<AccountStateSnapshotDB> for AccountStateSnapshot {
             }),
             source: serde_json::from_str(&format!("\"{}\"", db.source))
                 .unwrap_or(SnapshotSource::Calculated),
-        }
+        })
     }
 }
 
@@ -119,6 +151,29 @@ impl From<AccountStateSnapshot> for AccountStateSnapshotDB {
                 .trim_matches('"')
                 .to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_snapshot_date_is_not_coerced_to_epoch() {
+        let snapshot = AccountStateSnapshot {
+            account_id: "account-1".to_string(),
+            ..Default::default()
+        };
+        let mut row = AccountStateSnapshotDB::from(snapshot);
+        row.snapshot_date = "not-a-date".to_string();
+
+        let error = AccountStateSnapshot::try_from(row)
+            .expect_err("malformed stored dates must remain an explicit read failure");
+
+        assert!(error
+            .to_string()
+            .contains("Invalid snapshot date 'not-a-date'"));
+        assert!(error.to_string().contains("account-1"));
     }
 }
 

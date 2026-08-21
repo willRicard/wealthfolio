@@ -192,7 +192,7 @@ export interface InternalHostAPI {
     accountId: string,
     snapshots: HoldingsSnapshotInput[],
   ): Promise<ImportHoldingsCsvResult>;
-  deleteSnapshot(accountId: string, date: string): Promise<void>;
+  deleteSnapshot(accountId: string, date: string, snapshotId?: string): Promise<void>;
 
   // Logger functions (internal - these are the raw logger functions)
   logError(message: string): void;

@@ -202,7 +202,9 @@ where
 {
     let mut total = Decimal::ZERO;
 
-    for position in holdings_snapshot.positions.values() {
+    let mut positions: Vec<_> = holdings_snapshot.positions.values().collect();
+    positions.sort_by(|left, right| left.asset_id.cmp(&right.asset_id));
+    for position in positions {
         if position.is_alternative {
             continue;
         }
@@ -222,12 +224,6 @@ where
         let position_currency = normalize_currency_code(&position.currency);
 
         if position.lots.is_empty() {
-            if position_currency != target_currency {
-                warn!(
-                    "Position {} has no materialized lots on {}. Falling back to valuation-date FX for cost basis.",
-                    position.asset_id, target_date
-                );
-            }
             let rate = get_rate_from_map(
                 fx_rates_today,
                 position_currency,
@@ -315,7 +311,9 @@ fn calculate_investment_market_value_acct(
     let mut unpriced_positions = 0;
     let mut basis_status = BasisStatus::NotApplicable;
 
-    for (asset_id, position) in &holdings_snapshot.positions {
+    let mut positions: Vec<_> = holdings_snapshot.positions.iter().collect();
+    positions.sort_by_key(|(asset_id, _)| *asset_id);
+    for (asset_id, position) in positions {
         if position.is_alternative || position.quantity.is_zero() {
             continue;
         }
@@ -351,10 +349,6 @@ fn calculate_investment_market_value_acct(
             }
         } else {
             unpriced_positions += 1;
-            warn!(
-                "Missing quote for asset {} on date {}. Position market value treated as ZERO.",
-                asset_id, target_date
-            );
         }
     }
     Ok(InvestmentValuation {
@@ -374,7 +368,9 @@ fn calculate_cash_value_acct(
     account_currency: &str,
 ) -> Result<Decimal> {
     let mut total_cash_value = Decimal::ZERO;
-    for (cash_currency, amount) in &holdings_snapshot.cash_balances {
+    let mut cash_balances: Vec<_> = holdings_snapshot.cash_balances.iter().collect();
+    cash_balances.sort_by_key(|(currency, _)| *currency);
+    for (cash_currency, amount) in cash_balances {
         let (normalized_amount, normalized_cash_currency) =
             normalize_amount(*amount, cash_currency);
 

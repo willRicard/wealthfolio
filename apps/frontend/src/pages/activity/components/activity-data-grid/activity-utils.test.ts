@@ -470,6 +470,69 @@ describe("activity-utils", () => {
       expect(result.creates[0].idempotencyKey).toBe("manual-duplicate-123");
     });
 
+    it.each([true, false])(
+      "should preserve only an explicit %s credit boundary for a new duplicate",
+      (isExternal) => {
+        const transactions: LocalTransaction[] = [
+          createMockTransaction({
+            id: "temp-credit-1",
+            isNew: true,
+            activityType: ActivityType.CREDIT,
+            subtype: ACTIVITY_SUBTYPES.REIMBURSEMENT,
+            assetId: undefined,
+            assetSymbol: undefined,
+            amount: "100",
+            isExternal,
+            metadata: {
+              raw_type: "merchant_refund",
+              flow: { confidence: 0.9, is_external: isExternal },
+            },
+          }),
+        ];
+
+        const result = buildSavePayload(
+          transactions,
+          new Set(["temp-credit-1"]),
+          new Set(),
+          mockResolveTransactionCurrency,
+          dirtyCurrencyLookup,
+          assetCurrencyLookup,
+          "USD",
+        );
+
+        expect(JSON.parse(result.creates[0].metadata ?? "{}")).toEqual({
+          flow: { is_external: isExternal },
+        });
+      },
+    );
+
+    it("should leave credit metadata absent when no boundary was specified", () => {
+      const transactions: LocalTransaction[] = [
+        createMockTransaction({
+          id: "temp-credit-1",
+          isNew: true,
+          activityType: ActivityType.CREDIT,
+          subtype: ACTIVITY_SUBTYPES.REFUND,
+          assetId: undefined,
+          assetSymbol: undefined,
+          amount: "100",
+          isExternal: undefined,
+        }),
+      ];
+
+      const result = buildSavePayload(
+        transactions,
+        new Set(["temp-credit-1"]),
+        new Set(),
+        mockResolveTransactionCurrency,
+        dirtyCurrencyLookup,
+        assetCurrencyLookup,
+        "USD",
+      );
+
+      expect(result.creates[0].metadata).toBeUndefined();
+    });
+
     it("should include existing asset id selected from search for new market activities", () => {
       const transactions: LocalTransaction[] = [
         createMockTransaction({

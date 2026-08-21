@@ -16,6 +16,7 @@ import {
   calculateActivityCashImpact,
   canonicalizeActivitySubtype,
   formatSplitRatio,
+  supportsPerformanceBoundary,
 } from "./activity-utils";
 import { ActivityDetails } from "./types";
 
@@ -44,6 +45,22 @@ describe("Activity Utilities", () => {
       expect(isIncomeActivity(ActivityType.DEPOSIT)).toBe(false);
       expect(isIncomeActivity(ActivityType.WITHDRAWAL)).toBe(false);
     });
+  });
+
+  describe("supportsPerformanceBoundary", () => {
+    it.each([ActivityType.CREDIT, ActivityType.TRANSFER_IN, ActivityType.TRANSFER_OUT])(
+      "allows an explicit boundary for %s",
+      (activityType) => {
+        expect(supportsPerformanceBoundary(activityType)).toBe(true);
+      },
+    );
+
+    it.each([ActivityType.DEPOSIT, ActivityType.WITHDRAWAL, ActivityType.FEE, undefined])(
+      "does not expose a boundary for %s",
+      (activityType) => {
+        expect(supportsPerformanceBoundary(activityType)).toBe(false);
+      },
+    );
   });
 
   describe("isCashTransfer", () => {

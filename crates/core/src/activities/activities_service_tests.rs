@@ -13,18 +13,19 @@ mod tests {
         AssetServiceTrait, InstrumentType, NewAsset, ProviderProfile, QuoteCcyResolutionSource,
         QuoteMode, UpdateAssetProfile,
     };
-    use crate::errors::{DatabaseError, Error, Result};
+    use crate::errors::{DatabaseError, Error, Result, ValidationError};
     use crate::events::{DomainEvent, MockDomainEventSink};
     use crate::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
     use crate::lots::{AssetLotView, LotClosure, LotDisposal, LotRecord, LotRepositoryTrait};
     use crate::portfolio::economic_events::BasisStatus;
     use crate::portfolio::performance::{PerformanceService, PerformanceServiceTrait};
     use crate::portfolio::snapshot::{
-        AccountStateSnapshot, SnapshotRecalcMode, SnapshotServiceTrait,
+        AccountStateSnapshot, HoldingsTimeline, Position, SnapshotRecalcMode, SnapshotServiceTrait,
+        SnapshotSource,
     };
     use crate::portfolio::valuation::{
-        DailyAccountValuation, ExternalFlowSource, NegativeBalanceInfo, ValuationRepositoryTrait,
-        ValuationService, ValuationServiceTrait, ValuationStatus,
+        DailyAccountValuation, ExternalFlowSource, NegativeBalanceInfo, ValuationRecalcMode,
+        ValuationRepositoryTrait, ValuationService, ValuationServiceTrait, ValuationStatus,
     };
     use crate::quotes::service::ProviderInfo;
     use crate::quotes::{
@@ -689,6 +690,42 @@ mod tests {
             _end: NaiveDate,
         ) -> Result<Vec<Quote>> {
             unimplemented!()
+        }
+
+        fn get_sparse_quotes_in_range(
+            &self,
+            symbols: &HashSet<String>,
+            start: NaiveDate,
+            end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            if !symbols.contains("PARITY_ASSET") {
+                return Ok(Vec::new());
+            }
+            Ok([
+                ("2026-06-01", dec!(100)),
+                ("2026-06-03", dec!(102)),
+                ("2026-06-05", dec!(52)),
+            ]
+            .into_iter()
+            .filter_map(|(date, close)| {
+                let quote_date = NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap();
+                (quote_date >= start && quote_date <= end).then(|| Quote {
+                    id: format!("PARITY_ASSET-{date}"),
+                    asset_id: "PARITY_ASSET".to_string(),
+                    timestamp: quote_date.and_hms_opt(12, 0, 0).unwrap().and_utc(),
+                    open: close,
+                    high: close,
+                    low: close,
+                    close,
+                    adjclose: close,
+                    volume: Decimal::ZERO,
+                    currency: "USD".to_string(),
+                    data_source: "TEST".to_string(),
+                    created_at: quote_date.and_hms_opt(12, 0, 0).unwrap().and_utc(),
+                    notes: None,
+                })
+            })
+            .collect())
         }
 
         fn get_quotes_in_range_filled(
@@ -1685,7 +1722,6 @@ mod tests {
             }
             Ok(map)
         }
-
         async fn bulk_upsert(
             &self,
             _activities: Vec<crate::activities::ActivityUpsert>,
@@ -1758,20 +1794,27 @@ mod tests {
 
     #[async_trait]
     impl ValuationRepositoryTrait for MockValuationRepository {
-        async fn save_valuations(
-            &self,
-            _valuation_records: &[DailyAccountValuation],
-        ) -> Result<()> {
-            unimplemented!()
+        async fn save_valuations(&self, valuation_records: &[DailyAccountValuation]) -> Result<()> {
+            self.valuations
+                .lock()
+                .unwrap()
+                .extend_from_slice(valuation_records);
+            Ok(())
         }
 
         async fn replace_valuations_for_account(
             &self,
-            _account_id: &str,
-            _since_date: Option<NaiveDate>,
-            _valuation_records: &[DailyAccountValuation],
+            account_id: &str,
+            since_date: Option<NaiveDate>,
+            valuation_records: &[DailyAccountValuation],
         ) -> Result<()> {
-            unimplemented!()
+            let mut valuations = self.valuations.lock().unwrap();
+            valuations.retain(|valuation| {
+                valuation.account_id != account_id
+                    || since_date.is_some_and(|date| valuation.valuation_date < date)
+            });
+            valuations.extend_from_slice(valuation_records);
+            Ok(())
         }
 
         fn get_historical_valuations(
@@ -1852,8 +1895,15 @@ mod tests {
                 .max())
         }
 
-        fn load_latest_valuation_date(&self, _account_id: &str) -> Result<Option<NaiveDate>> {
-            unimplemented!()
+        fn load_latest_valuation_date(&self, account_id: &str) -> Result<Option<NaiveDate>> {
+            Ok(self
+                .valuations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|valuation| valuation.account_id == account_id)
+                .map(|valuation| valuation.valuation_date)
+                .max())
         }
 
         async fn delete_valuations_for_account(
@@ -1996,13 +2046,67 @@ mod tests {
             unimplemented!()
         }
 
-        fn get_daily_holdings_snapshots(
+        fn get_holdings_timeline(
             &self,
-            _account_id: &str,
-            _start_date: Option<NaiveDate>,
+            account_id: &str,
+            start_date: Option<NaiveDate>,
             _end_date: Option<NaiveDate>,
-        ) -> Result<Vec<AccountStateSnapshot>> {
-            Ok(Vec::new())
+        ) -> Result<HoldingsTimeline> {
+            assert!(
+                start_date.is_none_or(|date| date >= NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()),
+                "invalid valuation ranges must be rejected before timeline loading"
+            );
+            if account_id == "poisoned-account" {
+                return Err(Error::Validation(ValidationError::InvalidSnapshotDate {
+                    account_id: account_id.to_string(),
+                    date: NaiveDate::from_ymd_opt(1969, 12, 31).unwrap(),
+                    min_date: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+                    max_date: NaiveDate::from_ymd_opt(2026, 8, 7).unwrap(),
+                    snapshot_source: "CSV_IMPORT".to_string(),
+                }));
+            }
+            assert_eq!(account_id, "valuation-parity");
+            let first_date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+            let second_date = NaiveDate::from_ymd_opt(2026, 6, 4).unwrap();
+            let end_date = NaiveDate::from_ymd_opt(2026, 6, 6).unwrap();
+            let snapshot = |date: NaiveDate, quantity: Decimal| AccountStateSnapshot {
+                id: format!("valuation-parity-{date}"),
+                account_id: account_id.to_string(),
+                snapshot_date: date,
+                currency: "CAD".to_string(),
+                positions: HashMap::from([(
+                    "PARITY_ASSET".to_string(),
+                    Position {
+                        id: "PARITY_POSITION".to_string(),
+                        account_id: account_id.to_string(),
+                        asset_id: "PARITY_ASSET".to_string(),
+                        quantity,
+                        average_cost: dec!(10),
+                        total_cost_basis: quantity * dec!(10),
+                        currency: "USD".to_string(),
+                        inception_date: first_date.and_hms_opt(0, 0, 0).unwrap().and_utc(),
+                        ..Position::default()
+                    },
+                )]),
+                cash_balances: HashMap::new(),
+                cost_basis: quantity * dec!(10),
+                net_contribution: Decimal::ZERO,
+                net_contribution_base: Decimal::ZERO,
+                cash_total_account_currency: Decimal::ZERO,
+                cash_total_base_currency: Decimal::ZERO,
+                calculated_at: date.and_hms_opt(0, 0, 0).unwrap(),
+                source: SnapshotSource::Calculated,
+            };
+            Ok(HoldingsTimeline::new(
+                start_date.or(Some(first_date)),
+                end_date,
+                vec![
+                    snapshot(first_date, dec!(10)),
+                    snapshot(second_date, dec!(20)),
+                ],
+                None,
+                false,
+            ))
         }
 
         fn get_latest_holdings_snapshot(
@@ -2028,10 +2132,6 @@ mod tests {
             unimplemented!()
         }
 
-        async fn ensure_holdings_history(&self, _account_id: &str) -> Result<()> {
-            unimplemented!()
-        }
-
         async fn delete_snapshot_for_account(
             &self,
             _account_id: &str,
@@ -2051,6 +2151,143 @@ mod tests {
             Arc::new(MockQuoteService),
             Arc::new(MockFxService::new()),
         ))
+    }
+
+    #[tokio::test]
+    async fn valuation_batch_api_matches_dense_reference_end_to_end() {
+        let account_id = "valuation-parity";
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let mut split = create_stored_activity("parity-split", account_id, Some("PARITY_ASSET"));
+        split.activity_type = "SPLIT".to_string();
+        split.activity_date = NaiveDate::from_ymd_opt(2026, 6, 5)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        split.quantity = None;
+        split.unit_price = None;
+        split.amount = Some(dec!(2));
+        activity_repository.add_activity(split);
+
+        let build_service = |repository: Arc<MockValuationRepository>| {
+            ValuationService::new(
+                Arc::new(RwLock::new("USD".to_string())),
+                repository,
+                Arc::new(MockSnapshotService),
+                Arc::new(MockQuoteService),
+                Arc::new(MockFxService::new()),
+            )
+            .with_activity_repository(
+                activity_repository.clone(),
+                Arc::new(RwLock::new("UTC".to_string())),
+            )
+        };
+        let interval_repository = Arc::new(MockValuationRepository::new(Vec::new()));
+        let dense_repository = Arc::new(MockValuationRepository::new(Vec::new()));
+        let interval_service = build_service(interval_repository.clone());
+        let dense_service = build_service(dense_repository.clone());
+        let mode = ValuationRecalcMode::SinceDate(NaiveDate::from_ymd_opt(2026, 6, 2).unwrap());
+
+        let outcome = interval_service
+            .calculate_valuation_histories(&[account_id.to_string()], mode.clone())
+            .await
+            .expect("interval batch should complete");
+        assert_eq!(outcome.successful_accounts, vec![account_id.to_string()]);
+        assert!(outcome.failures.is_empty());
+        dense_service
+            .calculate_valuation_history_dense_reference(account_id, mode)
+            .await
+            .expect("dense reference should complete");
+
+        let mut interval = interval_repository
+            .get_historical_valuations(account_id, None, None)
+            .unwrap();
+        let mut dense = dense_repository
+            .get_historical_valuations(account_id, None, None)
+            .unwrap();
+        let stable_calculated_at = DateTime::<Utc>::from_timestamp(0, 0).unwrap();
+        for valuation in interval.iter_mut().chain(dense.iter_mut()) {
+            valuation.calculated_at = stable_calculated_at;
+        }
+
+        assert_eq!(interval, dense);
+        assert_eq!(interval.len(), 5);
+        assert_eq!(
+            interval.first().unwrap().valuation_date,
+            NaiveDate::from_ymd_opt(2026, 6, 2).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn valuation_batch_preserves_poisoned_account_and_commits_valid_account() {
+        let prior_poisoned = create_daily_valuation(
+            "poisoned-account",
+            "2026-05-31",
+            dec!(50),
+            Decimal::ZERO,
+            dec!(50),
+            dec!(50),
+        );
+        let repository = Arc::new(MockValuationRepository::new(vec![prior_poisoned.clone()]));
+        let service = ValuationService::new(
+            Arc::new(RwLock::new("USD".to_string())),
+            repository.clone(),
+            Arc::new(MockSnapshotService),
+            Arc::new(MockQuoteService),
+            Arc::new(MockFxService::new()),
+        );
+
+        let outcome = service
+            .calculate_valuation_histories(
+                &[
+                    "poisoned-account".to_string(),
+                    "valuation-parity".to_string(),
+                ],
+                ValuationRecalcMode::Full,
+            )
+            .await
+            .expect("one invalid account must not abort the valuation batch");
+
+        assert_eq!(
+            outcome.successful_accounts,
+            vec!["valuation-parity".to_string()]
+        );
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].account_id, "poisoned-account");
+        assert_eq!(outcome.failures[0].code, "INVALID_SNAPSHOT_DATE");
+        assert_eq!(
+            repository
+                .get_historical_valuations("poisoned-account", None, None)
+                .unwrap(),
+            vec![prior_poisoned]
+        );
+        assert!(
+            !repository
+                .get_historical_valuations("valuation-parity", None, None)
+                .unwrap()
+                .is_empty(),
+            "the valid account should still commit its replacement history"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_since_date_fails_before_timeline_and_market_fact_loading() {
+        let repository = Arc::new(MockValuationRepository::new(Vec::new()));
+        let service = scoped_valuation_service(repository);
+        let invalid_date = NaiveDate::from_ymd_opt(224, 7, 20).unwrap();
+
+        let outcome = service
+            .calculate_valuation_histories(
+                &["valuation-parity".to_string()],
+                ValuationRecalcMode::SinceDate(invalid_date),
+            )
+            .await
+            .expect("invalid account ranges are reported without aborting the batch");
+
+        assert!(outcome.successful_accounts.is_empty());
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].code, "INVALID_SNAPSHOT_DATE");
+        assert_eq!(outcome.failures[0].date, Some(invalid_date));
     }
 
     #[test]
@@ -2865,6 +3102,218 @@ mod tests {
         assert!(err
             .to_string()
             .contains("BUY activities are not supported for credit card accounts"));
+    }
+
+    /// Cash-only create for the mixed-account bulk tests below. `currency` is
+    /// passed through verbatim so a test can leave it empty and observe which
+    /// account currency preparation falls back to.
+    fn create_test_cash_create(
+        id: &str,
+        account_id: &str,
+        activity_type: &str,
+        currency: &str,
+    ) -> NewActivity {
+        NewActivity {
+            id: Some(id.to_string()),
+            account_id: account_id.to_string(),
+            asset: None,
+            activity_type: activity_type.to_string(),
+            subtype: None,
+            activity_date: "2024-01-15".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: currency.to_string(),
+            fee: Some(dec!(0)),
+            tax: None,
+            amount: Some(dec!(100)),
+            status: None,
+            notes: None,
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: None,
+            source_record_id: Some(id.to_string()),
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+        }
+    }
+
+    fn mixed_account_service() -> Arc<MockAccountService> {
+        let account_service = Arc::new(MockAccountService::new());
+
+        let mut card = create_test_account("card-1", "USD");
+        card.account_type = "CREDIT_CARD".to_string();
+        account_service.add_account(card);
+
+        let mut bank = create_test_account("bank-1", "USD");
+        bank.account_type = "CASH".to_string();
+        account_service.add_account(bank);
+
+        account_service
+    }
+
+    /// A credit-card row must not disqualify a later row that belongs to a
+    /// different account. Regression test: preparation used to validate the
+    /// whole batch against the first create's account, so this ordering failed
+    /// with "DEPOSIT activities are not supported for credit card accounts".
+    #[tokio::test]
+    async fn bulk_create_validates_each_row_against_its_own_account() {
+        let activity_service = ActivityService::new(
+            Arc::new(MockActivityRepository::new()),
+            mixed_account_service(),
+            Arc::new(MockAssetService::new()),
+            Arc::new(MockFxService::new()),
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![
+                    create_test_cash_create("card-purchase", "card-1", "WITHDRAWAL", "USD"),
+                    create_test_cash_create("bank-deposit", "bank-1", "DEPOSIT", "USD"),
+                ],
+                updates: vec![],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("mixed-account bulk create should succeed");
+
+        assert!(
+            result.errors.is_empty(),
+            "expected no errors, got {:?}",
+            result.errors
+        );
+        assert_eq!(result.created.len(), 2);
+        assert_eq!(
+            result
+                .created
+                .iter()
+                .map(|activity| activity.account_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["card-1", "bank-1"],
+            "created rows should stay in request order"
+        );
+    }
+
+    /// The same two rows in the opposite order must behave identically.
+    #[tokio::test]
+    async fn bulk_create_mixed_accounts_is_order_independent() {
+        let activity_service = ActivityService::new(
+            Arc::new(MockActivityRepository::new()),
+            mixed_account_service(),
+            Arc::new(MockAssetService::new()),
+            Arc::new(MockFxService::new()),
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![
+                    create_test_cash_create("bank-deposit", "bank-1", "DEPOSIT", "USD"),
+                    create_test_cash_create("card-purchase", "card-1", "WITHDRAWAL", "USD"),
+                ],
+                updates: vec![],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("mixed-account bulk create should succeed in either order");
+
+        assert!(
+            result.errors.is_empty(),
+            "expected no errors, got {:?}",
+            result.errors
+        );
+        assert_eq!(result.created.len(), 2);
+        assert_eq!(
+            result
+                .created
+                .iter()
+                .map(|activity| activity.account_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bank-1", "card-1"],
+            "created rows should stay in request order"
+        );
+    }
+
+    /// Per-account validation must still reject a row that its own account
+    /// disallows, and report it against that row rather than the batch.
+    #[tokio::test]
+    async fn bulk_create_still_rejects_row_invalid_for_its_own_account() {
+        let activity_service = ActivityService::new(
+            Arc::new(MockActivityRepository::new()),
+            mixed_account_service(),
+            Arc::new(MockAssetService::new()),
+            Arc::new(MockFxService::new()),
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![
+                    create_test_cash_create("bank-deposit", "bank-1", "DEPOSIT", "USD"),
+                    create_test_cash_create("card-deposit", "card-1", "DEPOSIT", "USD"),
+                ],
+                updates: vec![],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk mutation should return structured errors");
+
+        assert!(result.created.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].id.as_deref(), Some("card-deposit"));
+        assert!(
+            result.errors[0]
+                .message
+                .contains("DEPOSIT activities are not supported for credit card accounts"),
+            "unexpected message: {}",
+            result.errors[0].message
+        );
+    }
+
+    /// Preparation also resolves a missing activity currency from the account,
+    /// so a mixed-currency batch must fall back per row, not per batch.
+    #[tokio::test]
+    async fn bulk_create_resolves_missing_currency_from_each_row_account() {
+        let account_service = Arc::new(MockAccountService::new());
+        account_service.add_account(create_test_account("acc-usd", "USD"));
+        account_service.add_account(create_test_account("acc-eur", "EUR"));
+
+        let activity_service = ActivityService::new(
+            Arc::new(MockActivityRepository::new()),
+            account_service,
+            Arc::new(MockAssetService::new()),
+            Arc::new(MockFxService::new()),
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![
+                    create_test_cash_create("usd-deposit", "acc-usd", "DEPOSIT", ""),
+                    create_test_cash_create("eur-deposit", "acc-eur", "DEPOSIT", ""),
+                ],
+                updates: vec![],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("mixed-currency bulk create should succeed");
+
+        assert!(
+            result.errors.is_empty(),
+            "expected no errors, got {:?}",
+            result.errors
+        );
+        assert_eq!(
+            result
+                .created
+                .iter()
+                .map(|activity| (activity.account_id.as_str(), activity.currency.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("acc-usd", "USD"), ("acc-eur", "EUR")],
+            "each row should inherit its own account currency"
+        );
     }
 
     #[tokio::test]
@@ -4828,6 +5277,155 @@ mod tests {
         assert_eq!(asset_service.get_assets().unwrap().len(), 1);
     }
 
+    /// The save path is where a synced activity's asset identity is really decided,
+    /// so the share-class rule has to hold here and not only in canonicalization.
+    /// `ZAAA.F` on Cboe Canada is BMO's currency-hedged unit class and `.F` is
+    /// Yahoo's Frankfurt suffix; both candidate rows are seeded, and the unhedged
+    /// `ZAAA` is the one this used to bind to.
+    #[tokio::test]
+    async fn test_create_keeps_a_share_class_the_supplied_venue_contradicts() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "CAD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "SEC:ZAAA.F:NEOE",
+            "ZAAA.F",
+            Some("NEOE"),
+            Some(InstrumentType::Equity),
+            "CAD",
+        ));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "SEC:ZAAA:NEOE",
+            "ZAAA",
+            Some("NEOE"),
+            Some(InstrumentType::Equity),
+            "CAD",
+        ));
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let new_activity = NewActivity {
+            id: Some("activity-zaaa".to_string()),
+            account_id: "acc-1".to_string(),
+            asset: Some(AssetResolutionInput {
+                symbol: Some("ZAAA.F".to_string()),
+                exchange_mic: Some("NEOE".to_string()),
+                quote_ccy: Some("CAD".to_string()),
+                instrument_type: Some("EQUITY".to_string()),
+                ..Default::default()
+            }),
+            activity_type: "BUY".to_string(),
+            subtype: None,
+            activity_date: "2026-07-30".to_string(),
+            quantity: Some(dec!(10)),
+            unit_price: Some(dec!(29.48)),
+            currency: "CAD".to_string(),
+            fee: Some(dec!(0)),
+            tax: None,
+            amount: Some(dec!(294.8)),
+            status: None,
+            notes: None,
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+        };
+
+        let created = activity_service
+            .create_activity(new_activity)
+            .await
+            .expect("hedged unit class should save");
+
+        assert_eq!(created.asset_id.as_deref(), Some("SEC:ZAAA.F:NEOE"));
+    }
+
+    /// The same path, on the venue the suffix agrees with: `SHOP.TO` with XTSE is an
+    /// ordinary exchange suffix and must still be stripped off the ticker.
+    #[tokio::test]
+    async fn test_create_still_strips_a_suffix_the_supplied_venue_agrees_with() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "CAD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "SEC:SHOP:XTSE",
+            "SHOP",
+            Some("XTSE"),
+            Some(InstrumentType::Equity),
+            "CAD",
+        ));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "SEC:SHOP.TO:XTSE",
+            "SHOP.TO",
+            Some("XTSE"),
+            Some(InstrumentType::Equity),
+            "CAD",
+        ));
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let new_activity = NewActivity {
+            id: Some("activity-shop".to_string()),
+            account_id: "acc-1".to_string(),
+            asset: Some(AssetResolutionInput {
+                symbol: Some("SHOP.TO".to_string()),
+                exchange_mic: Some("XTSE".to_string()),
+                quote_ccy: Some("CAD".to_string()),
+                instrument_type: Some("EQUITY".to_string()),
+                ..Default::default()
+            }),
+            activity_type: "BUY".to_string(),
+            subtype: None,
+            activity_date: "2026-07-30".to_string(),
+            quantity: Some(dec!(1)),
+            unit_price: Some(dec!(100)),
+            currency: "CAD".to_string(),
+            fee: Some(dec!(0)),
+            tax: None,
+            amount: Some(dec!(100)),
+            status: None,
+            notes: None,
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+        };
+
+        let created = activity_service
+            .create_activity(new_activity)
+            .await
+            .expect("suffixed symbol on its own venue should save");
+
+        assert_eq!(created.asset_id.as_deref(), Some("SEC:SHOP:XTSE"));
+    }
+
     #[tokio::test]
     async fn test_create_id_lookup_transient_error_is_not_swallowed() {
         let account_service = Arc::new(MockAccountService::new());
@@ -5926,6 +6524,118 @@ mod tests {
         let checked = &result[0];
         assert_eq!(checked.quote_ccy.as_deref(), Some("GBp"));
         assert_eq!(checked.currency, "USD");
+    }
+
+    // Regression for #1388. When the CSV has no currency column the review step
+    // resolves the account currency, but the frontend keeps `currencySource:
+    // "default"` and sends an empty currency on confirm. The import must fall back
+    // to the account currency instead of persisting "", which later breaks FX
+    // conversion ("" -> CAD) during valuation.
+    #[tokio::test]
+    async fn test_import_defaults_missing_currency_to_account_currency() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "CAD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "asset-zfl",
+            "ZFL",
+            Some("XTSE"),
+            Some(InstrumentType::Equity),
+            "CAD",
+        ));
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let checked = activity_service
+            .check_activities_import(vec![ActivityImport {
+                id: None,
+                date: "2026-07-15".to_string(),
+                symbol: "ZFL".to_string(),
+                activity_type: "BUY".to_string(),
+                quantity: Some(dec!(10)),
+                unit_price: Some(dec!(120)),
+                currency: String::new(),
+                fee: Some(dec!(0)),
+                tax: None,
+                amount: Some(dec!(1200)),
+                comment: None,
+                account_id: Some("acc-1".to_string()),
+                account_name: None,
+                symbol_name: None,
+                exchange_mic: None,
+                quote_ccy: None,
+                instrument_type: None,
+                quote_mode: None,
+                provider_id: None,
+                provider_symbol: None,
+                errors: None,
+                warnings: None,
+                duplicate_of_id: None,
+                duplicate_of_line_number: None,
+                is_draft: false,
+                is_valid: false,
+                line_number: Some(1),
+                fx_rate: None,
+                subtype: None,
+                asset_id: None,
+                isin: None,
+                force_import: false,
+                is_external: None,
+            }])
+            .await
+            .expect("import check should succeed");
+
+        // The review grid displays the account currency.
+        assert_eq!(checked[0].currency, "CAD");
+
+        // The confirm step strips it again because the row is still
+        // `currencySource: "default"` (resolved currency == account currency).
+        let mut confirmed = checked;
+        confirmed[0].currency = String::new();
+
+        let result = activity_service
+            .import_activities(confirmed.clone())
+            .await
+            .expect("import should succeed");
+
+        assert!(result.summary.success);
+        assert_eq!(result.summary.imported, 1);
+
+        let stored = activity_repository
+            .get_activities()
+            .expect("imported activity should be stored");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(
+            stored[0].currency, "CAD",
+            "missing currency must fall back to the account currency, not persist as empty"
+        );
+
+        // The fallback has to happen before the idempotency key is built, otherwise
+        // re-importing the same file silently duplicates the row.
+        let reimport = activity_service
+            .import_activities(confirmed)
+            .await
+            .expect("re-import should succeed");
+
+        assert_eq!(reimport.summary.imported, 0);
+        assert_eq!(reimport.summary.duplicates, 1);
+        assert_eq!(
+            activity_repository
+                .get_activities()
+                .expect("re-import should not insert")
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -8379,7 +9089,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_import_prepare_date_errors_are_keyed_under_activity_date_field() {
+    async fn test_import_rejects_dates_before_supported_history() {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());
         let fx_service = Arc::new(MockFxService::new());
@@ -8399,7 +9109,7 @@ mod tests {
 
         let invalid_date_row = ActivityImport {
             id: None,
-            date: "invalid-date".to_string(),
+            date: "1969-12-31".to_string(),
             symbol: "VWRPL".to_string(),
             activity_type: "BUY".to_string(),
             quantity: Some(dec!(1)),
@@ -8448,6 +9158,9 @@ mod tests {
             .expect("expected prepare errors");
         assert!(errors.contains_key("activityDate"));
         assert!(!errors.contains_key("symbol"));
+        assert!(errors["activityDate"]
+            .iter()
+            .any(|message| message.contains("on or after 1970-01-01")));
     }
 
     #[tokio::test]

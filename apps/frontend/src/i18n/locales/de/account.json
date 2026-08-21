@@ -69,6 +69,11 @@
     "tab": "Momentaufnahmen",
     "deleted": "Momentaufnahme gelöscht",
     "delete_failed": "Löschen der Momentaufnahme fehlgeschlagen",
+    "invalid_date_title": "Dieses Bestandsdatum kann nicht verwendet werden",
+    "invalid_date_desc": "Ihr Portfolioverlauf bleibt unverändert. Löschen Sie den markierten Eintrag; Ihr Portfolio wird anschließend automatisch aktualisiert.",
+    "invalid_date_update_failed": "Ein Teil des Verlaufs wurde nicht aktualisiert",
+    "invalid_date_update_desc": "Ein Konto wurde wegen eines nicht unterstützten Datums übersprungen. Andere Konten wurden normal aktualisiert.",
+    "review_health": "Problem prüfen",
     "history_title": "Verlauf der Momentaufnahmen",
     "history_desc": "Gespeicherte Bestände und Barbestände nach Datum überprüfen.",
     "add": "Momentaufnahme hinzufügen",
@@ -87,7 +92,6 @@
     "source_csv": "CSV",
     "source_broker": "Broker",
     "source_calculated": "Berechnet",
-    "source_synthetic": "Synthetisch",
     "summary_one": "{{count}} Position, {{cash}} Bargeld",
     "summary_other": "{{count}} Positionen, {{cash}} Bargeld"
   },
@@ -147,5 +151,7 @@
   "so_far_in": "bisher in",
   "no_limit_set": "Für dieses Konto ist keine Einzahlungsgrenze festgelegt.",
   "to_this_account_in": "auf dieses Konto in",
-  "your_total_is": "Ihr Gesamtbetrag beträgt"
+  "your_total_is": "Ihr Gesamtbetrag beträgt",
+  "more_count_one": "+{{count}} weitere",
+  "more_count_other": "+{{count}} weitere"
 }

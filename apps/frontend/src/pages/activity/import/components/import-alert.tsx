@@ -13,6 +13,7 @@ interface ImportAlertProps {
   description?: React.ReactNode;
   className?: string;
   icon?: Icon;
+  iconClassName?: string;
   rightIcon?: Icon;
   size?: AlertSize;
   children?: React.ReactNode;
@@ -24,6 +25,7 @@ export function ImportAlert({
   description,
   className,
   icon: CustomIcon,
+  iconClassName,
   rightIcon: RightIcon,
   size = "lg",
   children,
@@ -222,7 +224,7 @@ export function ImportAlert({
                     styles.iconColor,
                   )}
                 >
-                  <Icon className={sizeStyle.iconSize} strokeWidth={2.5} />
+                  <Icon className={cn(sizeStyle.iconSize, iconClassName)} strokeWidth={2.5} />
                 </div>
               </motion.div>
             )}

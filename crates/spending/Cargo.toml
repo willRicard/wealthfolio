@@ -25,3 +25,4 @@ wealthfolio-core = { path = "../core" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+proptest = "1.4"

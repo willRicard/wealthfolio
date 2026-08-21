@@ -273,6 +273,21 @@ impl AffectedItem {
             symbol: None,
         }
     }
+
+    /// Creates a new affected item for an activity, deep-linking to the row in
+    /// the activities grid so the user can edit it in place.
+    pub fn activity(id: impl Into<String>, name: impl Into<String>) -> Self {
+        let id_str = id.into();
+        Self {
+            route: Some(format!(
+                "/activities?activity={}&healthContext=activity",
+                urlencoding::encode(&id_str)
+            )),
+            id: id_str,
+            name: name.into(),
+            symbol: None,
+        }
+    }
 }
 
 impl NavigateAction {

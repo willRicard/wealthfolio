@@ -477,7 +477,13 @@ export const AccountsSummary = React.memo(
           totalValueAccountCurrency,
           accountCurrency: valuation.accountCurrency,
           totalGainLossAmountAccountCurrency:
-            valuation.accountCurrency === valuation.baseCurrency ? gainLossBaseCurrency : null,
+            valuation.accountCurrency === valuation.baseCurrency
+              ? gainLossBaseCurrency
+              : gainLossBaseCurrency != null &&
+                  valuation.fxRateToBase != null &&
+                  valuation.fxRateToBase > 0
+                ? gainLossBaseCurrency / valuation.fxRateToBase
+                : null,
           totalGainLossPercent: gainPercent,
           accountId: acc.id,
           accountType: acc.accountType,

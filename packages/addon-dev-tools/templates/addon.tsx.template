@@ -26,7 +26,8 @@ function AddonExample({ ctx }: { ctx: AddonContext }) {
 // Route component. The sidebar entry + route are declared in manifest.json
 // (`contributes.routes` + `contributes.links`), so the host renders navigation
 // without booting the addon; this component only runs when the route is first
-// visited. The QueryClientProvider shares one cache across route navigations.
+// visited. The QueryClientProvider reuses this addon's isolated cache across
+// route navigations; invalidations/refetches are bridged to the host.
 const AddonRoute = () => (
   <QueryClientProvider client={addonCtx!.api.query.getClient() as QueryClient}>
     <AddonExample ctx={addonCtx!} />

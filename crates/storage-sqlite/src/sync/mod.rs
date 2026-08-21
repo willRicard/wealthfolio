@@ -175,9 +175,6 @@ mod tests {
             SnapshotSource::CsvImport
         ));
         assert!(!should_sync_outbox_for_snapshot_source(
-            SnapshotSource::Synthetic
-        ));
-        assert!(!should_sync_outbox_for_snapshot_source(
             SnapshotSource::BrokerImported
         ));
         assert!(!should_sync_outbox_for_snapshot_source(

@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::activities::activities_model::*;
-    use chrono::{TimeZone, Utc};
+    use chrono::{NaiveDate, TimeZone, Utc};
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
     use serde_json::json;
@@ -362,6 +362,29 @@ mod tests {
     }
 
     #[test]
+    fn test_new_activity_rejects_date_before_supported_history() {
+        let mut activity = create_test_new_activity();
+        activity.activity_date = "1969-12-31".to_string();
+
+        let error = activity.validate().unwrap_err();
+
+        assert!(error.to_string().contains("on or after 1970-01-01"));
+    }
+
+    #[test]
+    fn test_activity_date_boundary_uses_configured_timezone() {
+        let timezone = "Pacific/Auckland".parse().unwrap();
+
+        assert_eq!(
+            validate_activity_date_in_timezone("1969-12-31T12:30:00Z", timezone).unwrap(),
+            NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
+        );
+        assert!(
+            validate_activity_date_in_timezone("1969-12-31T12:30:00Z", chrono_tz::UTC).is_err()
+        );
+    }
+
+    #[test]
     fn test_new_activity_allows_null_asset_id() {
         let mut activity = create_test_new_activity();
         activity.asset = None;
@@ -568,6 +591,16 @@ mod tests {
 
         let result = update.validate();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_activity_update_rejects_date_before_supported_history() {
+        let mut update = create_test_activity_update();
+        update.activity_date = "1969-12-31T23:59:59Z".to_string();
+
+        let error = update.validate().unwrap_err();
+
+        assert!(error.to_string().contains("on or after 1970-01-01"));
     }
 
     #[test]
@@ -929,6 +962,56 @@ mod tests {
         let metadata = converted.metadata.expect("metadata should be set");
         let parsed: serde_json::Value = serde_json::from_str(&metadata).unwrap();
         assert_eq!(parsed["flow"]["is_external"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_activity_import_to_new_activity_preserves_credit_boundary_metadata() {
+        for (subtype, is_external) in [("REFUND", true), ("BONUS", false)] {
+            let import = ActivityImport {
+                id: None,
+                date: "2024-01-15".to_string(),
+                symbol: String::new(),
+                activity_type: "CREDIT".to_string(),
+                quantity: None,
+                unit_price: None,
+                currency: "USD".to_string(),
+                fee: None,
+                tax: None,
+                amount: Some(dec!(100)),
+                comment: None,
+                account_id: Some("acc-1".to_string()),
+                account_name: None,
+                symbol_name: None,
+                exchange_mic: None,
+                quote_ccy: None,
+                instrument_type: None,
+                quote_mode: None,
+                provider_id: None,
+                provider_symbol: None,
+                errors: None,
+                warnings: None,
+                duplicate_of_id: None,
+                duplicate_of_line_number: None,
+                is_draft: false,
+                is_valid: true,
+                line_number: Some(1),
+                fx_rate: None,
+                subtype: Some(subtype.to_string()),
+                asset_id: None,
+                isin: None,
+                force_import: false,
+                is_external: Some(is_external),
+            };
+
+            let converted = NewActivity::from(import);
+            let metadata = converted.metadata.expect("credit metadata should be set");
+            let parsed: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+            assert_eq!(
+                parsed["flow"]["is_external"],
+                serde_json::Value::Bool(is_external),
+                "credit subtype: {subtype}"
+            );
+        }
     }
 
     #[test]

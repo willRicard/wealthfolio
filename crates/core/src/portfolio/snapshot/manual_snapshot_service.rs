@@ -2,19 +2,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{NaiveDate, TimeZone, Utc};
-use log::debug;
+use log::{debug, warn};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::assets::{AssetKind, AssetMetadata, AssetServiceTrait, InstrumentType, QuoteMode};
 use crate::errors::Result;
-use crate::events::{DomainEvent, DomainEventSink, NoOpDomainEventSink};
 use crate::fx::FxServiceTrait;
 use crate::portfolio::snapshot::{
-    AccountStateSnapshot, Position, SnapshotServiceTrait, SnapshotSource,
+    validate_snapshot_write_date, AccountStateSnapshot, Position, SnapshotServiceTrait,
+    SnapshotSource,
 };
 use crate::quotes::constants::DATA_SOURCE_MANUAL;
 use crate::quotes::{Quote, QuoteServiceTrait};
+use crate::utils::time_utils::{parse_user_timezone_or_default, user_today};
 
 #[derive(Debug, Clone)]
 pub struct ManualHoldingInput {
@@ -62,7 +63,7 @@ pub struct ManualSnapshotService {
     fx_service: Arc<dyn FxServiceTrait>,
     snapshot_service: Arc<dyn SnapshotServiceTrait>,
     quote_service: Arc<dyn QuoteServiceTrait>,
-    event_sink: Arc<dyn DomainEventSink>,
+    timezone: String,
 }
 
 impl ManualSnapshotService {
@@ -77,13 +78,12 @@ impl ManualSnapshotService {
             fx_service,
             snapshot_service,
             quote_service,
-            event_sink: Arc::new(NoOpDomainEventSink),
+            timezone: String::new(),
         }
     }
 
-    /// Sets the domain event sink for emitting ManualSnapshotSaved events.
-    pub fn with_event_sink(mut self, event_sink: Arc<dyn DomainEventSink>) -> Self {
-        self.event_sink = event_sink;
+    pub fn with_timezone(mut self, timezone: String) -> Self {
+        self.timezone = timezone;
         self
     }
 
@@ -91,6 +91,13 @@ impl ManualSnapshotService {
         &self,
         request: ManualSnapshotRequest,
     ) -> Result<Vec<String>> {
+        validate_snapshot_write_date(
+            &request.account_id,
+            request.snapshot_date,
+            request.source.as_str(),
+            user_today(parse_user_timezone_or_default(&self.timezone)),
+        )?;
+
         let mut positions: HashMap<String, Position> = HashMap::new();
         let mut asset_ids: Vec<String> = Vec::new();
 
@@ -232,6 +239,21 @@ impl ManualSnapshotService {
 
         let total_cost_basis: Decimal = positions.values().map(|p| p.total_cost_basis).sum();
 
+        // Cache the cash totals on the keyframe: the daily holdings calculator
+        // only fills them on CALCULATED snapshots, and the snapshot history UI
+        // reads them straight off the keyframe.
+        let cash_total_account_currency = self.sum_cash_in_currency(
+            &cash_balances,
+            &request.account_currency,
+            request.snapshot_date,
+        );
+        let cash_total_base_currency = match request.base_currency.as_deref() {
+            Some(base_currency) => {
+                self.sum_cash_in_currency(&cash_balances, base_currency, request.snapshot_date)
+            }
+            None => Decimal::ZERO,
+        };
+
         let snapshot = AccountStateSnapshot {
             id: format!(
                 "{}_{}",
@@ -246,8 +268,8 @@ impl ManualSnapshotService {
             cost_basis: total_cost_basis,
             net_contribution: Decimal::ZERO,
             net_contribution_base: Decimal::ZERO,
-            cash_total_account_currency: Decimal::ZERO,
-            cash_total_base_currency: Decimal::ZERO,
+            cash_total_account_currency,
+            cash_total_base_currency,
             calculated_at: Utc::now().naive_utc(),
             source: request.source,
         };
@@ -256,14 +278,44 @@ impl ManualSnapshotService {
             .save_manual_snapshot(&request.account_id, snapshot)
             .await?;
 
-        // Emit domain event to trigger portfolio recalculation
-        self.event_sink
-            .emit(DomainEvent::manual_snapshot_saved(request.account_id));
-
         asset_ids.sort();
         asset_ids.dedup();
 
         Ok(asset_ids)
+    }
+
+    /// Sums cash balances converted into `target_currency` at `date`.
+    /// Falls back to the unconverted amount when no FX rate is available,
+    /// matching the holdings calculator's cash-total semantics.
+    fn sum_cash_in_currency(
+        &self,
+        cash_balances: &HashMap<String, Decimal>,
+        target_currency: &str,
+        date: NaiveDate,
+    ) -> Decimal {
+        let mut total = Decimal::ZERO;
+        for (currency, &amount) in cash_balances {
+            if currency == target_currency {
+                total += amount;
+            } else {
+                match self.fx_service.convert_currency_for_date(
+                    amount,
+                    currency,
+                    target_currency,
+                    date,
+                ) {
+                    Ok(converted) => total += converted,
+                    Err(e) => {
+                        warn!(
+                            "Failed to convert cash balance {} to {}: {}. Using unconverted amount.",
+                            currency, target_currency, e
+                        );
+                        total += amount;
+                    }
+                }
+            }
+        }
+        total
     }
 
     /// Creates a quote from snapshot data to serve as a price fallback.

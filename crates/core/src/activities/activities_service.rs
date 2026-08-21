@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use log::debug;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::accounts::{account_types, Account, AccountServiceTrait};
 use crate::activities::activities_constants::{
@@ -23,7 +23,7 @@ use crate::activities::{
 };
 use crate::assets::{
     canonicalize_market_identity, normalize_quote_ccy_code, parse_crypto_pair_symbol,
-    parse_symbol_with_exchange_suffix, resolve_import_quote_ccy_precedence,
+    parse_symbol_with_known_exchange, resolve_import_quote_ccy_precedence,
     resolve_quote_ccy_precedence, AssetKind, AssetResolutionInput as ImportAssetResolutionInput,
     AssetServiceTrait, InstrumentType, QuoteCcyResolutionSource, QuoteMode,
 };
@@ -33,6 +33,7 @@ use crate::fx::currency::{get_normalization_rule, normalize_amount, resolve_curr
 use crate::fx::FxServiceTrait;
 use crate::quotes::constants::DATA_SOURCE_MANUAL;
 use crate::quotes::{Quote, QuoteServiceTrait};
+use crate::utils::time_utils::parse_user_timezone_or_default;
 use crate::Result;
 use log::warn;
 
@@ -109,6 +110,7 @@ pub struct ActivityService {
     quote_service: Arc<dyn QuoteServiceTrait>,
     import_run_repository: Option<Arc<dyn ImportRunRepositoryTrait>>,
     event_sink: Arc<dyn DomainEventSink>,
+    timezone: Arc<RwLock<String>>,
 }
 
 #[derive(Clone, Copy)]
@@ -554,6 +556,7 @@ impl ActivityService {
             quote_service,
             import_run_repository: None,
             event_sink: Arc::new(NoOpDomainEventSink),
+            timezone: Arc::new(RwLock::new("UTC".to_string())),
         }
     }
 
@@ -574,6 +577,7 @@ impl ActivityService {
             quote_service,
             import_run_repository: Some(import_run_repository),
             event_sink: Arc::new(NoOpDomainEventSink),
+            timezone: Arc::new(RwLock::new("UTC".to_string())),
         }
     }
 
@@ -672,6 +676,32 @@ impl ActivityService {
     pub fn with_event_sink(mut self, event_sink: Arc<dyn DomainEventSink>) -> Self {
         self.event_sink = event_sink;
         self
+    }
+
+    pub fn with_timezone(mut self, timezone: Arc<RwLock<String>>) -> Self {
+        self.timezone = timezone;
+        self
+    }
+
+    fn validate_and_normalize_activity_date(&self, activity_date: &str) -> Result<String> {
+        let configured_timezone = self.timezone.read().unwrap().clone();
+        let timezone = parse_user_timezone_or_default(&configured_timezone);
+        validate_activity_date_in_timezone(activity_date, timezone)?;
+
+        // Preserve the submitted timestamp whenever its own calendar date is
+        // already supported. Re-encode only the boundary case where the
+        // configured timezone makes the date valid but the submitted offset
+        // does not; repository validation can then reach the same conclusion.
+        if validate_activity_date(activity_date).is_ok() {
+            return Ok(activity_date.to_string());
+        }
+
+        match DateTime::parse_from_rfc3339(activity_date) {
+            Ok(date) => Ok(date.with_timezone(&timezone).to_rfc3339()),
+            Err(_) => NaiveDate::parse_from_str(activity_date, "%Y-%m-%d")
+                .map(|date| date.format("%Y-%m-%d").to_string())
+                .map_err(|error| ActivityError::InvalidData(error.to_string()).into()),
+        }
     }
 
     fn invalid_activity_data(message: impl Into<String>) -> Error {
@@ -1902,6 +1932,8 @@ impl ActivityService {
     }
 
     async fn prepare_new_activity(&self, mut activity: NewActivity) -> Result<NewActivity> {
+        activity.activity_date =
+            self.validate_and_normalize_activity_date(&activity.activity_date)?;
         activity.subtype = NewActivity::canonicalize_subtype_for_activity(
             &activity.activity_type,
             activity.subtype.as_deref(),
@@ -1961,9 +1993,12 @@ impl ActivityService {
             effective_instrument_type.as_ref(),
             Some(InstrumentType::Crypto | InstrumentType::Fx)
         );
+        // A supplied MIC decides whether a trailing `.X` is a venue or part of the
+        // ticker: `ZAAA.F` on Cboe Canada is a hedged unit class, not a Frankfurt
+        // listing. See `parse_symbol_with_known_exchange`.
         let (base_symbol, suffix_mic) = symbol
             .as_deref()
-            .map(parse_symbol_with_exchange_suffix)
+            .map(|sym| parse_symbol_with_known_exchange(sym, exchange_mic.as_deref()))
             .unwrap_or(("", None));
         let exchange_mic = if is_non_security_instrument {
             None
@@ -2358,6 +2393,8 @@ impl ActivityService {
         &self,
         mut activity: ActivityUpdate,
     ) -> Result<ActivityUpdate> {
+        activity.activity_date =
+            self.validate_and_normalize_activity_date(&activity.activity_date)?;
         let account: Account = self.account_service.get_account(&activity.account_id)?;
         Self::validate_activity_allowed_for_account(&activity.activity_type, &account)?;
         let base_ccy = self.account_service.get_base_currency().unwrap_or_default();
@@ -2413,9 +2450,12 @@ impl ActivityService {
             effective_instrument_type.as_ref(),
             Some(InstrumentType::Crypto | InstrumentType::Fx)
         );
+        // A supplied MIC decides whether a trailing `.X` is a venue or part of the
+        // ticker: `ZAAA.F` on Cboe Canada is a hedged unit class, not a Frankfurt
+        // listing. See `parse_symbol_with_known_exchange`.
         let (base_symbol, suffix_mic) = symbol
             .as_deref()
-            .map(parse_symbol_with_exchange_suffix)
+            .map(|sym| parse_symbol_with_known_exchange(sym, exchange_mic.as_deref()))
             .unwrap_or(("", None));
         let exchange_mic = if is_non_security_instrument {
             None
@@ -2850,8 +2890,11 @@ impl ActivityService {
             .into());
         }
 
-        // Strip Yahoo suffix from symbol (e.g. GOOG.TO → GOOG + XTSE)
-        let (base_symbol, suffix_mic) = parse_symbol_with_exchange_suffix(&symbol);
+        // Strip Yahoo suffix from symbol (e.g. GOOG.TO → GOOG + XTSE), unless the row
+        // already names a venue the suffix disagrees with — then the suffix is part of
+        // the ticker, as with a `.F` hedged class on Cboe Canada.
+        let (base_symbol, suffix_mic) =
+            parse_symbol_with_known_exchange(&symbol, activity.get_exchange_mic());
 
         // Get exchange MIC: prefer explicit value, then a recognized Yahoo suffix, then live lookup.
         // If a CSV says MSF.DE, the suffix is the user's venue intent and must not be
@@ -3078,37 +3121,21 @@ impl ActivityService {
     }
 
     fn reviewed_import_asset_metadata_is_sufficient(activity: &ActivityImport) -> bool {
-        let Some(instrument_type) =
-            Self::parse_instrument_type(activity.instrument_type.as_deref())
-        else {
-            return false;
-        };
-        if Self::normalize_quote_ccy(activity.quote_ccy.as_deref()).is_none() {
-            return false;
+        ImportAssetResolutionInput {
+            key: String::new(),
+            source_symbol: activity.symbol.clone(),
+            account_currency: String::new(),
+            activity_currency: None,
+            exchange_mic: activity.exchange_mic.clone(),
+            quote_ccy: activity.quote_ccy.clone(),
+            instrument_type: Self::parse_instrument_type(activity.instrument_type.as_deref()),
+            quote_mode: Self::parse_import_quote_mode(activity.quote_mode.as_deref()),
+            isin: None,
+            asset_id: activity.asset_id.clone(),
+            provider_id: None,
+            provider_symbol: None,
         }
-
-        if Self::parse_import_quote_mode(activity.quote_mode.as_deref()) == Some(QuoteMode::Manual)
-        {
-            return true;
-        }
-
-        match instrument_type {
-            InstrumentType::Equity => {
-                activity
-                    .exchange_mic
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|mic| !mic.is_empty())
-                    || parse_symbol_with_exchange_suffix(&activity.symbol)
-                        .1
-                        .is_some()
-            }
-            InstrumentType::Crypto
-            | InstrumentType::Fx
-            | InstrumentType::Option
-            | InstrumentType::Metal
-            | InstrumentType::Bond => true,
-        }
+        .reviewed_metadata_is_sufficient()
     }
 
     fn validate_import_asset_backed_income_values(
@@ -3307,7 +3334,11 @@ impl ActivityService {
                 .clone()
                 .or_else(|| asset_resolution.and_then(|output| output.exchange_mic.clone()));
 
-            let (base_symbol, suffix_mic) = parse_symbol_with_exchange_suffix(&symbol);
+            // Same rule as the save paths: a venue on the row is better evidence than
+            // a suffix that resolves elsewhere, so a contradicted suffix stays on the
+            // ticker rather than renaming the instrument.
+            let (base_symbol, suffix_mic) =
+                parse_symbol_with_known_exchange(&symbol, activity.exchange_mic.as_deref());
             let has_import_market_hint = activity
                 .exchange_mic
                 .as_deref()
@@ -3639,7 +3670,8 @@ impl ActivityService {
     /// the import apply path runs a lightweight invariant check afterward.
     ///
     /// - CashMovement: clears symbol, exchange_mic, quote_ccy, instrument_type
-    /// - SPLIT: falls back to `account_currency` when currency is missing or invalid
+    /// - Any row: falls back to `account_currency` when currency is missing
+    /// - SPLIT: also falls back when the currency is not a 3-letter code
     fn normalize_for_insert(activity: &mut ActivityImport, account_currency: &str) {
         Self::normalize_import_activity_subtype(activity);
 
@@ -3655,9 +3687,14 @@ impl ActivityService {
             activity.exchange_mic = None;
             activity.quote_ccy = None;
             activity.instrument_type = None;
-            if activity.currency.trim().is_empty() {
-                activity.currency = account_currency.to_string();
-            }
+        }
+
+        // The review step sends an empty currency whenever the user kept the account
+        // currency (`currencySource: "default"` in the import UI), so every row needs
+        // this fallback, not just cash movements. It has to run before the idempotency
+        // key is built so the stored row matches what the review step keyed on.
+        if activity.currency.trim().is_empty() {
+            activity.currency = account_currency.to_string();
         }
 
         if activity.activity_type == ACTIVITY_TYPE_SPLIT {
@@ -4321,35 +4358,93 @@ impl ActivityServiceTrait for ActivityService {
             });
         }
 
-        // Use save preparation for all creates at once
+        // Use save preparation for the creates, one account at a time.
+        //
+        // Save preparation is account-scoped: it enforces the per-account-type
+        // activity rules and resolves symbols and currencies against the
+        // account currency. A bulk request may span accounts, so preparing
+        // every create against a single account would judge rows by an account
+        // they do not belong to (e.g. rejecting a bank DEPOSIT because an
+        // unrelated credit-card row happened to be listed first).
         if !request.creates.is_empty() {
-            // Get account from first create (all creates in a bulk request typically share the same account)
-            let account_id = &request.creates[0].account_id;
-            let account = self.account_service.get_account(account_id)?;
-
             // Store temp_ids for error reporting (prepare result uses indices)
             let temp_ids: Vec<Option<String>> =
                 request.creates.iter().map(|a| a.id.clone()).collect();
 
-            let prepare_result = self
-                .prepare_activities_for_save(request.creates, &account)
-                .await?;
-
-            // Convert preparation errors to bulk mutation errors
-            for (idx, error) in prepare_result.errors {
-                errors.push(ActivityBulkMutationError {
-                    id: temp_ids.get(idx).cloned().flatten(),
-                    action: "create".to_string(),
-                    message: error,
-                });
+            // Group creates by account, keeping each row's index in the
+            // original request so errors and prepared rows can be reported
+            // back in request order.
+            let mut grouped: Vec<(String, Vec<(usize, NewActivity)>)> = Vec::new();
+            let mut group_positions: HashMap<String, usize> = HashMap::new();
+            for (idx, activity) in request.creates.into_iter().enumerate() {
+                let account_id = activity.account_id.clone();
+                let position = match group_positions.get(&account_id) {
+                    Some(position) => *position,
+                    None => {
+                        group_positions.insert(account_id.clone(), grouped.len());
+                        grouped.push((account_id, Vec::new()));
+                        grouped.len() - 1
+                    }
+                };
+                grouped[position].1.push((idx, activity));
             }
 
-            // Extract prepared activities
-            prepared_creates = prepare_result
-                .prepared
-                .into_iter()
-                .map(|p| p.activity)
-                .collect();
+            let mut create_errors: Vec<(usize, ActivityBulkMutationError)> = Vec::new();
+            let mut ordered_creates: Vec<Option<NewActivity>> = vec![None; temp_ids.len()];
+
+            for (account_id, entries) in grouped {
+                let account = self.account_service.get_account(&account_id)?;
+                let indexes: Vec<usize> = entries.iter().map(|(idx, _)| *idx).collect();
+                let account_creates: Vec<NewActivity> =
+                    entries.into_iter().map(|(_, activity)| activity).collect();
+
+                let prepare_result = self
+                    .prepare_activities_for_save(account_creates, &account)
+                    .await?;
+
+                // Convert preparation errors to bulk mutation errors. Preparation
+                // reports indices within the group it was handed, so map each one
+                // back to its position in the original request.
+                let failed_offsets: HashSet<usize> = prepare_result
+                    .errors
+                    .iter()
+                    .map(|(offset, _)| *offset)
+                    .collect();
+                for (offset, error) in prepare_result.errors {
+                    let idx = indexes.get(offset).copied().unwrap_or(offset);
+                    create_errors.push((
+                        idx,
+                        ActivityBulkMutationError {
+                            id: temp_ids.get(idx).cloned().flatten(),
+                            action: "create".to_string(),
+                            message: error,
+                        },
+                    ));
+                }
+
+                // Preparation yields one prepared row per input row that did not
+                // error, in input order, so walking the surviving offsets puts
+                // each row back at its original request position.
+                let mut prepared = prepare_result.prepared.into_iter();
+                for (offset, idx) in indexes.into_iter().enumerate() {
+                    if failed_offsets.contains(&offset) {
+                        continue;
+                    }
+                    match prepared.next() {
+                        Some(prepared_activity) => {
+                            ordered_creates[idx] = Some(prepared_activity.activity);
+                        }
+                        None => break,
+                    }
+                }
+            }
+
+            // Report errors and prepared activities in request order, so the
+            // result does not depend on how the creates grouped by account.
+            create_errors.sort_by_key(|(idx, _)| *idx);
+            errors.extend(create_errors.into_iter().map(|(_, error)| error));
+
+            prepared_creates = ordered_creates.into_iter().flatten().collect();
         }
 
         // For updates: capture OLD values before preparing the update
@@ -4801,17 +4896,14 @@ impl ActivityServiceTrait for ActivityService {
                 activity.quantity,
                 activity.unit_price,
             );
-            let valid_date = DateTime::parse_from_rfc3339(&activity.date).is_ok()
-                || NaiveDate::parse_from_str(&activity.date, "%Y-%m-%d").is_ok();
-            if !valid_date {
-                activity.is_valid = false;
-                Self::add_activity_error(
-                    activity,
-                    "activityDate",
-                    &format!("Invalid date '{}'.", activity.date),
-                );
-                has_validation_errors = true;
-                continue;
+            match self.validate_and_normalize_activity_date(&activity.date) {
+                Ok(date) => activity.date = date,
+                Err(error) => {
+                    activity.is_valid = false;
+                    Self::add_activity_error(activity, "activityDate", &error.to_string());
+                    has_validation_errors = true;
+                    continue;
+                }
             }
             if let Err((field, message)) =
                 Self::validate_import_asset_backed_income_values(activity)
@@ -5537,7 +5629,14 @@ impl ActivityService {
 
         let activities: Vec<NewActivity> = activities
             .into_iter()
-            .map(Self::normalize_activity_for_preparation)
+            .map(|activity| {
+                let mut activity = Self::normalize_activity_for_preparation(activity);
+                if let Ok(date) = self.validate_and_normalize_activity_date(&activity.activity_date)
+                {
+                    activity.activity_date = date;
+                }
+                activity
+            })
             .collect();
 
         let mut result = PrepareActivitiesResult::default();

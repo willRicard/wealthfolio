@@ -69,6 +69,9 @@ export const createInterestFormSchema = (t?: TFunction) =>
           ),
         })
         .default(0),
+      // Positivity for unitPrice/quantity is enforced in superRefine, only for
+      // the staking-reward subtype: cash records persist 0 for these hidden
+      // fields, and a top-level .positive() would reject editing them.
       unitPrice: z.coerce
         .number({
           invalid_type_error: msg(
@@ -77,9 +80,6 @@ export const createInterestFormSchema = (t?: TFunction) =>
             "FMV per unit must be a number.",
           ),
         })
-        .positive({
-          message: msg(t, "activity:form.err_fmv_gt_zero", "FMV per unit must be greater than 0."),
-        })
         .optional(),
       quantity: z.coerce
         .number({
@@ -87,13 +87,6 @@ export const createInterestFormSchema = (t?: TFunction) =>
             t,
             "activity:form.err_received_quantity_number",
             "Received quantity must be a number.",
-          ),
-        })
-        .positive({
-          message: msg(
-            t,
-            "activity:form.err_received_quantity_gt_zero",
-            "Received quantity must be greater than 0.",
           ),
         })
         .optional(),
@@ -139,6 +132,16 @@ export const createInterestFormSchema = (t?: TFunction) =>
             "Received quantity is required.",
           ),
         });
+      } else if (data.quantity < 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["quantity"],
+          message: msg(
+            t,
+            "activity:form.err_received_quantity_gt_zero",
+            "Received quantity must be greater than 0.",
+          ),
+        });
       }
       if (!data.unitPrice) {
         if (data.amount) return;
@@ -150,6 +153,12 @@ export const createInterestFormSchema = (t?: TFunction) =>
             "activity:form.err_enter_interest_or_fmv",
             "Enter either interest amount or FMV per unit.",
           ),
+        });
+      } else if (data.unitPrice < 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["unitPrice"],
+          message: msg(t, "activity:form.err_fmv_gt_zero", "FMV per unit must be greater than 0."),
         });
       }
     });

@@ -20,7 +20,7 @@ export interface LocalTransaction extends ActivityDetails {
   pendingProviderSymbol?: string;
   /** Persisted asset id selected from symbol search, if the result already exists */
   pendingAssetId?: string;
-  /** Whether this transfer is external (from/to outside tracked accounts). Stored in metadata.flow.is_external */
+  /** Explicit performance boundary marker stored in metadata.flow.is_external. */
   isExternal?: boolean;
   /** Original asset symbol from server - used to detect symbol changes for updates */
   _originalAssetSymbol?: string;
@@ -46,9 +46,9 @@ export function toLocalTransaction(activity: ActivityDetails): LocalTransaction 
   if (isLocalTransaction(activity)) {
     return activity;
   }
-  // Extract isExternal from metadata.flow.is_external
+  // Preserve both explicit boundary values; absence must remain distinguishable from false.
   const flowMeta = activity.metadata?.flow as Record<string, unknown> | undefined;
-  const isExternal = flowMeta?.is_external === true;
+  const isExternal = typeof flowMeta?.is_external === "boolean" ? flowMeta.is_external : undefined;
   return {
     ...activity,
     isNew: false,
@@ -145,7 +145,7 @@ interface ActivityBasePayload {
   tax?: string | null;
   fxRate?: string | null;
   notes?: string | null;
-  /** JSON blob for metadata (e.g., flow.is_external for transfers) */
+  /** JSON blob for metadata, including explicit transfer and credit boundaries. */
   metadata?: string;
 }
 

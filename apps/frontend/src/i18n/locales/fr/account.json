@@ -99,6 +99,11 @@
     "tab": "Instantanés",
     "deleted": "Instantané supprimé",
     "delete_failed": "Échec de la suppression de l'instantané",
+    "invalid_date_title": "Cette date de positions ne peut pas être utilisée",
+    "invalid_date_desc": "L'historique de votre portefeuille reste inchangé. Supprimez l'entrée en surbrillance et votre portefeuille sera mis à jour automatiquement.",
+    "invalid_date_update_failed": "Une partie de l’historique n’a pas été mise à jour",
+    "invalid_date_update_desc": "Un compte a été ignoré car il contient une date non prise en charge. Les autres ont été mis à jour.",
+    "review_health": "Examiner le problème",
     "history_title": "Historique des instantanés",
     "history_desc": "Consultez les positions et soldes de trésorerie enregistrés par date.",
     "add": "Ajouter un instantané",
@@ -117,7 +122,6 @@
     "source_csv": "CSV",
     "source_broker": "Courtier",
     "source_calculated": "Calculé",
-    "source_synthetic": "Synthétique",
     "summary_one": "{{count}} position, {{cash}} en trésorerie",
     "summary_other": "{{count}} positions, {{cash}} en trésorerie"
   },
@@ -147,5 +151,7 @@
     "period_irr": "TRI de la période",
     "twr_hover_hint": " Survolez la valeur pour voir le TWR cumulé.",
     "irr_hover_hint": " Survolez la valeur pour voir le TRI de la période sélectionnée."
-  }
+  },
+  "more_count_one": "+{{count}} de plus",
+  "more_count_other": "+{{count}} de plus"
 }

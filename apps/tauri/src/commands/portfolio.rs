@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use log::{debug, info, warn};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,7 @@ use wealthfolio_core::{
         TrackingMode,
     },
     allocation::{AllocationHoldings, PortfolioAllocations},
+    health::HealthServiceTrait,
     holdings::{Holding, HoldingListItem},
     income::IncomeSummary,
     lots::AssetLotView,
@@ -32,8 +33,11 @@ use wealthfolio_core::{
         PERFORMANCE_SUMMARY_BATCH_PARALLELISM,
     },
     portfolio::snapshot::{
-        CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
-        SnapshotSource,
+        check_holdings_import as validate_holdings_import, holdings_import_data_source,
+        snapshot_date_requires_remediation, snapshot_recalculation_start_after_delete,
+        validate_holdings_import_snapshot, CashBalanceInput, HoldingsImportPositionValidationInput,
+        HoldingsImportSnapshotValidationInput, ManualHoldingInput, ManualSnapshotRequest,
+        ManualSnapshotService, SnapshotSource,
     },
     portfolios::{AccountScope, ResolvedAccountScope},
     quotes::MarketSyncMode,
@@ -145,7 +149,9 @@ fn income_account_ids(
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotInfo {
     pub id: String,
+    /// Stored date, returned raw so malformed rows can be remediated.
     pub snapshot_date: String,
+    pub is_date_valid: bool,
     pub source: String,
     pub position_count: usize,
     pub cash_currency_count: usize,
@@ -229,23 +235,30 @@ pub async fn get_holdings(
 ) -> Result<Vec<Holding>, String> {
     debug!("Get holdings...");
     let filter = filter.into_account_filter()?;
-    get_holdings_for_filter(state.inner().as_ref(), filter).await
+    get_holdings_for_filter(state.inner().as_ref(), filter, false).await
 }
 
 #[tauri::command]
 pub async fn get_holdings_list(
     state: State<'_, Arc<ServiceContext>>,
     filter: AccountScopeInput,
+    include_closed: Option<bool>,
 ) -> Result<Vec<HoldingListItem>, String> {
     debug!("Get holdings list...");
     let filter = filter.into_account_filter()?;
-    let holdings = get_holdings_for_filter(state.inner().as_ref(), filter).await?;
+    let holdings = get_holdings_for_filter(
+        state.inner().as_ref(),
+        filter,
+        include_closed.unwrap_or(false),
+    )
+    .await?;
     Ok(holdings.into_iter().map(HoldingListItem::from).collect())
 }
 
 async fn get_holdings_for_filter(
     state: &ServiceContext,
     filter: AccountScope,
+    include_closed: bool,
 ) -> Result<Vec<Holding>, String> {
     let base_currency = state.get_base_currency();
     let resolved = resolve_scope(&filter, state).await?;
@@ -256,13 +269,18 @@ async fn get_holdings_for_filter(
     if account_ids.len() == 1 {
         state
             .holdings_service()
-            .get_holdings(&account_ids[0], &base_currency)
+            .get_holdings_with_options(&account_ids[0], &base_currency, include_closed)
             .await
             .map_err(|e| e.to_string())
     } else {
         state
             .holdings_service()
-            .get_holdings_for_accounts(&account_ids, &base_currency, &resolved.scope_id)
+            .get_holdings_for_accounts_with_options(
+                &account_ids,
+                &base_currency,
+                &resolved.scope_id,
+                include_closed,
+            )
             .await
             .map_err(|e| e.to_string())
     }
@@ -1059,7 +1077,7 @@ pub struct HoldingInput {
 #[tauri::command]
 pub async fn save_manual_holdings(
     state: State<'_, Arc<ServiceContext>>,
-    handle: AppHandle,
+    _handle: AppHandle,
     account_id: String,
     holdings: Vec<HoldingInput>,
     cash_balances: HashMap<String, String>,
@@ -1081,11 +1099,12 @@ pub async fn save_manual_holdings(
     // Get base currency for FX pair registration
     let base_currency = state.get_base_currency();
 
-    // Parse the snapshot date or use today
+    // Parse the snapshot date or use today in the configured user timezone.
+    let timezone = state.get_timezone();
     let date = match snapshot_date {
         Some(date_str) => chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
             .map_err(|e| format!("Invalid date format: {}", e))?,
-        None => Utc::now().naive_utc().date(),
+        None => user_today(parse_user_timezone_or_default(&timezone)),
     };
 
     let mut positions: Vec<ManualHoldingInput> = Vec::new();
@@ -1133,7 +1152,8 @@ pub async fn save_manual_holdings(
         state.fx_service(),
         state.snapshot_service(),
         state.quote_service(),
-    );
+    )
+    .with_timezone(timezone);
 
     let asset_ids = manual_snapshot_service
         .save_manual_snapshot(ManualSnapshotRequest {
@@ -1154,20 +1174,6 @@ pub async fn save_manual_holdings(
         date,
         asset_ids.len()
     );
-
-    // Trigger portfolio update to recalculate valuations from the new snapshot
-    // Pass specific asset IDs to ensure quotes are fetched for the new holdings
-    let payload = PortfolioRequestPayload::builder()
-        .account_ids(Some(vec![account_id.clone()]))
-        .market_sync_mode(MarketSyncMode::Incremental {
-            asset_ids: if asset_ids.is_empty() {
-                None
-            } else {
-                Some(asset_ids)
-            },
-        })
-        .build();
-    emit_portfolio_trigger_recalculate(&handle, payload);
 
     Ok(())
 }
@@ -1193,6 +1199,8 @@ pub struct CheckHoldingsImportResult {
     pub existing_dates: Vec<String>,
     pub symbols: Vec<SymbolCheckResult>,
     pub validation_errors: Vec<String>,
+    pub valid_snapshot_dates: Vec<String>,
+    pub invalid_snapshot_dates: Vec<String>,
 }
 
 #[tauri::command]
@@ -1208,101 +1216,72 @@ pub async fn check_holdings_import(
     );
 
     // Verify account exists
-    state
+    let account = state
         .account_service()
         .get_account(&account_id)
         .map_err(|e| format!("Failed to get account: {}", e))?;
+    let today = user_today(parse_user_timezone_or_default(&state.get_timezone()));
 
-    let mut validation_errors: Vec<String> = Vec::new();
-    let mut valid_dates: Vec<NaiveDate> = Vec::new();
-    let mut unique_symbols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let validation_snapshots: Vec<_> = snapshots
+        .iter()
+        .map(|snapshot| HoldingsImportSnapshotValidationInput {
+            date: snapshot.date.clone(),
+            cash_balances: snapshot
+                .cash_balances
+                .iter()
+                .map(|(currency, amount)| (currency.clone(), amount.clone()))
+                .collect(),
+            positions: snapshot
+                .positions
+                .iter()
+                .map(|position| HoldingsImportPositionValidationInput {
+                    symbol: position.symbol.clone(),
+                    quantity: position.quantity.clone(),
+                    avg_cost: position.avg_cost.clone(),
+                    currency: position.currency.clone(),
+                    exchange_mic: position.exchange_mic.clone(),
+                    quote_ccy: position.quote_ccy.clone(),
+                    instrument_type: position.instrument_type.clone(),
+                    quote_mode: position.quote_mode.clone(),
+                    provider_id: position.provider_id.clone(),
+                    provider_symbol: position.provider_symbol.clone(),
+                    asset_id: position.asset_id.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    let asset_service = state.asset_service();
+    let snapshot_service = state.snapshot_service();
+    let result = validate_holdings_import(
+        asset_service.as_ref(),
+        snapshot_service.as_ref(),
+        &account_id,
+        &account.currency,
+        today,
+        &validation_snapshots,
+    )
+    .await
+    .map_err(|e| format!("Failed to validate holdings import: {}", e))?;
 
-    for snapshot in &snapshots {
-        // Validate date
-        match NaiveDate::parse_from_str(&snapshot.date, "%Y-%m-%d") {
-            Ok(d) => valid_dates.push(d),
-            Err(_) => {
-                validation_errors.push(format!("Invalid date format: '{}'", snapshot.date));
-                continue;
-            }
-        }
-
-        // Validate positions
-        for pos in &snapshot.positions {
-            if pos.symbol.trim().is_empty() {
-                validation_errors.push(format!("Date {}: empty symbol found", snapshot.date));
-            }
-            if pos.quantity.parse::<Decimal>().is_err() {
-                validation_errors.push(format!(
-                    "Date {}: invalid quantity '{}' for {}",
-                    snapshot.date, pos.quantity, pos.symbol
-                ));
-            }
-            if let Some(ref c) = pos.avg_cost {
-                if !c.is_empty() && c.parse::<Decimal>().is_err() {
-                    validation_errors.push(format!(
-                        "Date {}: invalid avg cost '{}' for {}",
-                        snapshot.date, c, pos.symbol
-                    ));
-                }
-            }
-            unique_symbols.insert(pos.symbol.to_uppercase());
-        }
-    }
-
-    // Check existing snapshots
-    let existing_dates = if !valid_dates.is_empty() {
-        let min_date = *valid_dates.iter().min().unwrap();
-        let max_date = *valid_dates.iter().max().unwrap();
-        let existing = state
-            .snapshot_service()
-            .get_holdings_keyframes(&account_id, Some(min_date), Some(max_date))
-            .map_err(|e| format!("Failed to query snapshots: {}", e))?;
-
-        let import_dates: std::collections::HashSet<NaiveDate> = valid_dates.into_iter().collect();
-        existing
-            .into_iter()
-            .filter(|s| import_dates.contains(&s.snapshot_date))
-            .map(|s| s.snapshot_date.format("%Y-%m-%d").to_string())
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    // Symbol lookup: search DB first, then market data providers (like activity import)
-    let mut symbols: Vec<SymbolCheckResult> = Vec::new();
-    for sym in unique_symbols {
-        let results = state
-            .quote_service()
-            .search_symbol_with_currency(&sym, None)
-            .await
-            .unwrap_or_default();
-
-        if let Some(hit) = results.first() {
-            symbols.push(SymbolCheckResult {
-                symbol: sym,
-                found: true,
-                asset_name: Some(hit.long_name.clone()),
-                asset_id: hit.existing_asset_id.clone(),
-                currency: hit.currency.clone(),
-                exchange_mic: hit.exchange_mic.clone(),
-            });
-        } else {
-            symbols.push(SymbolCheckResult {
-                symbol: sym,
-                found: false,
-                asset_name: None,
-                asset_id: None,
-                currency: None,
-                exchange_mic: None,
-            });
-        }
-    }
+    let symbols = result
+        .symbols
+        .into_iter()
+        .map(|symbol| SymbolCheckResult {
+            symbol: symbol.symbol,
+            found: symbol.found,
+            asset_name: symbol.asset_name,
+            asset_id: symbol.asset_id,
+            currency: symbol.currency,
+            exchange_mic: symbol.exchange_mic,
+        })
+        .collect();
 
     Ok(CheckHoldingsImportResult {
-        existing_dates,
+        existing_dates: result.existing_dates,
         symbols,
-        validation_errors,
+        validation_errors: result.validation_errors,
+        valid_snapshot_dates: result.valid_snapshot_dates,
+        invalid_snapshot_dates: result.invalid_snapshot_dates,
     })
 }
 
@@ -1328,6 +1307,8 @@ pub struct HoldingsPositionInput {
     pub quote_ccy: Option<String>,
     /// Instrument type resolved during asset review/search
     pub instrument_type: Option<String>,
+    /// Quote mode selected during asset review (MARKET or MANUAL)
+    pub quote_mode: Option<String>,
     /// Market data provider that resolved this position, if selected.
     pub provider_id: Option<String>,
     /// Provider-native symbol/code selected by search/import.
@@ -1378,7 +1359,7 @@ pub struct ImportHoldingsCsvResult {
 #[tauri::command]
 pub async fn import_holdings_csv(
     state: State<'_, Arc<ServiceContext>>,
-    handle: AppHandle,
+    _handle: AppHandle,
     account_id: String,
     snapshots: Vec<HoldingsSnapshotInput>,
 ) -> Result<ImportHoldingsCsvResult, String> {
@@ -1440,19 +1421,6 @@ pub async fn import_holdings_csv(
         all_asset_ids.len()
     );
 
-    // Trigger portfolio update to sync quotes and recalculate valuations
-    let payload = PortfolioRequestPayload::builder()
-        .account_ids(Some(vec![account_id.clone()]))
-        .market_sync_mode(MarketSyncMode::Incremental {
-            asset_ids: if all_asset_ids.is_empty() {
-                None
-            } else {
-                Some(all_asset_ids)
-            },
-        })
-        .build();
-    emit_portfolio_trigger_recalculate(&handle, payload);
-
     Ok(ImportHoldingsCsvResult {
         snapshots_imported,
         snapshots_failed,
@@ -1469,9 +1437,34 @@ async fn import_single_snapshot(
     base_currency: &str,
     snapshot_input: &HoldingsSnapshotInput,
 ) -> Result<Vec<String>, String> {
-    // Parse the date
-    let date = NaiveDate::parse_from_str(&snapshot_input.date, "%Y-%m-%d")
-        .map_err(|e| format!("Invalid date format: {}", e))?;
+    let validation_input = HoldingsImportSnapshotValidationInput {
+        date: snapshot_input.date.clone(),
+        cash_balances: snapshot_input
+            .cash_balances
+            .iter()
+            .map(|(currency, amount)| (currency.clone(), amount.clone()))
+            .collect(),
+        positions: snapshot_input
+            .positions
+            .iter()
+            .map(|position| HoldingsImportPositionValidationInput {
+                symbol: position.symbol.clone(),
+                quantity: position.quantity.clone(),
+                avg_cost: position.avg_cost.clone(),
+                currency: position.currency.clone(),
+                exchange_mic: position.exchange_mic.clone(),
+                quote_ccy: position.quote_ccy.clone(),
+                instrument_type: position.instrument_type.clone(),
+                quote_mode: position.quote_mode.clone(),
+                provider_id: position.provider_id.clone(),
+                provider_symbol: position.provider_symbol.clone(),
+                asset_id: position.asset_id.clone(),
+            })
+            .collect(),
+    };
+    let today = user_today(parse_user_timezone_or_default(&state.get_timezone()));
+    let date = validate_holdings_import_snapshot(account_id, today, &validation_input)
+        .map_err(|errors| errors.join(" "))?;
 
     let mut positions: Vec<ManualHoldingInput> = Vec::new();
 
@@ -1482,11 +1475,16 @@ async fn import_single_snapshot(
             .map_err(|e| format!("Invalid quantity for {}: {}", pos_input.symbol, e))?;
 
         // Parse average cost from CSV if provided, use for cost basis calculation
-        let average_cost = pos_input
+        let average_cost = match pos_input
             .avg_cost
-            .as_ref()
-            .and_then(|p| p.parse::<Decimal>().ok())
-            .unwrap_or(Decimal::ZERO);
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            Some(value) => value
+                .parse::<Decimal>()
+                .map_err(|e| format!("Invalid average cost for {}: {}", pos_input.symbol, e))?,
+            None => Decimal::ZERO,
+        };
 
         positions.push(ManualHoldingInput {
             asset_id: pos_input.asset_id.clone(),
@@ -1496,7 +1494,7 @@ async fn import_single_snapshot(
             currency: pos_input.currency.clone(),
             average_cost,
             name: None,
-            data_source: None,
+            data_source: holdings_import_data_source(pos_input.quote_mode.as_deref()),
             asset_kind: None,
             quote_ccy: pos_input.quote_ccy.clone(),
             instrument_type: pos_input.instrument_type.clone(),
@@ -1521,7 +1519,8 @@ async fn import_single_snapshot(
         state.fx_service(),
         state.snapshot_service(),
         state.quote_service(),
-    );
+    )
+    .with_timezone(state.get_timezone());
 
     manual_snapshot_service
         .save_manual_snapshot(ManualSnapshotRequest {
@@ -1567,18 +1566,19 @@ pub async fn get_snapshots(
 
     let snapshots = state
         .snapshot_service()
-        .get_holdings_keyframes(&account_id, start_date, end_date)
+        .get_snapshot_metadata(&account_id, start_date, end_date)
         .map_err(|e| format!("Failed to get snapshots: {}", e))?;
 
     let result: Vec<SnapshotInfo> = snapshots
         .into_iter()
         .map(|s| SnapshotInfo {
             id: s.id,
-            snapshot_date: s.snapshot_date.format("%Y-%m-%d").to_string(),
-            source: snapshot_source_to_string(s.source),
-            position_count: s.positions.len(),
-            cash_currency_count: s.cash_balances.len(),
-            cash_total_account_currency: s.cash_total_account_currency.to_string(),
+            is_date_valid: NaiveDate::parse_from_str(&s.snapshot_date, "%Y-%m-%d").is_ok(),
+            snapshot_date: s.snapshot_date,
+            source: s.source,
+            position_count: s.position_count,
+            cash_currency_count: s.cash_currency_count,
+            cash_total_account_currency: s.cash_total_account_currency,
         })
         .collect();
 
@@ -1589,13 +1589,6 @@ pub async fn get_snapshots(
     );
 
     Ok(result)
-}
-
-fn snapshot_source_to_string(source: SnapshotSource) -> String {
-    serde_json::to_string(&source)
-        .unwrap_or_else(|_| "\"CALCULATED\"".to_string())
-        .trim_matches('"')
-        .to_string()
 }
 
 /// Gets the full snapshot data for a specific date.
@@ -1704,6 +1697,7 @@ pub async fn get_snapshot_by_date(
             id: format!("{}-{}-{}", id_prefix, account_id, position.asset_id),
             account_id: account_id.clone(),
             holding_type,
+            is_closed: false,
             instrument: Some(instrument),
             asset_kind: Some(asset.kind.clone()),
             quantity: position.quantity,
@@ -1751,6 +1745,7 @@ pub async fn get_snapshot_by_date(
             id: format!("CASH-{}-{}", account_id, currency),
             account_id: account_id.clone(),
             holding_type: wealthfolio_core::holdings::HoldingType::Cash,
+            is_closed: false,
             instrument: None,
             asset_kind: None, // Cash holdings have no asset
             quantity: amount,
@@ -1794,87 +1789,88 @@ pub async fn get_snapshot_by_date(
     Ok(holdings)
 }
 
-/// Deletes a manual/imported snapshot for a specific date.
-/// Only non-CALCULATED snapshots can be deleted.
+/// Deletes a snapshot by date or ID.
+/// Calculated snapshots are only deletable when their date requires remediation.
 #[tauri::command]
 pub async fn delete_snapshot(
     state: State<'_, Arc<ServiceContext>>,
     handle: AppHandle,
     account_id: String,
     date: String,
+    snapshot_id: Option<String>,
 ) -> Result<(), String> {
     debug!(
         "Deleting snapshot for account {} on date {}",
         account_id, date
     );
 
-    let target_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
-        .map_err(|e| format!("Invalid date format: {}", e))?;
-
-    // First verify the snapshot exists and is not CALCULATED
+    // Read raw metadata so a malformed stored date remains deletable by ID.
     let snapshots = state
         .snapshot_service()
-        .get_holdings_keyframes(&account_id, Some(target_date), Some(target_date))
+        .get_snapshot_metadata(&account_id, None, None)
         .map_err(|e| format!("Failed to get snapshot: {}", e))?;
 
     let snapshot = snapshots
         .into_iter()
-        .find(|s| s.snapshot_date == target_date)
+        .find(|snapshot| {
+            snapshot_id
+                .as_deref()
+                .map(|id| snapshot.id == id)
+                .unwrap_or(snapshot.snapshot_date == date)
+        })
         .ok_or_else(|| format!("No snapshot found for date {}", date))?;
 
-    if snapshot.source == SnapshotSource::Calculated {
+    let target_date = NaiveDate::parse_from_str(&snapshot.snapshot_date, "%Y-%m-%d").ok();
+    let account = state
+        .account_service()
+        .get_account(&account_id)
+        .map_err(|e| format!("Failed to get account: {}", e))?;
+    let today = user_today(parse_user_timezone_or_default(&state.get_timezone()));
+    let requires_remediation = target_date
+        .map(|date| snapshot_date_requires_remediation(date, today))
+        .unwrap_or(true);
+    let recalculation_start =
+        target_date.and_then(|date| snapshot_recalculation_start_after_delete(date, today));
+    if snapshot.source == SnapshotSource::Calculated.as_str() && !requires_remediation {
+        return Err("This entry comes from account activity and can't be deleted here. Update or delete the related activity instead.".to_string());
+    }
+    let standard_delete_allowed =
+        account.tracking_mode == TrackingMode::Holdings && account.provider_account_id.is_none();
+    if !standard_delete_allowed && !requires_remediation {
         return Err(
-            "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted."
+            "This entry can only be deleted here when Health Center identifies its date as invalid."
                 .to_string(),
         );
     }
 
     // Delete via the service so snapshot deletion stays behind one entry point.
-    state
-        .snapshot_service()
-        .delete_snapshot_for_account(&account_id, &[target_date])
-        .await
-        .map_err(|e| format!("Failed to delete snapshot: {}", e))?;
+    if let Some(snapshot_id) = snapshot_id.as_deref() {
+        state
+            .snapshot_service()
+            .delete_snapshot_for_account_by_id(&account_id, snapshot_id)
+            .await
+            .map_err(|e| format!("Failed to delete snapshot: {}", e))?;
+    } else if let Some(target_date) = target_date {
+        state
+            .snapshot_service()
+            .delete_snapshot_for_account(&account_id, &[target_date])
+            .await
+            .map_err(|e| format!("Failed to delete snapshot: {}", e))?;
+    } else {
+        return Err("snapshotId is required to delete a malformed snapshot".to_string());
+    }
 
     info!(
         "Deleted {:?} snapshot for account {} on date {}",
         snapshot.source, account_id, date
     );
-
-    // If no user-created snapshots remain, clean up orphan SYNTHETIC snapshots.
-    let remaining = state
-        .snapshot_repository()
-        .get_snapshots_by_account(&account_id, None, None)
-        .map_err(|e| format!("Failed to check remaining snapshots: {}", e))?;
-
-    let has_user_snapshots = remaining
-        .iter()
-        .any(|s| s.source != SnapshotSource::Calculated && s.source != SnapshotSource::Synthetic);
-
-    if !has_user_snapshots {
-        let synthetic_dates: Vec<NaiveDate> = remaining
-            .iter()
-            .filter(|s| s.source == SnapshotSource::Synthetic)
-            .map(|s| s.snapshot_date)
-            .collect();
-        if !synthetic_dates.is_empty() {
-            state
-                .snapshot_service()
-                .delete_snapshot_for_account(&account_id, &synthetic_dates)
-                .await
-                .map_err(|e| format!("Failed to clean up synthetic snapshots: {}", e))?;
-            info!(
-                "Cleaned up {} orphan SYNTHETIC snapshots for account {}",
-                synthetic_dates.len(),
-                account_id
-            );
-        }
-    }
+    state.health_service().clear_cache().await;
 
     // Trigger portfolio update to recalculate valuations
     let payload = PortfolioRequestPayload::builder()
         .account_ids(Some(vec![account_id.clone()]))
         .market_sync_mode(MarketSyncMode::Incremental { asset_ids: None })
+        .since_date(recalculation_start)
         .build();
     emit_portfolio_trigger_recalculate(&handle, payload);
 

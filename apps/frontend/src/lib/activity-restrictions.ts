@@ -67,7 +67,8 @@ export function accountSupportsActivityType(account: Account, activityType: stri
 
 /**
  * Returns true if the account supports adding holdings directly.
- * True for any account in HOLDINGS tracking mode.
+ * Connected holdings are managed by their provider; Health Center exposes a
+ * narrowly scoped deletion action when a connected snapshot needs remediation.
  */
 export function canAddHoldings(account: Account | undefined): boolean {
   if (!account) {
@@ -76,7 +77,7 @@ export function canAddHoldings(account: Account | undefined): boolean {
   if (isLiabilityAccountType(account.accountType)) {
     return false;
   }
-  return account.trackingMode === "HOLDINGS";
+  return account.trackingMode === "HOLDINGS" && !account.providerAccountId;
 }
 
 /**

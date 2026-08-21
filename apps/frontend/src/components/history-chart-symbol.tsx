@@ -1,13 +1,14 @@
 import { TimePeriod } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
-import { formatPrice } from "@wealthfolio/ui";
+import { useAmountFormatting, useDateFormatting, useNumberFormatting } from "@wealthfolio/ui";
+import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import {
   Area,
   AreaChart,
   ReferenceDot,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -65,6 +66,7 @@ export default function HistoryChart({
   interval,
   activityMarkers = [],
   onActivityMarkerClick,
+  averageCost,
   height = 350,
 }: {
   data: HistoryChartData[];
@@ -72,7 +74,9 @@ export default function HistoryChart({
   height?: number;
   activityMarkers?: HistoryChartActivityMarker[];
   onActivityMarkerClick?: (marker: HistoryChartActivityMarker) => void;
+  averageCost?: number;
 }) {
+  const amountFormatting = useAmountFormatting();
   const [hoveredMarker, setHoveredMarker] = useState(false);
   const markerByTimestamp = useMemo(() => {
     const markers = new Map<string, HistoryChartActivityMarker>();
@@ -142,6 +146,21 @@ export default function HistoryChart({
               fillOpacity={1}
               fill="url(#colorUv)"
             />
+            {averageCost != null && averageCost > 0 && (
+              <ReferenceLine
+                y={averageCost}
+                stroke="var(--foreground)"
+                strokeDasharray="4 3"
+                strokeWidth={1}
+                ifOverflow="extendDomain"
+                label={{
+                  value: amountFormatting.formatPrice(averageCost, data[0]?.currency ?? "", false),
+                  position: "insideBottomLeft",
+                  fill: "var(--foreground)",
+                  fontSize: 11,
+                }}
+              />
+            )}
             {activityMarkers.map((marker) => {
               return (
                 <ReferenceDot
@@ -168,6 +187,10 @@ export default function HistoryChart({
 }
 
 function SymbolToolTip({ active, payload }: SymbolTooltipProps) {
+  const amountFormatting = useAmountFormatting();
+  const numberFormatting = useNumberFormatting();
+  const dateFormatting = useDateFormatting();
+
   const { t } = useTranslation();
   if (!active || !payload?.length) {
     return null;
@@ -175,9 +198,11 @@ function SymbolToolTip({ active, payload }: SymbolTooltipProps) {
   const data = payload[0].payload;
   return (
     <div className="bg-popover pointer-events-none grid grid-cols-1 gap-1.5 rounded-md border p-2 shadow-md">
-      <p className="text-muted-foreground text-xs">{formatDate(data.timestamp)}</p>
+      <p className="text-muted-foreground text-xs">{formatDate(data.timestamp, dateFormatting)}</p>
 
-      <p className="text-base font-bold">{formatPrice(payload[0].value, data.currency, false)}</p>
+      <p className="text-base font-bold">
+        {amountFormatting.formatPrice(payload[0].value, data.currency, false)}
+      </p>
 
       {data.activities && data.activities.length > 0 && (
         <>
@@ -201,8 +226,14 @@ function SymbolToolTip({ active, payload }: SymbolTooltipProps) {
                 </div>
                 {hasPriceDetails && (
                   <span className="text-muted-foreground text-sm tabular-nums">
-                    {parseFloat(act.quantity || "0")} at{" "}
-                    {formatPrice(parseFloat(act.unitPrice || "0"), data.currency, false)}
+                    {t("common:component.activity_quantity_at_price", {
+                      quantity: numberFormatting.formatQuantity(parseFloat(act.quantity || "0")),
+                      price: amountFormatting.formatPrice(
+                        parseFloat(act.unitPrice || "0"),
+                        data.currency,
+                        false,
+                      ),
+                    })}
                   </span>
                 )}
               </div>

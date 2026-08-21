@@ -1,207 +1,88 @@
-# Addon Query Client and Cache Management Design
+# Addon query client and cache invalidation design
 
 ## Overview
 
-This document describes the design for sharing the React Query client between
-the main Wealthfolio application and addons, enabling automatic cache
-invalidation and data synchronization.
-
-## Architecture
-
-### 1. Shared Query Client
-
-Instead of each addon creating its own QueryClient, addons now share the main
-application's QueryClient:
-
-**Before:**
+Each sandboxed addon owns one TanStack Query `QueryClient`. The client is reused
+across that addon's route renders, then cleared when the sandbox stops. It is
+not the main application's client and does not share the host's in-memory cache.
 
 ```tsx
-// Each addon had its own QueryClient
-const queryClient = new QueryClient({
-  /* config */
-});
-```
+const addonQueryClient = ctx.api.query.getClient();
 
-**After:**
-
-```tsx
-// Addons use the shared QueryClient from main app
-const sharedQueryClient = ctx.api.query.getClient();
-```
-
-### 2. Global QueryClient Exposure
-
-The main app exposes its QueryClient globally:
-
-```tsx
-// In App.tsx
-const [queryClient] = useState(
-  () =>
-    new QueryClient({
-      /* config */
-    }),
-);
-(window as any).__wealthfolio_query_client__ = queryClient;
-```
-
-### 3. Shared Query Keys
-
-Both the main app and addons use the same query keys to ensure cache
-consistency:
-
-```typescript
-// Shared in @wealthfolio/addon-sdk
-export const QueryKeys = {
-  GOALS: "goals",
-  GOALS_ALLOCATIONS: "goals_allocations",
-  ACCOUNTS: "accounts",
-  // ... other keys
-} as const;
-```
-
-### 4. Query API in Addon Context
-
-Addons have access to query management functions:
-
-```typescript
-interface QueryAPI {
-  getClient(): QueryClient;
-  invalidateQueries(queryKey: string | string[]): void;
-  refetchQueries(queryKey: string | string[]): void;
-}
-```
-
-## Benefits
-
-### 1. **Cache Consistency**
-
-- Single source of truth for all cached data
-- No data duplication between main app and addons
-- Consistent cache invalidation strategies
-
-### 2. **Automatic Synchronization**
-
-- When main app updates data, addons automatically see changes
-- No need for manual refresh or polling mechanisms
-- Real-time updates across the entire application
-
-### 3. **Performance**
-
-- Single network request per data type
-- Shared cache reduces memory usage
-- Efficient data fetching and caching
-
-### 4. **Event-Driven Updates**
-
-- Addons can listen for data change events
-- Automatic cache invalidation on data mutations
-- Reactive UI updates without manual intervention
-
-## Implementation Example
-
-### Goal Progress Tracker Addon
-
-The goal progress tracker addon demonstrates this pattern:
-
-```typescript
-// Simple hook using shared query keys - no event listeners needed
-export function useGoals({ ctx, enabled = true }: UseGoalsOptions) {
-  return useQuery<Goal[]>({
-    queryKey: [QueryKeys.GOALS], // Shared query key
-    queryFn: async () => {
-      const data = await ctx.api.goals.getAll();
-      return data || [];
-    },
-    enabled: enabled && !!ctx.api,
-    staleTime: 10 * 60 * 1000, // 10 minutes
-    gcTime: 30 * 60 * 1000, // 30 minutes
-    retry: 3,
-    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-  });
-}
-```
-
-### Addon Wrapper Component
-
-```tsx
-const AddonWrapper = () => {
-  const sharedQueryClient = ctx.api.query.getClient();
+function AddonRoot() {
   return (
-    <QueryClientProvider client={sharedQueryClient}>
-      <AddonComponent ctx={ctx} />
+    <QueryClientProvider client={addonQueryClient}>
+      <AddonPage />
     </QueryClientProvider>
   );
-};
+}
 ```
 
-## Data Flow
+The isolation is intentional: a query cannot leak data or observers between
+addons, and removing an addon also removes its cache.
 
-1. **User creates a goal** in Settings → Goals page
-2. **Main app** updates the goal via mutation
-3. **Main app** invalidates `QueryKeys.GOALS` cache automatically (via React
-   Query mutation)
-4. **Goal Progress Tracker addon** automatically receives updated data (shared
-   cache)
-5. **Addon UI** re-renders with fresh data
+## Invalidation bridge
 
-## Cache Invalidation Strategy
+The sandbox augments the addon's client so calls to `invalidateQueries()` and
+`refetchQueries()` do two things:
 
-With the shared query client approach, cache invalidation happens automatically:
+1. Update the local addon cache.
+2. Send the same query-key operation to the host through `ctx.api.query`.
 
-- **Main app mutations** use React Query's built-in invalidation
-- **Shared cache** means invalidation affects all components (main app + addons)
-- **No manual event handling** required in addon hooks
-- **Automatic synchronization** across the entire application
-
-## Best Practices
-
-### 1. Use Shared Query Keys
-
-Always import and use QueryKeys from the addon SDK:
+The convenience methods below use the same bridge:
 
 ```typescript
-import { QueryKeys } from "@wealthfolio/addon-sdk";
+ctx.api.query.invalidateQueries(["accounts"]);
+ctx.api.query.refetchQueries(["portfolio", "holdings"]);
 ```
 
-### 2. Listen for Relevant Events
+This keeps mutations initiated by an addon coherent with host views without
+exposing the host client across the iframe boundary. The reverse direction is
+not automatic: a host cache invalidation does not directly mutate an addon's
+local cache.
 
-Set up event listeners in your hooks to automatically invalidate cache when data
-changes:
+## Reacting to host changes
+
+Use the domain event APIs when addon data must react to work initiated elsewhere
+in Wealthfolio. Invalidate the addon's local query after receiving the event:
 
 ```typescript
-useEffect(() => {
-  const unlisten = await ctx.api.events.goals.onCreate(() => {
-    ctx.api.query.invalidateQueries([QueryKeys.GOALS]);
+export async function enable(ctx: AddonContext) {
+  const queryClient = ctx.api.query.getClient() as QueryClient;
+  const unlisten = await ctx.api.events.portfolio.onUpdateComplete(() => {
+    void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
   });
-  return unlisten;
-}, [ctx]);
+
+  ctx.onDisable(unlisten);
+}
 ```
 
-### 3. Use the Shared QueryClient
+Do not rely on matching query keys alone to synchronize the two processes. Keys
+identify cache entries locally; events and the invalidation bridge coordinate
+changes across the sandbox boundary.
 
-Always use the shared QueryClient for consistency:
+## Recommended usage
 
-```tsx
-const queryClient = ctx.api.query.getClient();
+- Call `ctx.api.query.getClient()` once and pass that client to
+  `QueryClientProvider`.
+- Use stable domain query keys within the addon.
+- After an addon mutation, invalidate or refetch the relevant key. The bridge
+  updates the host as well as the addon.
+- Listen to relevant host events for changes the addon did not initiate.
+- Do not create a second `QueryClient` unless the addon deliberately needs a
+  separate cache.
+- Do not store the client outside the sandbox lifecycle.
+
+## Data flow
+
+```text
+Addon mutation
+    ↓
+addon QueryClient invalidate/refetch
+    ├─ updates addon-local observers
+    └─ RPC bridge → host QueryAPI → updates matching host queries
+
+Host mutation
+    ↓
+host domain event → addon listener → addon-local invalidate/refetch
 ```
-
-### 4. Proper Cache Keys
-
-Use descriptive and consistent cache keys that match the main app's patterns:
-
-```typescript
-queryKey: [QueryKeys.GOALS];
-queryKey: [QueryKeys.latestValuations, accountIds];
-```
-
-## Future Enhancements
-
-1. **Typed Event Payloads**: Add strong typing for event payloads
-2. **Granular Invalidation**: More specific cache invalidation strategies
-3. **Optimistic Updates**: Support for optimistic UI updates
-4. **Cache Persistence**: Shared cache persistence strategies
-5. **Cache Analytics**: Monitoring and debugging tools for cache behavior
-
-This design provides a robust foundation for data synchronization between the
-main application and addons, ensuring a seamless user experience across all
-components of the Wealthfolio ecosystem.

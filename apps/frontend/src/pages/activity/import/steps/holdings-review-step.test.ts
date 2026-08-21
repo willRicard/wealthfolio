@@ -4,6 +4,7 @@ import { HoldingsFormat } from "./holdings-mapping-step";
 import {
   buildHoldingsRowResolutionMap,
   parseHoldingsSnapshots,
+  parseHoldingsSnapshotsForValidation,
 } from "../utils/holdings-import-utils";
 import type { DraftActivity } from "../context";
 
@@ -78,6 +79,7 @@ describe("holdings review helpers", () => {
         exchangeMic: "XTSE",
         quoteCcy: "CAD",
         instrumentType: "EQUITY",
+        quoteMode: "MARKET",
         providerId: "YAHOO",
         providerSymbol: "SHOP.TO",
       }),
@@ -88,6 +90,7 @@ describe("holdings review helpers", () => {
       exchangeMic: "XTSE",
       quoteCcy: "CAD",
       instrumentType: "EQUITY",
+      quoteMode: "MARKET",
       providerId: "YAHOO",
       providerSymbol: "SHOP.TO",
     });
@@ -117,6 +120,7 @@ describe("holdings review helpers", () => {
       exchangeMic: "XTSE",
       quoteCcy: "CAD",
       instrumentType: "EQUITY",
+      quoteMode: "MARKET",
       providerId: "YAHOO",
       providerSymbol: "SHOP.TO",
     });
@@ -167,6 +171,67 @@ describe("holdings review helpers", () => {
         exchangeMic: "XTSE",
         assetId: "shop-tsx",
       },
+    ]);
+  });
+
+  it("preserves malformed rows in their date group for backend validation", () => {
+    const snapshots = parseHoldingsSnapshotsForValidation(
+      ["date", "symbol", "quantity", "avgCost", "currency"],
+      [
+        ["2026-01-02", "AAPL", "10", "125", "USD"],
+        ["2026-01-02", "MSFT", "not-a-number", "invalid-cost", "USD"],
+        ["not-a-date", "GOOG", "5", "100", "USD"],
+      ],
+      {
+        [HoldingsFormat.DATE]: "date",
+        [HoldingsFormat.SYMBOL]: "symbol",
+        [HoldingsFormat.QUANTITY]: "quantity",
+        [HoldingsFormat.AVG_COST]: "avgCost",
+        [HoldingsFormat.CURRENCY]: "currency",
+      },
+      {
+        dateFormat: "YYYY-MM-DD",
+        decimalSeparator: ".",
+        thousandsSeparator: ",",
+        defaultCurrency: "USD",
+      },
+    );
+
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots.find((snapshot) => snapshot.date === "2026-01-02")?.positions).toEqual([
+      expect.objectContaining({ symbol: "AAPL", quantity: "10", avgCost: "125" }),
+      expect.objectContaining({
+        symbol: "MSFT",
+        quantity: "not-a-number",
+        avgCost: "invalid-cost",
+      }),
+    ]);
+    expect(snapshots.find((snapshot) => snapshot.date === "not-a-date")?.positions).toEqual([
+      expect.objectContaining({ symbol: "GOOG", quantity: "5" }),
+    ]);
+  });
+
+  it("represents malformed cash amounts as validation positions", () => {
+    const snapshots = parseHoldingsSnapshotsForValidation(
+      ["date", "symbol", "quantity", "currency"],
+      [["2026-01-02", "$CASH", "invalid", "USD"]],
+      {
+        [HoldingsFormat.DATE]: "date",
+        [HoldingsFormat.SYMBOL]: "symbol",
+        [HoldingsFormat.QUANTITY]: "quantity",
+        [HoldingsFormat.CURRENCY]: "currency",
+      },
+      {
+        dateFormat: "YYYY-MM-DD",
+        decimalSeparator: ".",
+        thousandsSeparator: ",",
+        defaultCurrency: "USD",
+      },
+    );
+
+    expect(snapshots[0].cashBalances).toEqual({});
+    expect(snapshots[0].positions).toEqual([
+      expect.objectContaining({ symbol: "$CASH", quantity: "invalid" }),
     ]);
   });
 });

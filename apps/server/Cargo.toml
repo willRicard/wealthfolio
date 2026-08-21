@@ -17,7 +17,7 @@ wealthfolio-mcp = { workspace = true }
 
 # Web framework
 axum = { version = "0.8", features = ["json", "macros", "multipart"] }
-tower = "0.5"
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-full", "timeout", "request-id", "fs"] }
 
 # Workspace dependencies

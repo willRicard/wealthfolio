@@ -48,6 +48,17 @@ function normalizeStringArray(input?: string | string[]): string[] | undefined {
   return input.length > 0 ? [input] : undefined;
 }
 
+function serializeActivityMetadata<T extends ActivityCreate | ActivityUpdate>(activity: T): T {
+  if (activity.metadata === undefined || typeof activity.metadata === "string") {
+    return activity;
+  }
+
+  return {
+    ...activity,
+    metadata: JSON.stringify(activity.metadata),
+  };
+}
+
 export const getActivities = async (accountId?: string): Promise<ActivityDetails[]> => {
   try {
     const response = await searchActivities(
@@ -106,7 +117,9 @@ export const searchActivities = async (
 
 export const createActivity = async (activity: ActivityCreate): Promise<Activity> => {
   try {
-    return await invoke<Activity>("create_activity", { activity });
+    return await invoke<Activity>("create_activity", {
+      activity: serializeActivityMetadata(activity),
+    });
   } catch (err) {
     logger.error("Error creating activity.");
     throw err;
@@ -115,7 +128,9 @@ export const createActivity = async (activity: ActivityCreate): Promise<Activity
 
 export const updateActivity = async (activity: ActivityUpdate): Promise<Activity> => {
   try {
-    return await invoke<Activity>("update_activity", { activity });
+    return await invoke<Activity>("update_activity", {
+      activity: serializeActivityMetadata(activity),
+    });
   } catch (err) {
     logger.error("Error updating activity.");
     throw err;
@@ -126,8 +141,8 @@ export const saveActivities = async (
   request: ActivityBulkMutationRequest,
 ): Promise<ActivityBulkMutationResult> => {
   const payload: ActivityBulkMutationRequest = {
-    creates: request.creates ?? [],
-    updates: request.updates ?? [],
+    creates: (request.creates ?? []).map(serializeActivityMetadata),
+    updates: (request.updates ?? []).map(serializeActivityMetadata),
     deleteIds: request.deleteIds ?? [],
   };
   try {

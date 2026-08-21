@@ -562,6 +562,26 @@ fn normalize_payload_fields(
     Ok(normalized_fields)
 }
 
+fn synced_snapshot_payload_is_safe(fields: &[(String, serde_json::Value)]) -> bool {
+    let source = fields
+        .iter()
+        .find(|(column, _)| column == "source")
+        .and_then(|(_, value)| value.as_str());
+    if !matches!(source, Some("MANUAL_ENTRY" | "CSV_IMPORT")) {
+        return false;
+    }
+
+    let Some(snapshot_date) = fields
+        .iter()
+        .find(|(column, _)| column == "snapshot_date")
+        .and_then(|(_, value)| value.as_str())
+    else {
+        return false;
+    };
+    chrono::NaiveDate::parse_from_str(snapshot_date, "%Y-%m-%d")
+        .is_ok_and(|date| date.format("%Y-%m-%d").to_string() == snapshot_date)
+}
+
 fn normalize_outbox_payload(payload: serde_json::Value) -> Result<serde_json::Value> {
     let serde_json::Value::Object(fields) = payload else {
         return Ok(payload);
@@ -2060,6 +2080,13 @@ fn apply_remote_event_lww_tx(
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect();
                     let mut fields = normalize_payload_fields(conn, table_name, fields)?;
+                    if entity == SyncEntity::Snapshot && !synced_snapshot_payload_is_safe(&fields) {
+                        log::warn!(
+                            "Skipping synced snapshot '{}' with an unsupported source or malformed date",
+                            entity_id_value
+                        );
+                        applied_entity_change = false;
+                    }
                     if let Some((_, payload_pk)) = fields.iter().find(|(k, _)| k == pk_name) {
                         if !payload_value_matches_entity_id(payload_pk, &entity_id_value) {
                             return Err(Error::Database(DatabaseError::Internal(format!(
@@ -3418,6 +3445,37 @@ mod tests {
     use wealthfolio_core::accounts::account_types;
     use wealthfolio_core::activities::{ActivityRepositoryTrait, ActivityUpsert};
     use wealthfolio_core::goals::{GoalRepositoryTrait, GoalSummaryUpdate};
+
+    #[test]
+    fn synced_snapshot_payload_accepts_only_user_sources_and_canonical_dates() {
+        let fields = |source: &str, date: &str| {
+            vec![
+                ("source".to_string(), serde_json::json!(source)),
+                ("snapshot_date".to_string(), serde_json::json!(date)),
+            ]
+        };
+
+        assert!(synced_snapshot_payload_is_safe(&fields(
+            "MANUAL_ENTRY",
+            "2026-08-05"
+        )));
+        assert!(synced_snapshot_payload_is_safe(&fields(
+            "CSV_IMPORT",
+            "2026-08-05"
+        )));
+        assert!(!synced_snapshot_payload_is_safe(&fields(
+            "SYNTHETIC",
+            "2026-08-05"
+        )));
+        assert!(!synced_snapshot_payload_is_safe(&fields(
+            "BROKER_IMPORTED",
+            "2026-08-05"
+        )));
+        assert!(!synced_snapshot_payload_is_safe(&fields(
+            "CSV_IMPORT",
+            "not-a-date"
+        )));
+    }
 
     fn setup_db() -> (
         Arc<Pool<r2d2::ConnectionManager<SqliteConnection>>>,
@@ -8657,5 +8715,73 @@ mod tests {
         .get_result(&mut conn)
         .expect("snapshot position asset");
         assert_eq!(row.asset_id, "asset-sync-snap-new");
+    }
+
+    #[tokio::test]
+    async fn replay_skips_legacy_source_and_malformed_snapshot_date() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account_for_test(&mut conn, "acc-sync-invalid").expect("insert account");
+        drop(conn);
+
+        let payload = |id: &str, source: &str, snapshot_date: &str| {
+            serde_json::json!({
+                "id": id,
+                "accountId": "acc-sync-invalid",
+                "snapshotDate": snapshot_date,
+                "currency": "USD",
+                "positions": "{}",
+                "cashBalances": "{}",
+                "costBasis": "0",
+                "netContribution": "0",
+                "calculatedAt": "2026-02-01T00:00:00Z",
+                "netContributionBase": "0",
+                "cashTotalAccountCurrency": "0",
+                "cashTotalBaseCurrency": "0",
+                "source": source,
+            })
+        };
+
+        let legacy_applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                "snap-legacy-source".to_string(),
+                SyncOperation::Create,
+                "evt-legacy-source".to_string(),
+                "2026-02-01T00:00:00Z".to_string(),
+                1,
+                payload("snap-legacy-source", "SYNTHETIC", "2026-01-01"),
+            )
+            .await
+            .expect("legacy snapshot event should be acknowledged");
+        let malformed_applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                "snap-malformed-date".to_string(),
+                SyncOperation::Create,
+                "evt-malformed-date".to_string(),
+                "2026-02-01T00:00:01Z".to_string(),
+                2,
+                payload("snap-malformed-date", "CSV_IMPORT", "not-a-date"),
+            )
+            .await
+            .expect("malformed snapshot event should be acknowledged");
+
+        assert!(!legacy_applied);
+        assert!(!malformed_applied);
+        let mut conn = get_connection(&pool).expect("conn");
+        let row: CountRow = diesel::sql_query(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = 'acc-sync-invalid'",
+        )
+        .get_result(&mut conn)
+        .expect("count snapshots");
+        assert_eq!(row.c, 0);
     }
 }

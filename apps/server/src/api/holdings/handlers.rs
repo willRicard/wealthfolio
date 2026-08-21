@@ -4,19 +4,23 @@ use axum::{
     extract::{Query, State},
     Json,
 };
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use wealthfolio_core::portfolios::{AccountScope, ResolvedAccountScope};
 use wealthfolio_core::utils::time_utils::{parse_user_timezone_or_default, user_today};
 use wealthfolio_core::{
-    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait},
+    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait, TrackingMode},
     lots::AssetLotView,
     portfolio::{
         allocation::{AllocationHoldings, PortfolioAllocations},
         holdings::{Holding, HoldingListItem},
         snapshot::{
-            reconcile_quote_sync_from_latest_account_snapshots, CashBalanceInput,
-            ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService, SnapshotSource,
+            check_holdings_import as validate_holdings_import, holdings_import_data_source,
+            reconcile_quote_sync_from_latest_account_snapshots, snapshot_date_requires_remediation,
+            snapshot_recalculation_start_after_delete, validate_holdings_import_snapshot,
+            CashBalanceInput, HoldingsImportPositionValidationInput,
+            HoldingsImportSnapshotValidationInput, ManualHoldingInput, ManualSnapshotRequest,
+            ManualSnapshotService, SnapshotSource,
         },
         valuation::{
             CurrentAccountValuationService, CurrentValuationResponse, DailyAccountValuation,
@@ -34,7 +38,7 @@ use super::dto::{
     HoldingsSnapshotInput, ImportHoldingsCsvRequest, ImportHoldingsCsvResult,
     SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo, SnapshotsQuery, SymbolCheckResult,
 };
-use super::mappers::{parse_date, parse_date_optional, snapshot_source_to_string};
+use super::mappers::{parse_date, parse_date_optional};
 
 fn resolve_scope(
     filter: &AccountScope,
@@ -88,7 +92,8 @@ pub async fn get_holdings(
     State(state): State<Arc<AppState>>,
     Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<Vec<Holding>>> {
-    let holdings = load_holdings_for_filter(state.as_ref(), &body.filter).await?;
+    let holdings =
+        load_holdings_for_filter(state.as_ref(), &body.filter, body.include_closed).await?;
     Ok(Json(holdings))
 }
 
@@ -96,7 +101,8 @@ pub async fn get_holdings_list(
     State(state): State<Arc<AppState>>,
     Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<Vec<HoldingListItem>>> {
-    let holdings = load_holdings_for_filter(state.as_ref(), &body.filter).await?;
+    let holdings =
+        load_holdings_for_filter(state.as_ref(), &body.filter, body.include_closed).await?;
     Ok(Json(
         holdings.into_iter().map(HoldingListItem::from).collect(),
     ))
@@ -105,6 +111,7 @@ pub async fn get_holdings_list(
 async fn load_holdings_for_filter(
     state: &AppState,
     filter: &AccountScope,
+    include_closed: bool,
 ) -> ApiResult<Vec<Holding>> {
     let base = state.base_currency.read().unwrap().clone();
     let resolved = resolve_scope(filter, state)?;
@@ -114,12 +121,17 @@ async fn load_holdings_for_filter(
     } else if account_ids.len() == 1 {
         state
             .holdings_service
-            .get_holdings(&account_ids[0], &base)
+            .get_holdings_with_options(&account_ids[0], &base, include_closed)
             .await?
     } else {
         state
             .holdings_service
-            .get_holdings_for_accounts(&account_ids, &base, &resolved.scope_id)
+            .get_holdings_for_accounts_with_options(
+                &account_ids,
+                &base,
+                &resolved.scope_id,
+                include_closed,
+            )
             .await?
     };
     Ok(holdings)
@@ -137,7 +149,7 @@ pub async fn get_holdings_for_account(
     }
     let holdings = state
         .holdings_service
-        .get_holdings(&account_ids[0], &base)
+        .get_holdings_with_options(&account_ids[0], &base, q.include_closed)
         .await?;
     Ok(Json(holdings))
 }
@@ -154,7 +166,7 @@ pub async fn get_holdings_list_for_account(
     }
     let holdings = state
         .holdings_service
-        .get_holdings(&account_ids[0], &base)
+        .get_holdings_with_options(&account_ids[0], &base, q.include_closed)
         .await?;
     Ok(Json(
         holdings.into_iter().map(HoldingListItem::from).collect(),
@@ -446,17 +458,18 @@ pub async fn get_snapshots(
     let snapshots =
         state
             .snapshot_service
-            .get_holdings_keyframes(&q.account_id, start_date, end_date)?;
+            .get_snapshot_metadata(&q.account_id, start_date, end_date)?;
 
     let result: Vec<SnapshotInfo> = snapshots
         .into_iter()
         .map(|s| SnapshotInfo {
             id: s.id,
-            snapshot_date: s.snapshot_date.format("%Y-%m-%d").to_string(),
-            source: snapshot_source_to_string(s.source),
-            position_count: s.positions.len(),
-            cash_currency_count: s.cash_balances.len(),
-            cash_total_account_currency: s.cash_total_account_currency.to_string(),
+            is_date_valid: NaiveDate::parse_from_str(&s.snapshot_date, "%Y-%m-%d").is_ok(),
+            snapshot_date: s.snapshot_date,
+            source: s.source,
+            position_count: s.position_count,
+            cash_currency_count: s.cash_currency_count,
+            cash_total_account_currency: s.cash_total_account_currency,
         })
         .collect();
 
@@ -495,32 +508,57 @@ pub async fn delete_snapshot_handler(
     State(state): State<Arc<AppState>>,
     Query(q): Query<DeleteSnapshotQuery>,
 ) -> ApiResult<axum::http::StatusCode> {
-    let target_date = parse_date(&q.date, "date")?;
-
-    // First verify the snapshot exists and is not CALCULATED
-    let snapshots = state.snapshot_service.get_holdings_keyframes(
-        &q.account_id,
-        Some(target_date),
-        Some(target_date),
-    )?;
-
+    // Read raw metadata so a malformed stored date remains deletable by ID.
+    let snapshots = state
+        .snapshot_service
+        .get_snapshot_metadata(&q.account_id, None, None)?;
     let snapshot = snapshots
         .into_iter()
-        .find(|s| s.snapshot_date == target_date)
+        .find(|snapshot| {
+            q.snapshot_id
+                .as_deref()
+                .map(|snapshot_id| snapshot.id == snapshot_id)
+                .unwrap_or(snapshot.snapshot_date == q.date)
+        })
         .ok_or_else(|| anyhow::anyhow!("No snapshot found for date {}", q.date))?;
 
-    if snapshot.source == SnapshotSource::Calculated {
+    let target_date = NaiveDate::parse_from_str(&snapshot.snapshot_date, "%Y-%m-%d").ok();
+    let account = state.account_service.get_account(&q.account_id)?;
+    let timezone = state.timezone.read().unwrap().clone();
+    let today = user_today(parse_user_timezone_or_default(&timezone));
+    let requires_remediation = target_date
+        .map(|date| snapshot_date_requires_remediation(date, today))
+        .unwrap_or(true);
+    let recalculation_start =
+        target_date.and_then(|date| snapshot_recalculation_start_after_delete(date, today));
+    if snapshot.source == SnapshotSource::Calculated.as_str() && !requires_remediation {
+        return Err(anyhow::anyhow!("This entry comes from account activity and can't be deleted here. Update or delete the related activity instead.").into());
+    }
+    let standard_delete_allowed =
+        account.tracking_mode == TrackingMode::Holdings && account.provider_account_id.is_none();
+    if !standard_delete_allowed && !requires_remediation {
         return Err(anyhow::anyhow!(
-            "Cannot delete calculated snapshots. Only manual or imported snapshots can be deleted."
+            "This entry can only be deleted here when Health Center identifies its date as invalid."
         )
         .into());
     }
 
     // Delete via the service so snapshot deletion stays behind one entry point.
-    state
-        .snapshot_service
-        .delete_snapshot_for_account(&q.account_id, &[target_date])
-        .await?;
+    if let Some(snapshot_id) = q.snapshot_id.as_deref() {
+        state
+            .snapshot_service
+            .delete_snapshot_for_account_by_id(&q.account_id, snapshot_id)
+            .await?;
+    } else if let Some(target_date) = target_date {
+        state
+            .snapshot_service
+            .delete_snapshot_for_account(&q.account_id, &[target_date])
+            .await?;
+    } else {
+        return Err(
+            anyhow::anyhow!("snapshotId is required to delete a malformed snapshot").into(),
+        );
+    }
 
     tracing::info!(
         "Deleted {:?} snapshot for account {} on date {}",
@@ -529,10 +567,12 @@ pub async fn delete_snapshot_handler(
         q.date
     );
 
-    // Recalculate valuations for the affected account
+    let recalculation_mode = recalculation_start
+        .map(ValuationRecalcMode::SinceDate)
+        .unwrap_or(ValuationRecalcMode::Full);
     if let Err(e) = state
         .valuation_service
-        .calculate_valuation_history(&q.account_id, ValuationRecalcMode::IncrementalFromLast)
+        .calculate_valuation_history(&q.account_id, recalculation_mode)
         .await
     {
         tracing::warn!(
@@ -540,6 +580,7 @@ pub async fn delete_snapshot_handler(
             e
         );
     }
+    state.health_service.clear_cache().await;
 
     // Quote sync lifecycle is global; a single-account snapshot change must not
     // make holdings in other accounts look closed.
@@ -582,11 +623,12 @@ pub async fn save_manual_holdings_handler(
     // Get base currency for FX pair registration
     let base_currency = state.base_currency.read().unwrap().clone();
 
-    // Parse the snapshot date or use today
+    // Parse the snapshot date or use today in the configured user timezone.
+    let timezone = state.timezone.read().unwrap().clone();
     let date = match req.snapshot_date {
         Some(date_str) => NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
             .map_err(|e| anyhow::anyhow!("Invalid date format: {}", e))?,
-        None => Utc::now().naive_utc().date(),
+        None => user_today(parse_user_timezone_or_default(&timezone)),
     };
 
     let mut positions: Vec<ManualHoldingInput> = Vec::new();
@@ -629,14 +671,13 @@ pub async fn save_manual_holdings_handler(
         cash_balances.push(CashBalanceInput { currency, amount });
     }
 
-    // Create ManualSnapshotService with event sink for automatic recalculation
     let manual_snapshot_service = ManualSnapshotService::new(
         state.asset_service.clone(),
         state.fx_service.clone(),
         state.snapshot_service.clone(),
         state.quote_service.clone(),
     )
-    .with_event_sink(state.domain_event_sink.clone());
+    .with_timezone(timezone);
 
     manual_snapshot_service
         .save_manual_snapshot(ManualSnapshotRequest {
@@ -651,7 +692,7 @@ pub async fn save_manual_holdings_handler(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to save manual snapshot: {}", e))?;
 
-    // Portfolio recalculation is triggered via ManualSnapshotSaved domain event
+    // SnapshotService emits the dated HoldingsChanged event after persistence.
 
     tracing::info!(
         "Saved manual holdings for account {} on date {}",
@@ -673,102 +714,67 @@ pub async fn check_holdings_import_handler(
     );
 
     // Verify account exists
-    state.account_service.get_account(&req.account_id)?;
+    let account = state.account_service.get_account(&req.account_id)?;
+    let timezone = state.timezone.read().unwrap().clone();
+    let today = user_today(parse_user_timezone_or_default(&timezone));
 
-    let mut validation_errors: Vec<String> = Vec::new();
-    let mut valid_dates: Vec<NaiveDate> = Vec::new();
-    let mut unique_symbols: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for snapshot in &req.snapshots {
-        match NaiveDate::parse_from_str(&snapshot.date, "%Y-%m-%d") {
-            Ok(d) => valid_dates.push(d),
-            Err(_) => {
-                validation_errors.push(format!("Invalid date format: '{}'", snapshot.date));
-                continue;
-            }
-        }
-
-        for pos in &snapshot.positions {
-            if pos.symbol.trim().is_empty() {
-                validation_errors.push(format!("Date {}: empty symbol found", snapshot.date));
-            }
-            if pos.quantity.parse::<Decimal>().is_err() {
-                validation_errors.push(format!(
-                    "Date {}: invalid quantity '{}' for {}",
-                    snapshot.date, pos.quantity, pos.symbol
-                ));
-            }
-            if let Some(ref c) = pos.avg_cost {
-                if !c.is_empty() && c.parse::<Decimal>().is_err() {
-                    validation_errors.push(format!(
-                        "Date {}: invalid avg cost '{}' for {}",
-                        snapshot.date, c, pos.symbol
-                    ));
-                }
-            }
-            unique_symbols.insert(pos.symbol.to_uppercase());
-        }
-    }
-
-    // Check existing snapshots
-    let existing_dates = if !valid_dates.is_empty() {
-        let min_date = *valid_dates.iter().min().unwrap();
-        let max_date = *valid_dates.iter().max().unwrap();
-        let existing = state.snapshot_service.get_holdings_keyframes(
-            &req.account_id,
-            Some(min_date),
-            Some(max_date),
-        )?;
-
-        let import_dates: std::collections::HashSet<NaiveDate> = valid_dates.into_iter().collect();
-        existing
-            .into_iter()
-            .filter(|s| import_dates.contains(&s.snapshot_date))
-            .map(|s| s.snapshot_date.format("%Y-%m-%d").to_string())
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    // Symbol lookup: search DB first, then market data providers (like activity import)
-    let mut symbols: Vec<SymbolCheckResult> = Vec::new();
-    for sym in unique_symbols {
-        let results = state
-            .quote_service
-            .search_symbol_with_currency(&sym, None)
-            .await
-            .unwrap_or_default();
-
-        // Only mark as found if the top result is an exact symbol match
-        let exact_hit = results
-            .first()
-            .filter(|hit| hit.symbol.eq_ignore_ascii_case(&sym));
-
-        if let Some(hit) = exact_hit {
-            symbols.push(SymbolCheckResult {
-                symbol: sym,
-                found: true,
-                asset_name: Some(hit.long_name.clone()),
-                asset_id: hit.existing_asset_id.clone(),
-                currency: hit.currency.clone(),
-                exchange_mic: hit.exchange_mic.clone(),
-            });
-        } else {
-            symbols.push(SymbolCheckResult {
-                symbol: sym,
-                found: false,
-                asset_name: None,
-                asset_id: None,
-                currency: None,
-                exchange_mic: None,
-            });
-        }
-    }
+    let validation_snapshots: Vec<_> = req
+        .snapshots
+        .iter()
+        .map(|snapshot| HoldingsImportSnapshotValidationInput {
+            date: snapshot.date.clone(),
+            cash_balances: snapshot
+                .cash_balances
+                .iter()
+                .map(|(currency, amount)| (currency.clone(), amount.clone()))
+                .collect(),
+            positions: snapshot
+                .positions
+                .iter()
+                .map(|position| HoldingsImportPositionValidationInput {
+                    symbol: position.symbol.clone(),
+                    quantity: position.quantity.clone(),
+                    avg_cost: position.avg_cost.clone(),
+                    currency: position.currency.clone(),
+                    exchange_mic: position.exchange_mic.clone(),
+                    quote_ccy: position.quote_ccy.clone(),
+                    instrument_type: position.instrument_type.clone(),
+                    quote_mode: position.quote_mode.clone(),
+                    provider_id: position.provider_id.clone(),
+                    provider_symbol: position.provider_symbol.clone(),
+                    asset_id: position.asset_id.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    let result = validate_holdings_import(
+        state.asset_service.as_ref(),
+        state.snapshot_service.as_ref(),
+        &req.account_id,
+        &account.currency,
+        today,
+        &validation_snapshots,
+    )
+    .await?;
+    let symbols = result
+        .symbols
+        .into_iter()
+        .map(|symbol| SymbolCheckResult {
+            symbol: symbol.symbol,
+            found: symbol.found,
+            asset_name: symbol.asset_name,
+            asset_id: symbol.asset_id,
+            currency: symbol.currency,
+            exchange_mic: symbol.exchange_mic,
+        })
+        .collect();
 
     Ok(Json(CheckHoldingsImportResult {
-        existing_dates,
+        existing_dates: result.existing_dates,
         symbols,
-        validation_errors,
+        validation_errors: result.validation_errors,
+        valid_snapshot_dates: result.valid_snapshot_dates,
+        invalid_snapshot_dates: result.invalid_snapshot_dates,
     }))
 }
 
@@ -817,8 +823,7 @@ pub async fn import_holdings_csv_handler(
         }
     }
 
-    // Portfolio recalculation is triggered via ManualSnapshotSaved domain events
-    // (events are debounced, so multiple imports trigger a single recalculation)
+    // SnapshotService emits dated HoldingsChanged events; the queue coalesces import batches.
 
     tracing::info!(
         "Holdings CSV import complete for account {}: {} imported, {} failed",
@@ -842,9 +847,35 @@ async fn import_single_snapshot_impl(
     base_currency: &str,
     snapshot_input: &HoldingsSnapshotInput,
 ) -> Result<(), anyhow::Error> {
-    // Parse the date
-    let date = NaiveDate::parse_from_str(&snapshot_input.date, "%Y-%m-%d")
-        .map_err(|e| anyhow::anyhow!("Invalid date format: {}", e))?;
+    let validation_input = HoldingsImportSnapshotValidationInput {
+        date: snapshot_input.date.clone(),
+        cash_balances: snapshot_input
+            .cash_balances
+            .iter()
+            .map(|(currency, amount)| (currency.clone(), amount.clone()))
+            .collect(),
+        positions: snapshot_input
+            .positions
+            .iter()
+            .map(|position| HoldingsImportPositionValidationInput {
+                symbol: position.symbol.clone(),
+                quantity: position.quantity.clone(),
+                avg_cost: position.avg_cost.clone(),
+                currency: position.currency.clone(),
+                exchange_mic: position.exchange_mic.clone(),
+                quote_ccy: position.quote_ccy.clone(),
+                instrument_type: position.instrument_type.clone(),
+                quote_mode: position.quote_mode.clone(),
+                provider_id: position.provider_id.clone(),
+                provider_symbol: position.provider_symbol.clone(),
+                asset_id: position.asset_id.clone(),
+            })
+            .collect(),
+    };
+    let timezone = state.timezone.read().unwrap().clone();
+    let today = user_today(parse_user_timezone_or_default(&timezone));
+    let date = validate_holdings_import_snapshot(account_id, today, &validation_input)
+        .map_err(|errors| anyhow::anyhow!(errors.join(" ")))?;
 
     let mut positions: Vec<ManualHoldingInput> = Vec::new();
     for pos_input in &snapshot_input.positions {
@@ -854,11 +885,16 @@ async fn import_single_snapshot_impl(
             .map_err(|e| anyhow::anyhow!("Invalid quantity for {}: {}", pos_input.symbol, e))?;
 
         // Parse average cost from CSV if provided, use for cost basis calculation
-        let average_cost = pos_input
+        let average_cost = match pos_input
             .avg_cost
-            .as_ref()
-            .and_then(|p| p.parse::<Decimal>().ok())
-            .unwrap_or(Decimal::ZERO);
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            Some(value) => value.parse::<Decimal>().map_err(|e| {
+                anyhow::anyhow!("Invalid average cost for {}: {}", pos_input.symbol, e)
+            })?,
+            None => Decimal::ZERO,
+        };
 
         positions.push(ManualHoldingInput {
             asset_id: pos_input.asset_id.clone(),
@@ -868,7 +904,7 @@ async fn import_single_snapshot_impl(
             currency: pos_input.currency.clone(),
             average_cost,
             name: None,
-            data_source: None,
+            data_source: holdings_import_data_source(pos_input.quote_mode.as_deref()),
             asset_kind: None,
             quote_ccy: pos_input.quote_ccy.clone(),
             instrument_type: pos_input.instrument_type.clone(),
@@ -894,7 +930,7 @@ async fn import_single_snapshot_impl(
         state.snapshot_service.clone(),
         state.quote_service.clone(),
     )
-    .with_event_sink(state.domain_event_sink.clone());
+    .with_timezone(timezone);
 
     manual_snapshot_service
         .save_manual_snapshot(ManualSnapshotRequest {

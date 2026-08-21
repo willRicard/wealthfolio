@@ -49,6 +49,19 @@ export const loadAddonForRuntime = async (addonId: string): Promise<ExtractedAdd
   return await tauriInvoke<ExtractedAddon>("load_addon_for_runtime", { addonId });
 };
 
+export const loadAddonAsset = async (
+  addonId: string,
+  assetId: string,
+  mimeType?: string,
+): Promise<Blob> => {
+  const response = await tauriInvoke<ArrayBuffer | number[]>("load_addon_asset", {
+    addonId,
+    assetId,
+  });
+  const bytes = response instanceof ArrayBuffer ? response : new Uint8Array(response);
+  return new Blob([bytes], { type: mimeType || "application/octet-stream" });
+};
+
 export const getEnabledAddonsOnStartup = async (): Promise<ExtractedAddon[]> => {
   return await tauriInvoke<ExtractedAddon[]>("get_enabled_addons_on_startup");
 };

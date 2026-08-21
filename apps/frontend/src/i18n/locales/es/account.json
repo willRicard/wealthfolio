@@ -99,6 +99,11 @@
     "tab": "Instantáneas",
     "deleted": "Instantánea eliminada",
     "delete_failed": "No se pudo eliminar la instantánea",
+    "invalid_date_title": "Esta fecha de posiciones no se puede usar",
+    "invalid_date_desc": "El historial de tu cartera no ha cambiado. Elimina la entrada resaltada y actualizaremos tu cartera automáticamente.",
+    "invalid_date_update_failed": "Parte del historial no se actualizó",
+    "invalid_date_update_desc": "Se omitió una cuenta por contener una fecha no compatible. Las demás se actualizaron normalmente.",
+    "review_health": "Revisar problema",
     "history_title": "Historial de instantáneas",
     "history_desc": "Revisa las posiciones y saldos en efectivo guardados por fecha.",
     "add": "Añadir instantánea",
@@ -117,7 +122,6 @@
     "source_csv": "CSV",
     "source_broker": "Bróker",
     "source_calculated": "Calculado",
-    "source_synthetic": "Sintético",
     "summary_one": "{{count}} posición, {{cash}} en efectivo",
     "summary_other": "{{count}} posiciones, {{cash}} en efectivo"
   },
@@ -147,5 +151,7 @@
     "period_irr": "IRR del periodo",
     "twr_hover_hint": " Pasa el cursor sobre el valor para ver la TWR acumulada.",
     "irr_hover_hint": " Pasa el cursor sobre el valor para ver la IRR del periodo seleccionado."
-  }
+  },
+  "more_count_one": "+{{count}} más",
+  "more_count_other": "+{{count}} más"
 }

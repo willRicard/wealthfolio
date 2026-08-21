@@ -13,6 +13,22 @@ use crate::platform::Platform;
 use wealthfolio_core::accounts::Account;
 use wealthfolio_core::errors::Result;
 
+/// Account tracking modes accepted by Wealthfolio Connect account-scoped endpoints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerTrackingMode {
+    Holdings,
+    Transactions,
+}
+
+impl BrokerTrackingMode {
+    pub const fn as_header_value(self) -> &'static str {
+        match self {
+            Self::Holdings => "holdings",
+            Self::Transactions => "transactions",
+        }
+    }
+}
+
 /// Trait for fetching data from the cloud broker API
 #[async_trait]
 pub trait BrokerApiClient: Send + Sync {
@@ -40,6 +56,7 @@ pub trait BrokerApiClient: Send + Sync {
     async fn get_account_activities(
         &self,
         account_id: &str,
+        tracking_mode: BrokerTrackingMode,
         start_date: Option<&str>,
         end_date: Option<&str>,
         offset: Option<i64>,
@@ -53,7 +70,11 @@ pub trait BrokerApiClient: Send + Sync {
     /// * `account_id` - The broker account ID (provider's ID)
     ///
     /// Returns cash balances, stock/ETF positions, and option positions.
-    async fn get_account_holdings(&self, account_id: &str) -> Result<BrokerHoldingsResponse>;
+    async fn get_account_holdings(
+        &self,
+        account_id: &str,
+        tracking_mode: BrokerTrackingMode,
+    ) -> Result<BrokerHoldingsResponse>;
 }
 
 /// Trait for platform repository operations

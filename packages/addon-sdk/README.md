@@ -70,12 +70,15 @@ mkdir src && touch src/index.ts
 
 ```typescript
 // src/index.ts
-import { createRoot, type Root } from 'react-dom/client';
-import { getAddonContext, type AddonContext } from '@wealthfolio/addon-sdk';
+import type { AddonContext } from '@wealthfolio/addon-sdk';
 import { MyComponent } from './MyComponent';
 
+let addonContext: AddonContext | undefined;
+
+const MyAddonRoute = () => <MyComponent ctx={addonContext!} />;
+
 export default function enable(context: AddonContext) {
-  let root: Root | null = null;
+  addonContext = context;
 
   // Add navigation item
   const navItem = context.sidebar.addItem({
@@ -87,11 +90,9 @@ export default function enable(context: AddonContext) {
 
   // Register route
   context.router.add({
+    id: 'my-addon',
     path: '/addons/my-addon',
-    render: ({ root: routeRoot }) => {
-      root ??= createRoot(routeRoot);
-      root.render(<MyComponent ctx={context} />);
-    },
+    component: MyAddonRoute,
   });
 
   // Log activation
@@ -99,8 +100,7 @@ export default function enable(context: AddonContext) {
 
   // Cleanup on disable
   context.onDisable(() => {
-    root?.unmount();
-    root = null;
+    addonContext = undefined;
     navItem.remove();
     context.api.logger.info('My addon deactivated');
   });
@@ -122,15 +122,15 @@ pnpm add @wealthfolio/addon-sdk @tanstack/react-query
 
 ### Requirements
 
-- **Node.js**: >= 18.0.0
-- **React**: ^18.0.0 (peer dependency)
+- **Node.js**: >= 20.0.0
+- **React**: ^19.2.4 (peer dependency and host-provided version)
 - **TypeScript**: ^5.0.0 (recommended for development)
 - **React Query**: ^4.0.0 or ^5.0.0 (for data fetching)
 
 ### Package Information
 
 - **Package Name**: `@wealthfolio/addon-sdk`
-- **Current Version**: 1.0.0
+- **Current Version**: 3.7.0
 - **Bundle Format**: ESM (ECMAScript Modules)
 - **Type Definitions**: Included (TypeScript ready)
 - **License**: MIT
@@ -179,6 +179,46 @@ my-portfolio-addon/
 └── vite.config.ts        # Build configuration
 ```
 
+### Packaged assets
+
+Static files below `assets/` and generated files below `dist/assets/` are
+indexed automatically; they do not need to be declared in `manifest.json`.
+JavaScript chunks and CSS in those directories remain runtime code/styles. Load
+other files through the add-on context so the host can keep the opaque iframe
+offline:
+
+This API requires Wealthfolio 3.7 or newer. Set `sdkVersion` and
+`minWealthfolioVersion` to `3.7.0` when using it. No permission is required.
+
+```typescript
+export default async function enable(context: AddonContext) {
+  const logoUrl = await context.assets.getUrl('assets/logo.png');
+  const configBlob = await context.assets.getBlob('assets/config.json');
+  const config = JSON.parse(await configBlob.text());
+
+  // Use logoUrl in an <img>, CSS-in-JS value, or component prop.
+}
+```
+
+The registry also provides `list()` for public path/MIME/size metadata and
+`has(path)` for feature checks. It never exposes host paths or opaque internal
+identifiers. `context.assets` is unrelated to the financial-instrument API at
+`context.api.assets`.
+
+Packaged URLs in extracted CSS are resolved automatically and relative to the
+CSS file. For example, `dist/addon.css` can use `url("./assets/background.png")`
+for `dist/assets/background.png`. `data:` and `blob:` URLs remain unchanged. CSS
+`@import` and remote URLs are not supported; bundle imported CSS and use the
+brokered network API for remote data.
+
+JavaScript image imports that compile to relative HTTP URLs cannot work in the
+opaque Blob runtime. Use `context.assets.getUrl()` instead. Blob URLs are cached
+for the add-on lifetime and revoked automatically when it is disabled. Package
+limits remain 5 MiB per file, 25 MiB uncompressed in total, and 256 entries.
+Asset roots must be directories; symlinks are rejected. See the
+[v3.6 to v3.7 migration guide](../../docs/addons/addon-migration-guide-v3.6-to-v3.7.md)
+for compatibility and troubleshooting.
+
 ## 📋 Manifest Configuration
 
 Create a `manifest.json` file in your addon root:
@@ -193,8 +233,8 @@ Create a `manifest.json` file in your addon root:
   "homepage": "https://github.com/yourname/investment-fees-tracker",
   "license": "MIT",
   "main": "dist/addon.js",
-  "sdkVersion": "1.0.0",
-  "minWealthfolioVersion": "1.0.0",
+  "sdkVersion": "3.7.0",
+  "minWealthfolioVersion": "3.7.0",
   "keywords": ["portfolio", "fees", "tracking", "analytics"],
   "icon": "data:image/svg+xml;base64,...",
   "permissions": [
@@ -233,7 +273,7 @@ Create a `manifest.json` file in your addon root:
 | `permissions`           | `Permission[]` | Security permissions required          |
 | `minWealthfolioVersion` | `string`       | Minimum Wealthfolio version required   |
 | `keywords`              | `string[]`     | Keywords for discoverability           |
-| `icon`                  | `string`       | Addon icon (base64 or relative path)   |
+| `icon`                  | `string`       | Addon icon value supported by the host |
 
 ## 🔨 Development Guide
 
@@ -244,7 +284,6 @@ example:
 
 ```typescript
 // src/addon.tsx
-import { createRoot, type Root } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { AddonContext, AddonEnableFunction } from '@wealthfolio/addon-sdk';
 import FeesPage from './pages/fees-page';
@@ -264,7 +303,6 @@ const enable: AddonEnableFunction = (context) => {
 
   // Store references to items for cleanup
   const addedItems: Array<{ remove: () => void }> = [];
-  let root: Root | null = null;
 
   try {
     // Add sidebar navigation item with a host-supported icon token
@@ -279,11 +317,11 @@ const enable: AddonEnableFunction = (context) => {
 
     context.api.logger.debug('Sidebar navigation item added successfully');
 
-    // Create wrapper component with shared QueryClient
+    // Create wrapper component with this addon's QueryClient
     const InvestmentFeesTrackerWrapper = () => {
-      const sharedQueryClient = context.api.query.getClient();
+      const addonQueryClient = context.api.query.getClient();
       return (
-        <QueryClientProvider client={sharedQueryClient}>
+        <QueryClientProvider client={addonQueryClient}>
           <InvestmentFeesTrackerAddon ctx={context} />
         </QueryClientProvider>
       );
@@ -291,11 +329,9 @@ const enable: AddonEnableFunction = (context) => {
 
     // Register route
     context.router.add({
+      id: 'investment-fees-tracker',
       path: '/addons/investment-fees-tracker',
-      render: ({ root: routeRoot }) => {
-        root ??= createRoot(routeRoot);
-        root.render(<InvestmentFeesTrackerWrapper />);
-      },
+      component: InvestmentFeesTrackerWrapper,
     });
 
     context.api.logger.debug('Route registered successfully');
@@ -309,10 +345,6 @@ const enable: AddonEnableFunction = (context) => {
   // Register cleanup callback
   context.onDisable(() => {
     context.api.logger.info('🛑 Investment Fees Tracker addon is being disabled');
-
-    // Unmount the addon's React root
-    root?.unmount();
-    root = null;
 
     // Remove all sidebar items
     addedItems.forEach(item => {
@@ -333,16 +365,13 @@ export default enable;
 
 ### Key Features Demonstrated
 
-1. **Shared Query Client**: Uses `context.api.query.getClient()` for consistent
-   data fetching
+1. **Addon Query Client**: Uses `context.api.query.getClient()` for local data
+   fetching with host invalidation bridging
 2. **UI Icons**: Leverages `@wealthfolio/ui` for consistent iconography
 3. **Error Handling**: Comprehensive error handling with logging
 4. **Resource Management**: Proper cleanup of sidebar items and event listeners
 5. **TypeScript**: Full type safety with proper imports
-6. **Sandbox Rendering**: Mounts into the route root with `createRoot` and
-   unmounts on disable
-
-````
+6. **Sandbox Rendering**: Lets the sandbox host own and update the React root
 
 ### Advanced Component Example
 
@@ -358,7 +387,7 @@ interface FeesPageProps {
 }
 
 export function FeesPage({ ctx }: FeesPageProps) {
-  // Use React Query for data fetching with the shared client
+  // Use React Query for data fetching with this addon's client
   const { data: accounts, isLoading: accountsLoading } = useQuery({
     queryKey: ['accounts'],
     queryFn: () => ctx.api.accounts.getAll()
@@ -499,7 +528,7 @@ export default FeesPage;
 }
 
 export default AnalyticsDashboard;
-````
+```
 
 ### Using Hooks and State Management
 
@@ -604,6 +633,20 @@ cash flows.
 
 ## 🛠️ Build Configuration
 
+Wealthfolio 3.7 supports Chrome/Edge 107+, Firefox 104+, and Safari 16+. The
+desktop app requires macOS 12+ and the native mobile app requires iOS/iPadOS
+16+. On macOS 12, apply current macOS and Safari updates so the system WKWebView
+meets the Safari 16 floor. Addons run inside the platform system WebView, so
+build against this browser floor rather than relying on the browser used during
+development.
+
+Files below `assets/` and `dist/assets/` are private to the addon package. Use
+`ctx.assets.list()`, `ctx.assets.getBlob(path)`, and `ctx.assets.getUrl(path)`
+to access them. Packaged images, fonts, media, CSS, and WebAssembly are
+supported; Worker and service-worker entry points, popups, direct network
+requests, and remote CSS imports are not. Use the host's brokered APIs,
+including `ctx.api.network.request()`, for declared external access.
+
 ### Vite Configuration
 
 Create a `vite.config.ts` for optimal bundling:
@@ -616,6 +659,7 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [react()],
   build: {
+    target: ['chrome107', 'edge107', 'firefox104', 'safari16'],
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'MyPortfolioAddon',
@@ -819,7 +863,7 @@ ctx.api.logger.debug('Debug info:', debugData);
 | `goals.getFunding(goalId)`                      | Get funding rules for a goal                              | `financial-planning` |
 | `goals.saveFunding(goalId, rules)`              | Save funding rules for a goal                             | `financial-planning` |
 | `settings.get()`                                | Get app settings                                          | `settings`           |
-| `query.getClient()`                             | Get shared QueryClient instance                           | None                 |
+| `query.getClient()`                             | Get this addon's QueryClient                              | None                 |
 
 > Tip: `activities.getAll` accepts an optional account ID string to scope
 > results to a single account. The SDK normalizes this for both desktop (Tauri)
@@ -873,19 +917,20 @@ if (ctx.api.logger.isLevelEnabled('debug')) {
 }
 ```
 
-### Shared QueryClient Integration
+### Addon QueryClient Integration
 
-The SDK provides access to Wealthfolio's shared React Query client for
-consistent data fetching and caching:
+The sandbox provides one React Query client per addon. Its cache is reused
+across that addon's route renders, not shared with the host or other addons.
+Invalidate/refetch operations are mirrored to the host:
 
 ```typescript
-// Access the shared QueryClient instance
-const sharedQueryClient = context.api.query.getClient();
+// Access this addon's QueryClient instance
+const addonQueryClient = context.api.query.getClient();
 
 // Wrap your components with QueryClientProvider
 const MyAddonWrapper = () => {
   return (
-    <QueryClientProvider client={sharedQueryClient}>
+    <QueryClientProvider client={addonQueryClient}>
       <MyAddonComponent />
     </QueryClientProvider>
   );
@@ -908,14 +953,23 @@ function MyAddonComponent() {
 }
 ```
 
-**Benefits of Shared QueryClient:**
+**Benefits of the sandbox-scoped QueryClient:**
 
-- **Consistent Caching**: Share cache with the main application
-- **Performance**: Avoid duplicate API calls across addons
-- **Synchronization**: Real-time updates when data changes
-- **Memory Efficiency**: Single cache instance for all data
+- **Isolation**: Cached financial data and observers do not leak across addons
+- **Route continuity**: One cache is retained across the addon's pages
+- **Coordination**: Addon invalidations/refetches are also sent to the host
+- **Lifecycle cleanup**: The cache is cleared with the addon sandbox
+
+Host-originated invalidations do not mutate the addon cache automatically. Use
+the relevant `ctx.api.events` subscription and invalidate locally when the addon
+must react to changes initiated elsewhere.
 
 ## 🔄 Migration Guide
+
+For Wealthfolio 3.7, see the
+[v3.6 to v3.7 migration guide](../../docs/addons/addon-migration-guide-v3.6-to-v3.7.md).
+It covers backward compatibility, the private asset registry, CSS behavior, and
+the required development-tools upgrade.
 
 ### From v1.0.0 to v1.1.0
 
@@ -1008,6 +1062,7 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [react()],
   build: {
+    target: ['chrome107', 'edge107', 'firefox104', 'safari16'],
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'MyPortfolioAddon',
@@ -1290,6 +1345,7 @@ function usePortfolioData(accountId: string) {
 // vite.config.ts - optimize chunks
 export default defineConfig({
   build: {
+    target: ['chrome107', 'edge107', 'firefox104', 'safari16'],
     rollupOptions: {
       output: {
         manualChunks: {
@@ -1382,7 +1438,7 @@ We follow [Semantic Versioning](https://semver.org/) (SemVer):
 
 | SDK Version | Wealthfolio Version | Node.js   | React   |
 | ----------- | ------------------- | --------- | ------- |
-| 1.0.x       | >= 1.0.0            | >= 18.0.0 | ^18.0.0 |
+| 3.7.x       | >= 3.7.0            | >= 20.0.0 | ^19.2.4 |
 | 0.9.x       | >= 0.9.0            | >= 16.0.0 | ^17.0.0 |
 
 ### Installation from Registry
@@ -1394,10 +1450,10 @@ We follow [Semantic Versioning](https://semver.org/) (SemVer):
 npm install @wealthfolio/addon-sdk
 
 # Specific version
-npm install @wealthfolio/addon-sdk@1.0.0
+npm install @wealthfolio/addon-sdk@3.7.0
 
 # Version range
-npm install @wealthfolio/addon-sdk@^1.0.0
+npm install @wealthfolio/addon-sdk@^3.7.0
 ```
 
 #### Beta/Preview Releases
@@ -1633,6 +1689,7 @@ npm list react react-dom
 // vite.config.ts
 export default defineConfig({
   build: {
+    target: ['chrome107', 'edge107', 'firefox104', 'safari16'],
     rollupOptions: {
       external: ['react', 'react-dom', '@wealthfolio/addon-sdk'],
     },
@@ -1744,6 +1801,7 @@ const HeavyComponent = lazy(() => import('./HeavyComponent'));
 // vite.config.ts
 export default defineConfig({
   build: {
+    target: ['chrome107', 'edge107', 'firefox104', 'safari16'],
     rollupOptions: {
       output: {
         manualChunks: {

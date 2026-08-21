@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use tauri::Manager;
 use tauri::{AppHandle, State};
 
 // Import addon modules
@@ -9,17 +8,11 @@ use wealthfolio_core::addons::{
     ExtractedAddon, InstalledAddon,
 };
 
-fn addon_service(app_handle: &AppHandle, state: &ServiceContext) -> Result<AddonService, String> {
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-
-    Ok(AddonService::new(
-        app_data_dir,
-        state.rating_instance_id.as_str(),
-        state.addon_storage_repository.clone(),
-    ))
+fn addon_service(
+    _app_handle: &AppHandle,
+    state: &ServiceContext,
+) -> Result<Arc<AddonService>, String> {
+    Ok(Arc::clone(&state.addon_service))
 }
 
 #[tauri::command]
@@ -75,6 +68,21 @@ pub async fn load_addon_for_runtime(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<ExtractedAddon, String> {
     addon_service(&app_handle, &state)?.load_addon_for_runtime(&addon_id)
+}
+
+#[tauri::command]
+pub async fn load_addon_asset(
+    app_handle: AppHandle,
+    addon_id: String,
+    asset_id: String,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<tauri::ipc::Response, String> {
+    let addon_service = addon_service(&app_handle, &state)?;
+    let asset =
+        tokio::task::spawn_blocking(move || addon_service.load_addon_asset(&addon_id, &asset_id))
+            .await
+            .map_err(|error| format!("Addon asset task failed: {error}"))??;
+    Ok(tauri::ipc::Response::new(asset.bytes))
 }
 
 #[tauri::command]

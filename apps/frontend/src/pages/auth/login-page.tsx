@@ -1,4 +1,4 @@
-import { useAuth } from "@/context/auth-context";
+import { SSO_REDIRECT_GUARD_STORAGE_KEY, useAuth } from "@/context/auth-context";
 import {
   ApplicationShell,
   Button,
@@ -10,13 +10,50 @@ import {
   CardTitle,
   Input,
 } from "@wealthfolio/ui";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+const SSO_LOGIN_URL = "/api/v1/auth/oidc/login";
+
+/**
+ * Arm the one-shot redirect guard before navigating. Returns false when the
+ * guard is already armed (a previous attempt has not been confirmed by
+ * `/auth/me` yet, or the user logged out) or when sessionStorage cannot hold
+ * it — in both cases the automatic redirect must not fire, or a failed
+ * callback would bounce through the IdP forever.
+ */
+function armSsoRedirectGuard(): boolean {
+  try {
+    const storage = window.sessionStorage;
+    if (storage.getItem(SSO_REDIRECT_GUARD_STORAGE_KEY) !== null) return false;
+    storage.setItem(SSO_REDIRECT_GUARD_STORAGE_KEY, "1");
+    return storage.getItem(SSO_REDIRECT_GUARD_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export function LoginPage() {
   const { t } = useTranslation();
-  const { login, loginLoading, loginError, clearError, requiresPassword, oidcEnabled } = useAuth();
+  const {
+    login,
+    loginLoading,
+    loginError,
+    clearError,
+    requiresPassword,
+    oidcEnabled,
+    statusLoading,
+  } = useAuth();
   const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (statusLoading || !oidcEnabled || requiresPassword) return;
+    // An explicit callback error must stay visible instead of bouncing back out.
+    if (loginError) return;
+    if (!armSsoRedirectGuard()) return;
+    // replace() keeps the transient login page out of the back-button history.
+    window.location.replace(SSO_LOGIN_URL);
+  }, [statusLoading, oidcEnabled, requiresPassword, loginError]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -103,7 +140,9 @@ export function LoginPage() {
                     variant={requiresPassword ? "outline" : "default"}
                     className="w-full"
                     onClick={() => {
-                      window.location.href = "/api/v1/auth/oidc/login";
+                      // Deliberate click: navigates regardless of the guard, which
+                      // only `/auth/me` confirming a session may clear.
+                      window.location.href = SSO_LOGIN_URL;
                     }}
                   >
                     {t("auth:login.signInWithSso")}

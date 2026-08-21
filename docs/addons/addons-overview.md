@@ -68,7 +68,7 @@ const MyRoute = () => (
   </QueryClientProvider>
 );
 
-const enable: AddonEnableFunction = (ctx) => {
+const enable: AddonEnableFunction = async (ctx) => {
   addonCtx = ctx;
 
   // The route `id` MUST match `contributes.routes[].id` in the manifest.
@@ -79,7 +79,7 @@ const enable: AddonEnableFunction = (ctx) => {
   });
 
   // Listen to events
-  const unlisten = ctx.api.events.portfolio.onUpdateComplete(() => {
+  const unlisten = await ctx.api.events.portfolio.onUpdateComplete(() => {
     // Handle portfolio updates
   });
 
@@ -125,11 +125,11 @@ const accounts = await ctx.api.accounts.getAll();
 | `secrets`     | High       | set, get, delete                            |
 | `network`     | High       | request (brokered fetch to declared hosts)  |
 
-> **Baseline capabilities are not permissions.** `ui`, `query`, `toast`,
-> `logger`, and `storage` are granted to every addon and must **not** appear in
-> `manifest.json` `permissions`. Only data categories plus `files`, `network`,
-> `secrets`, `events`, `snapshots`, and `settings` require declaration and
-> consent.
+> **Baseline capabilities are not permissions.** `ui`, packaged `assets`,
+> `query`, `toast`, `logger`, and `storage` are granted to every addon and must
+> **not** appear in `manifest.json` `permissions`. Only data categories plus
+> `files`, `network`, `secrets`, `events`, `snapshots`, and `settings` require
+> declaration and consent.
 
 #### 3. User Approval
 
@@ -139,17 +139,19 @@ approve or reject the addon installation.
 ## Available APIs
 
 The addon context provides access to domain-specific data APIs plus a set of
-**baseline capabilities** (`query`, `storage`, `toast`, `logger`) that every
-addon gets without declaring a permission:
+**baseline capabilities** (`ui`, packaged `assets`, `query`, `storage`, `toast`,
+`logger`) that every addon gets without declaring a permission:
 
 ```typescript
 interface AddonContext {
+  ui: { root: HTMLElement };
   sidebar: SidebarAPI;
   router: RouterAPI;
+  assets: AddonAssets;
   onDisable: (callback: () => void) => void;
   api: {
     // Baseline capabilities — no permission declaration required
-    query: QueryAPI; // shared QueryClient (getClient, invalidate, refetch)
+    query: QueryAPI; // addon-local QueryClient with host invalidation bridge
     storage: StorageAPI; // durable, per-addon key/value store
     toast: ToastAPI; // user-facing notifications
     logger: LoggerAPI; // scoped logging
@@ -195,17 +197,22 @@ The development tools include a hot-reload server:
 # Start development server
 npm run dev:server
 
-# Available on localhost:3001-3003
+# Available on localhost:3001
 # Auto-discovered by Wealthfolio
 ```
 
 ```
 Development Server Structure:
-├─ /health          # Health check
-├─ /status          # Build status
-├─ /manifest.json   # Addon manifest
-└─ /addon.js        # Built addon code
+├─ /health                         # Health check
+├─ /status                         # Build status and generation
+├─ /runtime-package                # Manifest, runtime files, asset metadata
+├─ /runtime-files                  # JavaScript and CSS
+└─ /runtime-assets/:id?generation= # Lazy asset bytes
 ```
+
+Wealthfolio 3.7 requires `@wealthfolio/addon-dev-tools` 3.7 or newer. Each
+published runtime package is an immutable generation, preventing hot reload from
+mixing asset metadata and bytes from different builds.
 
 ## Project Structure
 
@@ -227,6 +234,13 @@ hello-world-addon/
 └── README.md               # Documentation
 ```
 
+Files under `assets/**` and `dist/assets/**` are private packaged assets. They
+do not need a manifest declaration. Load them with `ctx.assets.getBlob()` or
+`ctx.assets.getUrl()`; local CSS `url(...)` references are rewritten
+automatically. Addons using this API must set `minWealthfolioVersion` to
+`3.7.0`. See the
+[v3.6 to v3.7 migration guide](./addon-migration-guide-v3.6-to-v3.7.md).
+
 ### Manifest File
 
 ```json
@@ -237,8 +251,8 @@ hello-world-addon/
   "main": "dist/addon.js",
   "description": "Addon description",
   "author": "Your Name",
-  "sdkVersion": "3.6.1",
-  "minWealthfolioVersion": "3.6.1",
+  "sdkVersion": "3.7.0",
+  "minWealthfolioVersion": "3.7.0",
   "enabled": true,
   "contributes": {
     "routes": [{ "id": "my-addon" }],
@@ -393,6 +407,7 @@ export default defineConfig({
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
   build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
     lib: {
       entry: "src/addon.tsx",
       fileName: () => "addon.js",
@@ -415,7 +430,7 @@ export default defineConfig({
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "dev:server": "wealthfolio dev",
+    "dev:server": "wealthfolio-addon dev",
     "clean": "rm -rf dist",
     "package": "mkdir -p dist && zip -r dist/$npm_package_name-$npm_package_version.zip manifest.json dist/ assets/ README.md",
     "bundle": "pnpm clean && pnpm build && pnpm package",

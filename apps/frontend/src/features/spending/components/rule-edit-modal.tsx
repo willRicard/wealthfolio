@@ -8,7 +8,12 @@ import {
   DialogTitle,
 } from "@wealthfolio/ui";
 
-import { RuleForm, type RuleFormCategoryOption, type RuleFormValues } from "./rule-form";
+import {
+  RuleForm,
+  type RuleFormAccountOption,
+  type RuleFormCategoryOption,
+  type RuleFormValues,
+} from "./rule-form";
 import type { CategorizationRule } from "../types/rule";
 
 interface RuleEditModalProps {
@@ -16,6 +21,7 @@ interface RuleEditModalProps {
   onClose: () => void;
   rule?: CategorizationRule;
   categoryOptions: RuleFormCategoryOption[];
+  accountOptions: RuleFormAccountOption[];
   onSave: (values: RuleFormValues) => void;
   isLoading?: boolean;
 }
@@ -25,6 +31,7 @@ export function RuleEditModal({
   onClose,
   rule,
   categoryOptions,
+  accountOptions,
   onSave,
   isLoading,
 }: RuleEditModalProps) {
@@ -41,6 +48,7 @@ export function RuleEditModal({
         <RuleForm
           rule={rule}
           categoryOptions={categoryOptions}
+          accountOptions={accountOptions}
           onSubmit={onSave}
           onCancel={onClose}
           isLoading={isLoading}

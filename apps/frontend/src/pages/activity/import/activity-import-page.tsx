@@ -394,6 +394,8 @@ function ImportWizardContent() {
   const isTransactionImport = isTransactionImportProfile(importProfile);
 
   const isCsvImportAllowed = canImportCSV(selectedAccount);
+  const isHoldingsValidationLoading =
+    isHoldingsMode && state.step === "review" && state.isValidating;
 
   const canProceed = useStepValidation(isHoldingsMode, importProfile, accounts);
 
@@ -721,7 +723,12 @@ function ImportWizardContent() {
                     canGoBack={canGoBack}
                     canGoNext={canGoNext}
                     nextLabel={getNextLabel()}
-                    isNextLoading={isNextLoading}
+                    nextLoadingLabel={
+                      isHoldingsValidationLoading
+                        ? t("activity:import.holdings.validating")
+                        : undefined
+                    }
+                    isNextLoading={isNextLoading || isHoldingsValidationLoading}
                   />
                 </div>
               )}

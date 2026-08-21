@@ -1444,6 +1444,7 @@ fn mock_performance_result(id: &str) -> PerformanceResult {
         series: Vec::new(),
         is_holdings_mode: false,
         is_mixed_tracking_mode: false,
+        holdings_flows_unavailable: false,
     }
 }
 

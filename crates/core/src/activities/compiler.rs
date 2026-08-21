@@ -140,16 +140,23 @@ impl DefaultActivityCompiler {
             .filter(|amount| !amount.is_zero())
             .or(derived_amount)
             .or(activity.amount);
-        let acquisition_unit_price = activity.unit_price.or_else(|| {
-            income_amount.and_then(|amount| {
-                let reinvested_amount = amount - activity.fee_amt() - activity.tax_amt();
-                if quantity.is_zero() || reinvested_amount <= Decimal::ZERO {
-                    None
-                } else {
-                    Some(reinvested_amount / quantity)
-                }
+        // A non-positive unit_price (forms can carry stale 0s) only stands as the
+        // acquisition price when no price can be derived from the income amount —
+        // e.g. a dust reward where FMV and amount are both genuinely zero.
+        let acquisition_unit_price = activity
+            .unit_price
+            .filter(|price| price.is_sign_positive() && !price.is_zero())
+            .or_else(|| {
+                income_amount.and_then(|amount| {
+                    let reinvested_amount = amount - activity.fee_amt() - activity.tax_amt();
+                    if quantity.is_zero() || reinvested_amount <= Decimal::ZERO {
+                        None
+                    } else {
+                        Some(reinvested_amount / quantity)
+                    }
+                })
             })
-        });
+            .or(activity.unit_price);
 
         // Leg 1: income recognition
         let mut income_leg = activity.clone();
@@ -300,6 +307,116 @@ mod tests {
         assert_eq!(result[1].unit_price, Some(dec!(20)));
         assert!(result[1].amount.is_none());
         assert_eq!(result[1].fee, Some(dec!(0)));
+    }
+
+    /// Materializes the asset-income precedence rules:
+    /// - acquisition price: explicit positive unit_price → derived from net
+    ///   income (amount - fee - tax) / quantity → raw unit_price fallback
+    /// - income amount: non-zero amount → quantity * unit_price → raw amount
+    #[test]
+    fn test_compile_asset_income_price_and_amount_precedence() {
+        struct Case {
+            name: &'static str,
+            unit_price: Option<Decimal>,
+            amount: Option<Decimal>,
+            fee: Option<Decimal>,
+            tax: Option<Decimal>,
+            expected_income: Option<Decimal>,
+            expected_buy_price: Option<Decimal>,
+        }
+
+        // quantity is fixed at 5 for every case
+        let cases = [
+            Case {
+                name: "explicit positive price wins over derivable price",
+                unit_price: Some(dec!(30)),
+                amount: Some(dec!(100)),
+                fee: None,
+                tax: None,
+                expected_income: Some(dec!(100)),
+                expected_buy_price: Some(dec!(30)),
+            },
+            Case {
+                name: "missing price derives net of charges",
+                unit_price: None,
+                amount: Some(dec!(100)),
+                fee: Some(dec!(5)),
+                tax: Some(dec!(5)),
+                expected_income: Some(dec!(100)),
+                expected_buy_price: Some(dec!(18)),
+            },
+            Case {
+                name: "stale zero price loses to derivable price",
+                unit_price: Some(dec!(0)),
+                amount: Some(dec!(100)),
+                fee: None,
+                tax: None,
+                expected_income: Some(dec!(100)),
+                expected_buy_price: Some(dec!(20)),
+            },
+            Case {
+                name: "negative price loses to derivable price",
+                unit_price: Some(dec!(-20)),
+                amount: Some(dec!(100)),
+                fee: None,
+                tax: None,
+                expected_income: Some(dec!(100)),
+                expected_buy_price: Some(dec!(20)),
+            },
+            Case {
+                name: "zero price with nothing derivable stands (dust reward)",
+                unit_price: Some(dec!(0)),
+                amount: Some(dec!(0)),
+                fee: None,
+                tax: None,
+                expected_income: Some(dec!(0)),
+                expected_buy_price: Some(dec!(0)),
+            },
+            Case {
+                name: "no price and no amount yields no price",
+                unit_price: None,
+                amount: None,
+                fee: None,
+                tax: None,
+                expected_income: None,
+                expected_buy_price: None,
+            },
+            Case {
+                name: "zero amount with positive price derives income",
+                unit_price: Some(dec!(20)),
+                amount: Some(dec!(0)),
+                fee: None,
+                tax: None,
+                expected_income: Some(dec!(100)),
+                expected_buy_price: Some(dec!(20)),
+            },
+        ];
+
+        let compiler = DefaultActivityCompiler::new();
+        for case in cases {
+            let mut activity = create_test_activity();
+            activity.activity_type = ACTIVITY_TYPE_DIVIDEND.to_string();
+            activity.subtype = Some(ACTIVITY_SUBTYPE_DRIP.to_string());
+            activity.quantity = Some(dec!(5));
+            activity.unit_price = case.unit_price;
+            activity.amount = case.amount;
+            activity.fee = case.fee;
+            activity.tax = case.tax;
+
+            let result = compiler.compile(&activity).unwrap();
+
+            assert_eq!(result.len(), 2, "{}: legs", case.name);
+            assert_eq!(
+                result[0].amount, case.expected_income,
+                "{}: income",
+                case.name
+            );
+            assert_eq!(
+                result[1].unit_price, case.expected_buy_price,
+                "{}: buy price",
+                case.name
+            );
+        }
     }
 
     #[test]

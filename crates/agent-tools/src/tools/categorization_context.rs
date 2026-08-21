@@ -345,6 +345,7 @@ pub async fn compute_categorization_state(
             notes,
             act.effective_type(),
             &act.account_id,
+            act.amount.map(|d| d.abs()),
         );
         if let Some(m) = rule_match {
             if let (Some(tax_id), Some(cat_id)) =

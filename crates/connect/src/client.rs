@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use log::{debug, info};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 
@@ -20,10 +20,13 @@ use crate::request_metadata::{
 };
 use wealthfolio_core::errors::{Error, Result};
 
-use super::broker::BrokerApiClient;
+use super::broker::{BrokerApiClient, BrokerTrackingMode};
 
 /// Default timeout for API requests.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+const TRACKING_MODE_HEADER_NAME: HeaderName =
+    HeaderName::from_static("x-wealthfolio-tracking-mode");
 
 /// Default base URL for Wealthfolio Connect cloud service.
 pub const DEFAULT_CLOUD_API_URL: &str = "https://api.wealthfolio.app";
@@ -184,15 +187,51 @@ impl ConnectApiClient {
         Ok(headers)
     }
 
+    fn account_headers(
+        &self,
+        client_request_id: &str,
+        tracking_mode: BrokerTrackingMode,
+    ) -> Result<HeaderMap> {
+        let mut headers = self.headers(client_request_id)?;
+        headers.insert(
+            TRACKING_MODE_HEADER_NAME,
+            HeaderValue::from_static(tracking_mode.as_header_value()),
+        );
+        Ok(headers)
+    }
+
     /// Make a GET request and parse the response.
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        self.get_with_tracking_mode(path, None).await
+    }
+
+    /// Make an account-scoped GET request with the account's configured tracking mode.
+    async fn get_account_scoped<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        tracking_mode: BrokerTrackingMode,
+    ) -> Result<T> {
+        self.get_with_tracking_mode(path, Some(tracking_mode)).await
+    }
+
+    async fn get_with_tracking_mode<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        tracking_mode: Option<BrokerTrackingMode>,
+    ) -> Result<T> {
         let context = CloudRequestContext::new("GET", path, None);
         let url = format!("{}{}", self.base_url, path);
+        let headers = match tracking_mode {
+            Some(tracking_mode) => {
+                self.account_headers(&context.client_request_id, tracking_mode)?
+            }
+            None => self.headers(&context.client_request_id)?,
+        };
 
         let response = self
             .client
             .get(&url)
-            .headers(self.headers(&context.client_request_id)?)
+            .headers(headers)
             .send()
             .await
             .map_err(|e| self.request_transport_error(&context, e))?;
@@ -279,6 +318,7 @@ impl ConnectApiClient {
     pub async fn get_account_activities(
         &self,
         account_id: &str,
+        tracking_mode: BrokerTrackingMode,
         start_date: Option<&str>,
         end_date: Option<&str>,
         offset: Option<i64>,
@@ -306,7 +346,7 @@ impl ConnectApiClient {
 
         debug!("[ConnectApi] Fetching activities from: {}", path);
 
-        self.get(&path).await
+        self.get_account_scoped(&path, tracking_mode).await
     }
 
     /// Fetch current holdings for a broker account.
@@ -314,12 +354,16 @@ impl ConnectApiClient {
     /// # Arguments
     ///
     /// * `account_id` - The broker account ID (provider's ID)
-    pub async fn get_account_holdings(&self, account_id: &str) -> Result<BrokerHoldingsResponse> {
+    pub async fn get_account_holdings(
+        &self,
+        account_id: &str,
+        tracking_mode: BrokerTrackingMode,
+    ) -> Result<BrokerHoldingsResponse> {
         let path = format!("/api/v1/sync/brokerage/accounts/{}/holdings", account_id);
 
         debug!("[ConnectApi] Fetching holdings from: {}", path);
 
-        self.get(&path).await
+        self.get_account_scoped(&path, tracking_mode).await
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -486,6 +530,7 @@ impl BrokerApiClient for ConnectApiClient {
     async fn get_account_activities(
         &self,
         account_id: &str,
+        tracking_mode: BrokerTrackingMode,
         start_date: Option<&str>,
         end_date: Option<&str>,
         offset: Option<i64>,
@@ -493,15 +538,25 @@ impl BrokerApiClient for ConnectApiClient {
     ) -> Result<PaginatedUniversalActivity> {
         // Delegate to the inherent method
         ConnectApiClient::get_account_activities(
-            self, account_id, start_date, end_date, offset, limit,
+            self,
+            account_id,
+            tracking_mode,
+            start_date,
+            end_date,
+            offset,
+            limit,
         )
         .await
     }
 
     /// Fetch current holdings for a broker account.
-    async fn get_account_holdings(&self, account_id: &str) -> Result<BrokerHoldingsResponse> {
+    async fn get_account_holdings(
+        &self,
+        account_id: &str,
+        tracking_mode: BrokerTrackingMode,
+    ) -> Result<BrokerHoldingsResponse> {
         // Delegate to the inherent method
-        ConnectApiClient::get_account_holdings(self, account_id).await
+        ConnectApiClient::get_account_holdings(self, account_id, tracking_mode).await
     }
 }
 
@@ -651,6 +706,49 @@ mod tests {
         assert!(is_log_safe_request_id(client_request_id));
         assert!(!headers.contains_key(SERVER_REQUEST_ID_HEADER));
         handle.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn account_scoped_requests_send_configured_tracking_mode() {
+        for (tracking_mode, expected) in [
+            (BrokerTrackingMode::Holdings, "holdings"),
+            (BrokerTrackingMode::Transactions, "transactions"),
+        ] {
+            let (base_url, captured, handle) =
+                start_one_request_server(200, r#"{"data":[],"pagination":{}}"#, None);
+            let client = ConnectApiClient::new(&base_url, "test-token").unwrap();
+
+            client
+                .get_account_activities("broker-account", tracking_mode, None, None, None, None)
+                .await
+                .unwrap();
+
+            let headers = captured.lock().unwrap().clone().expect("captured request");
+            assert_eq!(
+                headers
+                    .get(TRACKING_MODE_HEADER_NAME.as_str())
+                    .map(String::as_str),
+                Some(expected)
+            );
+            handle.join().expect("server thread");
+
+            let (base_url, captured, handle) = start_one_request_server(200, r#"{}"#, None);
+            let client = ConnectApiClient::new(&base_url, "test-token").unwrap();
+
+            client
+                .get_account_holdings("broker-account", tracking_mode)
+                .await
+                .unwrap();
+
+            let headers = captured.lock().unwrap().clone().expect("captured request");
+            assert_eq!(
+                headers
+                    .get(TRACKING_MODE_HEADER_NAME.as_str())
+                    .map(String::as_str),
+                Some(expected)
+            );
+            handle.join().expect("server thread");
+        }
     }
 
     #[tokio::test]

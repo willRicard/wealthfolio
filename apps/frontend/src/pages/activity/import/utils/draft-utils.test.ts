@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ACTIVITY_SUBTYPES, AccountType, ActivityType, ImportFormat } from "@/lib/constants";
-import { createDraftActivities, draftToActivityImport } from "./draft-utils";
+import {
+  createDraftActivities,
+  draftToActivityImport,
+  reconcileExpenseReversalBoundary,
+} from "./draft-utils";
 import { getActivityImportProfileForAccountType } from "./activity-import-profile";
 import { applyAssetResolution } from "./asset-review-utils";
+import type { DraftActivity } from "../context";
 
 const headers = [
   ImportFormat.DATE,
@@ -47,6 +52,107 @@ function createSingleDraftWithMapping(row: string[], activityMappings: Record<st
   expect(draft).toBeDefined();
   return draft;
 }
+
+describe("expense reversal boundary reconciliation", () => {
+  const accountTypes = new Map([
+    ["cash-account", AccountType.CASH],
+    ["securities-account", AccountType.SECURITIES],
+  ]);
+  const reimbursementDraft: DraftActivity = {
+    rowIndex: 0,
+    rawRow: [],
+    activityDate: "2026-08-11T00:00:00.000Z",
+    accountId: "cash-account",
+    activityType: ActivityType.CREDIT,
+    subtype: ACTIVITY_SUBTYPES.REIMBURSEMENT,
+    isExternal: true,
+    boundaryInference: "expense-reversal",
+    currency: "USD",
+    status: "valid",
+    errors: {},
+    warnings: {},
+    isEdited: false,
+  };
+
+  it("clears the inferred boundary when a cash reimbursement moves to a securities account", () => {
+    expect(
+      reconcileExpenseReversalBoundary(
+        reimbursementDraft,
+        { accountId: "securities-account" },
+        accountTypes,
+      ),
+    ).toEqual({ accountId: "securities-account", isExternal: undefined });
+  });
+
+  it("adds the inferred boundary when a securities reimbursement moves to a cash account", () => {
+    expect(
+      reconcileExpenseReversalBoundary(
+        { ...reimbursementDraft, accountId: "securities-account", isExternal: undefined },
+        { accountId: "cash-account" },
+        accountTypes,
+      ),
+    ).toEqual({ accountId: "cash-account", isExternal: true });
+  });
+
+  it("clears a stale boundary when a reimbursement is reclassified as a refund", () => {
+    expect(
+      reconcileExpenseReversalBoundary(
+        reimbursementDraft,
+        { subtype: ACTIVITY_SUBTYPES.REFUND },
+        accountTypes,
+      ),
+    ).toEqual({
+      subtype: ACTIVITY_SUBTYPES.REFUND,
+      isExternal: undefined,
+      boundaryInference: undefined,
+    });
+  });
+
+  it("recomputes an inferred merchant refund when its account changes", () => {
+    const merchantRefundDraft: DraftActivity = {
+      ...reimbursementDraft,
+      subtype: ACTIVITY_SUBTYPES.REFUND,
+    };
+
+    const movedToSecurities = reconcileExpenseReversalBoundary(
+      merchantRefundDraft,
+      { accountId: "securities-account" },
+      accountTypes,
+    );
+    expect(movedToSecurities).toEqual({
+      accountId: "securities-account",
+      isExternal: undefined,
+    });
+
+    expect(
+      reconcileExpenseReversalBoundary(
+        { ...merchantRefundDraft, ...movedToSecurities },
+        { accountId: "cash-account" },
+        accountTypes,
+      ),
+    ).toEqual({ accountId: "cash-account", isExternal: true });
+  });
+
+  it("preserves an explicit boundary edit", () => {
+    expect(
+      reconcileExpenseReversalBoundary(
+        reimbursementDraft,
+        { accountId: "securities-account", isExternal: true },
+        accountTypes,
+      ),
+    ).toEqual({ accountId: "securities-account", isExternal: true });
+  });
+
+  it("preserves an explicit false boundary across later edits", () => {
+    expect(
+      reconcileExpenseReversalBoundary(
+        { ...reimbursementDraft, isExternal: false },
+        { accountId: "securities-account" },
+        accountTypes,
+      ),
+    ).toEqual({ accountId: "securities-account" });
+  });
+});
 
 describe("createDraftActivities explicit activity mapping", () => {
   it("uses the resolved asset currency for security rows when the CSV has no currency column", () => {
@@ -587,7 +693,7 @@ describe("createDraftActivities explicit activity mapping", () => {
     expect(drafts[1].isExternal).toBe(false);
   });
 
-  it("does not serialize stale external flags for non-transfer rows", () => {
+  it("does not serialize stale external flags for activities without boundary semantics", () => {
     const draft = createSingleDraftWithMapping(["2024-03-15", "TRANSFER", "250.00", "USD"], {
       [ActivityType.TRANSFER_IN]: ["TRANSFER"],
     });
@@ -596,9 +702,106 @@ describe("createDraftActivities explicit activity mapping", () => {
     expect(
       draftToActivityImport({
         ...draft,
-        activityType: ActivityType.CREDIT,
+        activityType: ActivityType.DEPOSIT,
       }).isExternal,
     ).toBeUndefined();
+  });
+
+  it("infers external boundaries from unambiguous cash-account reversal labels", () => {
+    const labels = ["MERCHANT REFUND", "CASH BACK", "REIMBURSEMENT"];
+    const drafts = createDraftActivities(
+      labels.map((label) => ["2024-03-15", label, "25.00", "USD"]),
+      headers,
+      {
+        ...baseMapping,
+        activityMappings: { [ActivityType.CREDIT]: labels },
+      },
+      parseConfig,
+      "account-1",
+      undefined,
+      new Map([["account-1", AccountType.CASH]]),
+    );
+
+    expect(drafts.map((draft) => draft.subtype)).toEqual([
+      ACTIVITY_SUBTYPES.REFUND,
+      ACTIVITY_SUBTYPES.REBATE,
+      ACTIVITY_SUBTYPES.REIMBURSEMENT,
+    ]);
+    expect(drafts.every((draft) => draft.isExternal === true)).toBe(true);
+    expect(drafts.every((draft) => draft.boundaryInference === "expense-reversal")).toBe(true);
+    expect(drafts.every((draft) => draftToActivityImport(draft).isExternal === true)).toBe(true);
+  });
+
+  it("keeps ambiguous cash-account refund and rebate labels internal by default", () => {
+    const labels = ["REFUND", "REBATE"];
+    const drafts = createDraftActivities(
+      labels.map((label) => ["2024-03-15", label, "25.00", "USD"]),
+      headers,
+      {
+        ...baseMapping,
+        activityMappings: { [ActivityType.CREDIT]: labels },
+      },
+      parseConfig,
+      "account-1",
+      undefined,
+      new Map([["account-1", AccountType.CASH]]),
+    );
+
+    expect(drafts.map((draft) => draft.subtype)).toEqual([
+      ACTIVITY_SUBTYPES.REFUND,
+      ACTIVITY_SUBTYPES.REBATE,
+    ]);
+    expect(drafts.every((draft) => draft.isExternal === undefined)).toBe(true);
+  });
+
+  it("shows the BONUS default and preserves an explicit false import override", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "CREDIT", "25.00", "USD", "BONUS"]],
+      [...headers, ImportFormat.SUBTYPE],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          ...baseMapping.fieldMappings,
+          [ImportFormat.SUBTYPE]: ImportFormat.SUBTYPE,
+        },
+        activityMappings: { [ActivityType.CREDIT]: ["CREDIT"] },
+      },
+      parseConfig,
+      "account-1",
+      undefined,
+      new Map([["account-1", AccountType.CASH]]),
+    );
+
+    expect(draft.subtype).toBe(ACTIVITY_SUBTYPES.BONUS);
+    expect(draft.isExternal).toBe(true);
+    expect(draftToActivityImport({ ...draft, isExternal: false }).isExternal).toBe(false);
+  });
+
+  it("serializes an explicit boundary for any credit subtype", () => {
+    const draft = createSingleDraftWithMapping(["2024-03-15", "CREDIT", "25.00", "USD"], {
+      [ActivityType.CREDIT]: ["CREDIT"],
+    });
+
+    expect(draftToActivityImport({ ...draft, isExternal: true }).isExternal).toBe(true);
+  });
+
+  it("keeps the same refund internal when imported into a securities account", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "REFUND", "25.00", "USD"]],
+      headers,
+      {
+        ...baseMapping,
+        activityMappings: { [ActivityType.CREDIT]: ["REFUND"] },
+      },
+      parseConfig,
+      "account-1",
+      undefined,
+      new Map([["account-1", AccountType.SECURITIES]]),
+    );
+
+    expect(draft.subtype).toBe(ACTIVITY_SUBTYPES.REFUND);
+    expect(draft.isExternal).toBeUndefined();
+    expect(draftToActivityImport(draft).isExternal).toBeUndefined();
   });
 
   it("accepts a positive split ratio from the amount column", () => {

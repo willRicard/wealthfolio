@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import type { HostAPI } from './host-api';
 import type { AddonIconName } from './icons';
+import type { AddonAsset } from './manifest';
 
 /**
  * Core types for addon development
@@ -120,6 +121,18 @@ export interface RouterManager {
   add(route: RouteConfig): void;
 }
 
+/** Access to files packaged below `assets/` or `dist/assets/`. */
+export interface AddonAssets {
+  /** List the packaged assets registered for this add-on. */
+  list(): readonly AddonAsset[];
+  /** Check whether a logical package path is registered. */
+  has(path: string): boolean;
+  /** Load an asset as a Blob. The host caches it for the sandbox lifetime. */
+  getBlob(path: string): Promise<Blob>;
+  /** Return a sandbox-local Blob URL, revoked automatically when the add-on stops. */
+  getUrl(path: string): Promise<string>;
+}
+
 /**
  * Event callback type for Tauri events
  */
@@ -143,6 +156,8 @@ export interface AddonContext {
   sidebar: SidebarManager;
   /** Router management */
   router: RouterManager;
+  /** Packaged, add-on-private assets. */
+  assets: AddonAssets;
   /** Register a callback for addon cleanup */
   onDisable(callback: () => void): void;
   /** Access to host application APIs */
@@ -154,4 +169,7 @@ export interface AddonContext {
  */
 export type AddonEnableFunction = (
   context: AddonContext,
-) => void | { disable?: () => void };
+) =>
+  | void
+  | { disable?: () => void | Promise<void> }
+  | Promise<void | { disable?: () => void | Promise<void> }>;

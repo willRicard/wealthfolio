@@ -1,7 +1,3 @@
-import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { calculatePerformanceSummaries } from "@/adapters";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useCurrentAccountValuations } from "@/hooks/use-current-account-valuations";
@@ -18,6 +14,10 @@ import type {
 } from "@/lib/types";
 import { AccountType } from "@/lib/types";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountsSummary } from "./accounts-summary";
 
 vi.mock("@/adapters", () => ({
@@ -107,6 +107,7 @@ const mockSettings: Settings = {
   theme: "light",
   font: "font-sans",
   language: "en",
+  formattingRegion: "US",
   baseCurrency: "USD",
   defaultReturnMetric: "twr",
   timezone: "America/Chicago",
@@ -180,6 +181,7 @@ function createCurrentValuation(
     accountId: overrides.accountId ?? "account-1",
     accountCurrency: overrides.accountCurrency ?? "USD",
     baseCurrency: overrides.baseCurrency ?? "USD",
+    fxRateToBase: overrides.fxRateToBase === undefined ? 1 : overrides.fxRateToBase,
     cashBalance: overrides.cashBalance ?? 0,
     investmentMarketValue: overrides.investmentMarketValue ?? 0,
     totalValue: overrides.totalValue ?? 0,
@@ -306,6 +308,7 @@ function renderAccountsSummary({
       accountId: valuation.accountId,
       accountCurrency: valuation.accountCurrency,
       baseCurrency: valuation.baseCurrency,
+      fxRateToBase: valuation.fxRateToBase,
       cashBalance: valuation.cashBalance,
       investmentMarketValue: valuation.investmentMarketValue,
       totalValue: valuation.totalValue,
@@ -561,7 +564,8 @@ describe("AccountsSummary", () => {
           accountCurrency: "CAD",
           baseCurrency: "USD",
           totalValue: 150,
-          totalValueBase: 110,
+          totalValueBase: 120,
+          fxRateToBase: 0.8,
         }),
       ],
       performanceByAccountId: {
@@ -576,12 +580,39 @@ describe("AccountsSummary", () => {
     expect(row).not.toBeNull();
     // Value is shown in the account's own currency (CAD), not the USD base currency.
     expect(within(row as HTMLElement).getByText("value:CAD:150")).toBeInTheDocument();
-    expect(within(row as HTMLElement).queryByText("value:USD:110")).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText("value:USD:120")).not.toBeInTheDocument();
     // Return percent is currency-agnostic and still shown.
     expect(within(row as HTMLElement).getByText("gain-percent:0.08")).toBeInTheDocument();
-    // P&L amount is only computed in base currency for foreign accounts, so it is
-    // omitted here rather than mislabeled as CAD.
+    // P&L is returned in base currency and converted with the live CAD-to-USD rate.
+    expect(within(row as HTMLElement).getByText("gain-amount:CAD:true:12.5")).toBeInTheDocument();
+  });
+
+  it("does not label base-currency P&L as account-currency P&L when FX is unavailable", () => {
+    renderAccountsSummary({
+      accounts: [createAccount({ id: "cad-account", name: "CAD Account", currency: "CAD" })],
+      valuations: [],
+      currentValuations: [
+        createCurrentValuation({
+          accountId: "cad-account",
+          accountCurrency: "CAD",
+          baseCurrency: "USD",
+          totalValue: 150,
+          totalValueBase: 120,
+          fxRateToBase: null,
+        }),
+      ],
+      performanceByAccountId: {
+        "cad-account": {
+          pnl: 10,
+          returnValue: 0.08,
+        },
+      },
+    });
+
+    const row = screen.getByText("CAD Account").closest("a");
+    expect(row).not.toBeNull();
     expect(within(row as HTMLElement).queryByText(/^gain-amount:/)).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("gain-percent:0.08")).toBeInTheDocument();
   });
 
   it("keeps bad-data warnings for foreign-currency accounts when only base P&L is available", () => {

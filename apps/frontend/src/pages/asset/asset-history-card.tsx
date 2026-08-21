@@ -19,7 +19,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  formatPercent,
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
@@ -30,9 +29,11 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  useDateFormatting,
+  useNumberFormatting,
 } from "@wealthfolio/ui";
 import { format, subMonths } from "date-fns";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ASSET_MARKER_ACTIVITY_TYPES,
@@ -43,6 +44,8 @@ import {
 } from "./asset-history-markers";
 import { RefreshQuotesConfirmDialog } from "./refresh-quotes-confirm-dialog";
 
+const SHOW_ACTIVITY_MARKERS_STORAGE_KEY = "history-chart-show-activity-markers";
+
 interface AssetHistoryProps {
   marketPrice: number;
   totalGainAmount: number;
@@ -50,6 +53,7 @@ interface AssetHistoryProps {
   currency: string;
   quoteHistory: Quote[];
   assetId: string;
+  averageCost?: number;
   className?: string;
 }
 
@@ -60,13 +64,30 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
   currency,
   quoteHistory,
   assetId,
+  averageCost,
   className,
 }) => {
+  const numberFormatting = useNumberFormatting();
+  const dateFormatting = useDateFormatting();
+
   const { t } = useTranslation();
   const syncMarketDataMutation = useSyncMarketDataMutation(true);
   const { isBalanceHidden } = useBalancePrivacy();
   const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
-  const [showActivityMarkers, setShowActivityMarkers] = useState(false);
+  const [showActivityMarkers, setShowActivityMarkers] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(SHOW_ACTIVITY_MARKERS_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SHOW_ACTIVITY_MARKERS_STORAGE_KEY, String(showActivityMarkers));
+    } catch {
+      // localStorage unavailable (e.g. private browsing); the toggle just won't persist.
+    }
+  }, [showActivityMarkers]);
   const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
   const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
 
@@ -200,8 +221,11 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
                       currency={currency}
                       isHidden={isBalanceHidden}
                     />{" "}
-                    ({percentage == null ? t("asset:historyCard.na") : formatPercent(percentage)}){" "}
-                    {selectedIntervalDesc}
+                    (
+                    {percentage == null
+                      ? t("asset:historyCard.na")
+                      : numberFormatting.formatPercent(percentage)}
+                    ) {selectedIntervalDesc}
                   </p>
                 </div>
               </HoverCardTrigger>
@@ -212,7 +236,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
                       <Icons.Calendar className="mr-2 h-4 w-4" />
                       {t("asset:historyCard.as_of")}{" "}
                       <Badge className="ml-1 font-medium" variant="secondary">
-                        {calculatedAt ? `${format(new Date(calculatedAt), "PPpp")}` : "-"}
+                        {calculatedAt ? dateFormatting.formatDateTime(new Date(calculatedAt)) : "-"}
                       </Badge>
                     </h4>
                   </div>
@@ -270,6 +294,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
           <HistoryChart
             data={chartData}
             activityMarkers={activityMarkers}
+            averageCost={showActivityMarkers && !isBalanceHidden ? averageCost : undefined}
             onActivityMarkerClick={(marker) => {
               setSelectedActivityDate(dateKey(marker.point));
               setIsActivitySheetOpen(true);

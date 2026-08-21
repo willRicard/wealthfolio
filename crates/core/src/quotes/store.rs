@@ -171,6 +171,50 @@ pub trait QuoteStore: Send + Sync {
         source: Option<&QuoteSource>,
     ) -> Result<HashMap<AssetId, Quote>>;
 
+    /// Gets sparse quotes in a date range for multiple assets.
+    ///
+    /// This is the batch counterpart to [`QuoteStore::range`]. Implementations
+    /// should avoid issuing one query per asset. With no source filter, the
+    /// highest-priority quote is selected for each asset/day. Results are sorted
+    /// by asset and then timestamp.
+    fn range_batch(
+        &self,
+        asset_ids: &[AssetId],
+        start: Day,
+        end: Day,
+        source: Option<&QuoteSource>,
+    ) -> Result<Vec<Quote>> {
+        let mut quotes = Vec::new();
+        for asset_id in asset_ids {
+            quotes.extend(self.range(asset_id, start, end, source)?);
+        }
+        quotes.sort_by(|left, right| {
+            left.asset_id
+                .cmp(&right.asset_id)
+                .then_with(|| left.timestamp.cmp(&right.timestamp))
+        });
+        Ok(quotes)
+    }
+
+    /// Gets sparse quote rows for assets that may have different inclusive start dates.
+    fn range_batch_from_dates(
+        &self,
+        asset_start_dates: &[(AssetId, Day)],
+        end: Day,
+        source: Option<&QuoteSource>,
+    ) -> Result<Vec<Quote>> {
+        let mut quotes = Vec::new();
+        for (asset_id, start) in asset_start_dates {
+            quotes.extend(self.range(asset_id, *start, end, source)?);
+        }
+        quotes.sort_by(|left, right| {
+            left.asset_id
+                .cmp(&right.asset_id)
+                .then_with(|| left.timestamp.cmp(&right.timestamp))
+        });
+        Ok(quotes)
+    }
+
     /// Gets latest + previous quote for multiple assets.
     ///
     /// This is useful for calculating daily price changes.
@@ -208,6 +252,21 @@ pub trait QuoteStore: Send + Sync {
         asset_ids: &[String],
         source: &str,
     ) -> Result<HashMap<String, (NaiveDate, NaiveDate)>>;
+
+    /// Gets quote date bounds across all sources for multiple assets.
+    fn get_quote_bounds_for_assets_any_source(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<HashMap<String, (NaiveDate, NaiveDate)>> {
+        let latest = self.get_latest_quotes(asset_ids)?;
+        Ok(latest
+            .into_iter()
+            .map(|(asset_id, quote)| {
+                let date = quote.timestamp.date_naive();
+                (asset_id, (date, date))
+            })
+            .collect())
+    }
 
     // =========================================================================
     // Legacy Methods (String-based, for backward compatibility)
@@ -261,6 +320,23 @@ pub trait QuoteStore: Send + Sync {
         symbols: &[String],
         as_of: NaiveDate,
     ) -> Result<HashMap<String, Quote>>;
+
+    /// Gets one original persisted seed quote per asset using an asset-specific cutoff.
+    fn get_latest_quotes_as_of_dates(
+        &self,
+        requests: &[(String, NaiveDate)],
+    ) -> Result<HashMap<String, Quote>> {
+        let mut result = HashMap::new();
+        for (asset_id, as_of) in requests {
+            if let Some(quote) = self
+                .get_latest_quotes_as_of(std::slice::from_ref(asset_id), *as_of)?
+                .remove(asset_id)
+            {
+                result.insert(asset_id.clone(), quote);
+            }
+        }
+        Ok(result)
+    }
 
     /// Gets the latest quote on or before each requested asset/date pair.
     ///

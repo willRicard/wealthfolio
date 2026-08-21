@@ -369,6 +369,16 @@ where
     let mut summary_warnings = Vec::new();
     let mut account_warnings = Vec::new();
 
+    let account_fx_rate = latest_rate(&account.currency, base_currency).into();
+    valuation.fx_rate_to_base = account_fx_rate
+        .warning
+        .is_none()
+        .then_some(account_fx_rate.rate)
+        .filter(|rate| *rate > Decimal::ZERO);
+    if let Some(warning) = account_fx_rate.warning {
+        account_warnings.push(warning);
+    }
+
     for (cash_currency, amount) in &snapshot.cash_balances {
         let (normalized_amount, normalized_cash_currency) =
             normalize_amount(*amount, cash_currency);
@@ -508,6 +518,7 @@ fn zero_current_account_valuation(
         account_id: account.id.clone(),
         account_currency: account.currency.clone(),
         base_currency: base_currency.to_string(),
+        fx_rate_to_base: (account.currency == base_currency).then_some(Decimal::ONE),
         cash_balance: Decimal::ZERO,
         investment_market_value: Decimal::ZERO,
         total_value: Decimal::ZERO,

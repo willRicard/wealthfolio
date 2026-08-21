@@ -33,8 +33,14 @@ export const getHoldings = async (filter: AccountScope): Promise<Holding[]> => {
   return invoke<Holding[]>("get_holdings", { filter });
 };
 
-export const getHoldingsList = async (filter: AccountScope): Promise<Holding[]> => {
-  return invoke<Holding[]>("get_holdings_list", { filter });
+export const getHoldingsList = async (
+  filter: AccountScope,
+  options: { includeClosed?: boolean } = {},
+): Promise<Holding[]> => {
+  return invoke<Holding[]>("get_holdings_list", {
+    filter,
+    ...(options.includeClosed ? { includeClosed: true } : {}),
+  });
 };
 
 export const getIncomeSummary = async (filter?: AccountScope): Promise<IncomeSummary[]> => {
@@ -346,9 +352,13 @@ export const getSnapshotByDate = async (accountId: string, date: string): Promis
 };
 
 /**
- * Deletes a manual/imported snapshot for a specific date.
- * Only non-CALCULATED snapshots can be deleted.
+ * Deletes a snapshot by date, or by ID for malformed-date remediation.
+ * Calculated snapshots are only deletable when their date requires remediation.
  */
-export const deleteSnapshot = async (accountId: string, date: string): Promise<void> => {
-  return invoke<void>("delete_snapshot", { accountId, date });
+export const deleteSnapshot = async (
+  accountId: string,
+  date: string,
+  snapshotId?: string,
+): Promise<void> => {
+  return invoke<void>("delete_snapshot", { accountId, date, snapshotId });
 };

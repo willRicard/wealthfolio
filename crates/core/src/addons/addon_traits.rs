@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 
 use super::network::{AddonNetworkRequest, AddonNetworkResponse};
-use super::{AddonManifest, AddonUpdateCheckResult, ExtractedAddon, InstalledAddon};
+use super::{
+    AddonAssetContent, AddonManifest, AddonUpdateCheckResult, ExtractedAddon, InstalledAddon,
+};
 
 /// Service trait for addon business logic operations.
 #[async_trait]
@@ -29,6 +31,9 @@ pub trait AddonServiceTrait: Send + Sync {
     fn list_installed_addons(&self) -> Result<Vec<InstalledAddon>, String>;
 
     fn load_addon_for_runtime(&self, addon_id: &str) -> Result<ExtractedAddon, String>;
+
+    fn load_addon_asset(&self, addon_id: &str, asset_id: &str)
+        -> Result<AddonAssetContent, String>;
 
     fn get_enabled_addons_on_startup(&self) -> Result<Vec<ExtractedAddon>, String>;
 

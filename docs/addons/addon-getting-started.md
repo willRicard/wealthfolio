@@ -72,6 +72,7 @@ hello-world-addon/
 │   ├── utils/              # Utility functions
 │   └── types/              # Type definitions
 ├── dist/                   # Built files (generated)
+├── assets/                 # Private static assets (optional)
 ├── manifest.json           # Addon metadata and permissions
 ├── package.json            # NPM package configuration
 ├── vite.config.ts          # Build configuration
@@ -92,8 +93,8 @@ permissions it needs:
   "description": "My first Wealthfolio addon",
   "author": "Your Name",
   "main": "dist/addon.js",
-  "sdkVersion": "3.6.1",
-  "minWealthfolioVersion": "3.6.1",
+  "sdkVersion": "3.7.0",
+  "minWealthfolioVersion": "3.7.0",
   "enabled": true,
   "contributes": {
     "routes": [{ "id": "hello-world" }],
@@ -187,6 +188,30 @@ const enable: AddonEnableFunction = (ctx) => {
 
 export default enable;
 ```
+
+## Add Packaged Assets
+
+Wealthfolio 3.7 automatically indexes `assets/**` and `dist/assets/**`; there is
+no `assets` manifest field or permission. Load a hand-authored image, JSON file,
+font, media file, or Wasm module through the private registry:
+
+```typescript
+const logoUrl = await ctx.assets.getUrl("assets/logo.png");
+const configBlob = await ctx.assets.getBlob("assets/config.json");
+const config = JSON.parse(await configBlob.text());
+```
+
+Use Blob URLs only for the current addon lifetime. The sandbox revokes them on
+reload or disable. Local CSS `url(...)` references are resolved relative to the
+stylesheet automatically, while remote CSS URLs and `@import` are rejected.
+JavaScript/JSX strings are not rewritten, so images rendered by components must
+use `getUrl()`.
+
+`ctx.assets` contains package files; `ctx.api.assets` manages Wealthfolio
+financial instruments. Addons using `ctx.assets` must set `sdkVersion` and
+`minWealthfolioVersion` to `3.7.0`. See the
+[v3.6 to v3.7 guide](./addon-migration-guide-v3.6-to-v3.7.md) for limits and
+compatibility.
 
 > **Do not call `createRoot` yourself.** The host owns the single React root and
 > mounts your `component` into it. A per-route `createRoot` leaves an orphaned
@@ -392,8 +417,8 @@ declaring a data `category`, the `functions` you call, and a human-readable
   "description": "My first Wealthfolio addon",
   "author": "Your Name",
   "main": "dist/addon.js",
-  "sdkVersion": "3.6.1",
-  "minWealthfolioVersion": "3.6.1",
+  "sdkVersion": "3.7.0",
+  "minWealthfolioVersion": "3.7.0",
   "enabled": true,
   "contributes": {
     "routes": [{ "id": "hello-world" }],
@@ -478,6 +503,11 @@ const enable: AddonEnableFunction = (ctx) => {
 - Source maps for debugging
 - Real-time TypeScript checking
 - Hot Module Replacement
+- Coherent `/runtime-package` generations for code, CSS, and private assets
+
+Wealthfolio 3.7 requires `@wealthfolio/addon-dev-tools` 3.7 or newer. If the
+host reports that the server does not support v3.7 runtime packages, upgrade the
+package and restart `pnpm dev:server`.
 
 ## IDE Setup
 
@@ -531,12 +561,12 @@ pnpm format
 ```json
 {
   "scripts": {
-    "dev:server": "wealthfolio dev",
+    "dev:server": "wealthfolio-addon dev",
     "build": "vite build",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "bundle": "pnpm build && zip -r addon.zip manifest.json dist/"
+    "bundle": "pnpm build && zip -r addon.zip manifest.json dist/ assets/"
   }
 }
 ```
@@ -574,9 +604,9 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
 // Host-provided dependencies are marked `external` so they are NOT bundled —
-// the sandbox provides the real instances at runtime (one shared React, one
-// shared QueryClient). Keep this list aligned with `hostDependencies` in
-// manifest.json.
+// the sandbox provides the real instances at runtime (one shared React module
+// and one QueryClient scoped to this addon). Keep this list aligned with
+// `hostDependencies` in manifest.json.
 const hostProvidedDependencies = [
   "@tanstack/react-query",
   "@wealthfolio/addon-sdk",
@@ -604,6 +634,7 @@ export default defineConfig({
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
   build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
     lib: {
       entry: "src/addon.tsx",
       formats: ["es"],

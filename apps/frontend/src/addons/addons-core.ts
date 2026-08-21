@@ -165,6 +165,7 @@ async function loadAddon(addonFile: AddonFile, activationEpoch: number): Promise
 
     const handle = await addonIframeManager.startAddon({
       addonId: extractedAddon.metadata.id,
+      assets: extractedAddon.assets,
       code: addonCode,
       files: extractedAddon.files,
       manifest: extractedAddon.metadata,

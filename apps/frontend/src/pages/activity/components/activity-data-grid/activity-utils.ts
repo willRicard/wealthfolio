@@ -371,7 +371,7 @@ export function applyTransactionUpdate(params: TransactionUpdateParams): LocalTr
     }
     updated = applyCashDefaults(updated, resolveTransactionCurrency, fallbackCurrency);
   } else if (field === "isExternal") {
-    // isExternal flag for TRANSFER_IN/TRANSFER_OUT (stored in metadata.flow.is_external)
+    // Explicit performance boundary stored in metadata.flow.is_external.
     updated = { ...updated, isExternal: Boolean(value) };
   } else if (field === "instrumentType") {
     // Instrument type (EQUITY, OPTION, BOND, etc.) — also set pendingInstrumentType for save payload
@@ -467,6 +467,7 @@ export function buildSavePayload(
     const isTransfer =
       transaction.activityType === ActivityType.TRANSFER_IN ||
       transaction.activityType === ActivityType.TRANSFER_OUT;
+    const supportsBoundary = isTransfer || transaction.activityType === ActivityType.CREDIT;
     const assetSymbol = (transaction.assetSymbol || "").trim();
     const isCash = isTransfer
       ? isCashTransfer(transaction.activityType, assetSymbol) || !assetSymbol
@@ -478,11 +479,12 @@ export function buildSavePayload(
 
     const isNew = transaction.isNew === true;
 
-    // Build metadata JSON if needed (e.g., for isExternal flag on transfers)
+    // Build metadata JSON if an explicit performance boundary is present.
     let metadataJson: string | undefined;
-    if (isTransfer && transaction.isExternal != null) {
-      // Merge with existing metadata if present
-      const existingMeta = typeof transaction.metadata === "object" ? transaction.metadata : {};
+    if (supportsBoundary && transaction.isExternal != null) {
+      // Existing updates retain metadata. New manual duplicates carry only the boundary marker.
+      const existingMeta =
+        !isNew && typeof transaction.metadata === "object" ? transaction.metadata : {};
       const newMeta = {
         ...existingMeta,
         flow: {

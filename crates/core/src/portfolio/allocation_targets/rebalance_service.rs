@@ -417,9 +417,14 @@ impl RebalanceServiceTrait for RebalanceService {
             )
             .await?;
 
-        let cash_in_scope =
-            deployable_cash_from_contributions(&profile.taxonomy_id, &taxonomy_contributions)
-                .unwrap_or_else(|| tracked_cash(&all_holdings));
+        let deployable_cash =
+            deployable_cash_from_contributions(&profile.taxonomy_id, &taxonomy_contributions);
+        // Some(_) ⇒ the taxonomy has a cash sleeve, so scope cash is already part
+        // of the drift report total; None ⇒ cash lives outside the classified
+        // universe and the optimizer must widen its planning basis by the cash
+        // it deploys.
+        let total_includes_cash = deployable_cash.is_some();
+        let cash_in_scope = deployable_cash.unwrap_or_else(|| tracked_cash(&all_holdings));
 
         let available_cash = if input.available_cash > cash_in_scope {
             let overage = input.available_cash - cash_in_scope;
@@ -604,6 +609,7 @@ impl RebalanceServiceTrait for RebalanceService {
             scenario_mode: input.scenario_mode,
             available_cash,
             total_value,
+            total_includes_cash,
             categories,
             candidates,
             sell_candidates,
@@ -703,6 +709,7 @@ mod tests {
             id: id.to_string(),
             account_id: "acc-1".to_string(),
             holding_type: HoldingType::Security,
+            is_closed: false,
             instrument: Some(Instrument {
                 id: id.to_string(),
                 symbol: symbol.to_string(),
@@ -754,6 +761,7 @@ mod tests {
             id: "cash".to_string(),
             account_id: "acc-1".to_string(),
             holding_type: HoldingType::Cash,
+            is_closed: false,
             instrument: None,
             asset_kind: None,
             quantity: amount,

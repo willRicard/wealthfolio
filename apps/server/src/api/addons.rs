@@ -1,9 +1,14 @@
 use std::sync::Arc;
 
-use crate::{error::ApiResult, main_lib::AppState};
+use crate::{
+    error::{ApiError, ApiResult},
+    main_lib::AppState,
+};
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::Response,
     routing::{delete, get, post},
     Json, Router,
 };
@@ -119,6 +124,26 @@ async fn load_addon_for_runtime_web(
         .load_addon_for_runtime(&id)
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(Json(extracted))
+}
+
+async fn load_addon_asset_web(
+    Path((id, asset_id)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Response> {
+    let addon_service = Arc::clone(&state.addon_service);
+    let asset = tokio::task::spawn_blocking(move || addon_service.load_addon_asset(&id, &asset_id))
+        .await
+        .map_err(|error| ApiError::Internal(format!("Addon asset task failed: {error}")))?
+        .map_err(ApiError::BadRequest)?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, asset.mime_type)
+        .header(header::CACHE_CONTROL, "private, no-store")
+        .body(Body::from(asset.bytes))
+        .map_err(|error| {
+            ApiError::Internal(format!("Failed to build addon asset response: {error}"))
+        })
 }
 
 async fn get_enabled_addons_on_startup_web(
@@ -349,6 +374,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/addons/toggle", post(toggle_addon_web))
         .route("/addons/{id}", delete(uninstall_addon_web))
         .route("/addons/runtime/{id}", get(load_addon_for_runtime_web))
+        .route(
+            "/addons/runtime/{id}/assets/{asset_id}",
+            get(load_addon_asset_web),
+        )
         .route(
             "/addons/enabled-on-startup",
             get(get_enabled_addons_on_startup_web),

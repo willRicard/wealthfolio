@@ -16,6 +16,7 @@ npm install @wealthfolio/addon-sdk
 **What it provides:**
 
 - `AddonContext` interface and types
+- `AddonAssets` and `AddonAsset` types for private packaged files
 - `HostAPI` interface for all financial APIs
 - Permission system types and utilities
 - Data type definitions (Account, Holding, Activity, etc.)
@@ -27,13 +28,15 @@ npm install @wealthfolio/addon-sdk
 import type {
   AddonContext,
   AddonEnableFunction,
+  AddonAsset,
+  AddonAssets,
   HostAPI,
   Permission,
   RiskLevel,
 } from "@wealthfolio/addon-sdk";
 ```
 
-**Version:** 1.0.0 **Peer Dependencies:** React ^18.0.0
+**Version:** 3.7.0 **Peer Dependencies:** React ^19.2.4
 
 ### @wealthfolio/ui
 
@@ -85,7 +88,7 @@ npm install -D @wealthfolio/addon-dev-tools
 
 **What it provides:**
 
-- `wealthfolio` CLI command
+- `wealthfolio-addon` CLI command (`wealthfolio` is a deprecated alias)
 - Hot-reload development server
 - Project scaffolding templates
 - Build and package utilities
@@ -94,29 +97,29 @@ npm install -D @wealthfolio/addon-dev-tools
 
 ```bash
 # Create new addon
-wealthfolio create my-addon
+wealthfolio-addon create my-addon
 
 # Start development server
-wealthfolio dev
+wealthfolio-addon dev
 
 # Build addon
-wealthfolio build
+wealthfolio-addon build
 
 # Package for distribution
-wealthfolio package
+wealthfolio-addon package
 ```
 
 ## Required Dependencies
 
 ### React Ecosystem
 
-All addons must use React 18:
+All addons must use the host-provided React version:
 
 ```json
 {
   "dependencies": {
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   }
 }
 ```
@@ -146,8 +149,8 @@ TypeScript support with proper types:
   "devDependencies": {
     "typescript": "^5.8.3",
     "@types/node": "^22.14.0",
-    "@types/react": "^19.1.11",
-    "@types/react-dom": "^18.3.0"
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3"
   }
 }
 ```
@@ -302,9 +305,9 @@ You can add other npm packages to your addon:
 ```json
 {
   "dependencies": {
-    "@wealthfolio/addon-sdk": "1.0.0",
-    "@wealthfolio/ui": "1.0.0",
-    "react": "^19.1.1"
+    "@wealthfolio/addon-sdk": "^3.7.0",
+    "@wealthfolio/ui": "^3.7.0",
+    "react": "^19.2.4"
   }
 }
 ```
@@ -330,23 +333,23 @@ Template for addon package.json:
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "dev:server": "wealthfolio dev",
+    "dev:server": "wealthfolio-addon dev",
     "clean": "rm -rf dist *.zip",
-    "package": "zip -r my-addon.zip manifest.json dist/ README.md",
+    "package": "zip -r my-addon.zip manifest.json dist/ assets/ README.md",
     "bundle": "npm run clean && npm run build && npm run package",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@wealthfolio/addon-sdk": "1.0.0",
-    "@wealthfolio/ui": "1.0.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "@wealthfolio/addon-sdk": "^3.7.0",
+    "@wealthfolio/ui": "^3.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@wealthfolio/addon-dev-tools": "^1.0.0",
+    "@wealthfolio/addon-dev-tools": "^3.7.0",
     "@types/node": "^22.14.0",
-    "@types/react": "^19.1.11",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.4.1",
     "typescript": "^5.8.3",
     "vite": "^6.2.7"
@@ -381,6 +384,7 @@ export default defineConfig({
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
   build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
     lib: {
       entry: "src/addon.tsx",
       fileName: () => "addon.js",
@@ -404,14 +408,31 @@ Always use compatible versions:
 
 | SDK Version | Wealthfolio Version | React Version |
 | ----------- | ------------------- | ------------- |
-| 1.0.0       | 1.0.0+              | ^19.1.1       |
+| 3.7.x       | 3.7.0+              | ^19.2.4       |
+| 3.6.x       | 3.6.0+              | ^19.2.4       |
 
 ### Breaking Changes
 
 Major version increments indicate breaking changes:
 
-- **1.x.x**: Current stable API
-- **2.x.x**: Future breaking changes (when available)
+- Addons using `ctx.assets` require SDK and Wealthfolio 3.7 or newer.
+- Existing v3.6 addons remain supported by Wealthfolio 3.7.
+
+## Packaged Asset Support
+
+Wealthfolio indexes files below `assets/**` and `dist/assets/**` without an
+`assets` manifest field. Use `ctx.assets.getBlob(path)` for bytes and
+`ctx.assets.getUrl(path)` for images, fonts, media, and Wasm-compatible Blob
+URLs. Local CSS `url(...)` references are rewritten automatically.
+
+`ctx.assets` is private package content; `ctx.api.assets` is the financial asset
+domain API. See the
+[v3.6 to v3.7 migration guide](./addon-migration-guide-v3.6-to-v3.7.md) for
+limits, CSS restrictions, lifecycle, and compatibility.
+
+Packaged assets can be consumed by images, fonts, media elements, CSS, and
+WebAssembly. The sandbox does not allow Worker or service-worker entry points,
+popups, direct network requests, or remote CSS imports.
 
 ## Package Installation
 
@@ -462,9 +483,9 @@ npm run dev:server
 Using CLI directly:
 
 ```bash
-npx wealthfolio dev
+npx wealthfolio-addon dev
 # or if installed globally
-wealthfolio dev
+wealthfolio-addon dev
 ```
 
 #### How Hot Reload Works
@@ -481,18 +502,15 @@ The development server automatically:
 - `.tsx`, `.ts` - TypeScript/React components
 - `.json` - Manifest and configuration files
 - `.css` - Stylesheets
+- Files below `assets/` - Private packaged resources
 
 #### Development Server Configuration
 
-The development server runs on ports 3001-3003 by default:
+The development server runs on port 3001 by default. The host discovers it via
+`/health`, loads one coherent `/runtime-package` generation, and lazily requests
+asset bytes from that same generation.
 
-```typescript
-// Auto-discovery process
-const DEVELOPMENT_PORTS = [3001, 3002, 3003];
-
-// Server will bind to first available port
-// Wealthfolio automatically discovers addons on these ports
-```
+Use `@wealthfolio/addon-dev-tools` 3.7 or newer with Wealthfolio 3.7.
 
 #### Package.json Scripts
 
@@ -501,7 +519,7 @@ Standard development scripts setup:
 ```json
 {
   "scripts": {
-    "dev:server": "wealthfolio dev",
+    "dev:server": "wealthfolio-addon dev",
     "build": "vite build",
     "clean": "rm -rf dist",
     "bundle": "npm run build && wealthfolio package",
@@ -559,7 +577,7 @@ The development server provides detailed logging:
 🔧 Building addon...
 ✅ Build successful
 🌐 Server running on http://localhost:3001
-📡 Addon available at: http://localhost:3001/addon.js
+📡 Runtime package available at: http://localhost:3001/runtime-package
 ```
 
 #### Troubleshooting Development Server
@@ -569,14 +587,17 @@ The development server provides detailed logging:
 ```bash
 # Check if ports are available
 lsof -i :3001
-lsof -i :3002
-lsof -i :3003
 
 # Kill conflicting processes
 kill -9 <PID>
 ```
 
 **Hot reload not working:**
+
+Wealthfolio 3.7 requires `@wealthfolio/addon-dev-tools` 3.7 or newer. A 404/405
+for `/runtime-package` means the running development server must be upgraded and
+restarted. Runtime packages are immutable generation snapshots; the server
+retains the four most recent generations for lazy asset requests.
 
 ```bash
 # Check Wealthfolio console for discovery logs
@@ -656,7 +677,7 @@ const debug = import.meta.env.VITE_DEBUG;
 
 ```bash
 npm ls react  # Check React version
-npm install react@^19.1.1  # Fix version
+npm install react@^19.2.4 react-dom@^19.2.4  # Match the host version
 ```
 
 **Missing peer dependencies:**

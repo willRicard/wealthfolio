@@ -19,6 +19,18 @@ use super::{
 
 const CUSTOM_GROUPS_TAXONOMY_ID: &str = "custom_groups";
 
+/// Largest assignment shortfall (in basis points) absorbed pro rata instead of surfacing as
+/// "Unknown". Provider asset-class breakdowns routinely land a few bps under 100% — an "other"
+/// sleeve we don't map, or the provider's own weights not summing to exactly 1.0 — and that
+/// noise should not become a top-level category. Larger gaps are real missing coverage.
+///
+/// Only applied to auto-classified `asset_classes` assignments: a shortfall a user entered by
+/// hand is intentional and must be reported as-is.
+const RESIDUAL_TOLERANCE_BPS: i32 = 75;
+
+/// `source` written by auto-classification (`crates/core/src/assets/auto_classification.rs`).
+const AUTO_SOURCE: &str = "AUTO";
+
 #[derive(Debug, Clone)]
 struct HoldingTaxonomyShare {
     category_id: String,
@@ -422,7 +434,21 @@ impl AllocationService {
             }];
         }
 
-        let weight_divisor = Decimal::from(total_active_weight.max(10000));
+        // A small shortfall in auto-classified asset-class weights is provider noise: rescale the
+        // assigned weights to fill it rather than attributing it to "Unknown". Manual and custom
+        // classifications are left alone — their shortfalls are deliberate.
+        let absorb_residual = taxonomy_id == "asset_classes"
+            && total_active_weight < 10000
+            && 10000 - total_active_weight <= RESIDUAL_TOLERANCE_BPS
+            && active_assignments
+                .iter()
+                .all(|a| a.source.eq_ignore_ascii_case(AUTO_SOURCE));
+
+        let weight_divisor = if absorb_residual {
+            Decimal::from(total_active_weight)
+        } else {
+            Decimal::from(total_active_weight.max(10000))
+        };
         let mut shares: Vec<HoldingTaxonomyShare> = Vec::new();
 
         for assignment in active_assignments {
@@ -443,7 +469,7 @@ impl AllocationService {
             });
         }
 
-        if total_active_weight < 10000 {
+        if total_active_weight < 10000 && !absorb_residual {
             shares.push(HoldingTaxonomyShare {
                 category_id: "__UNKNOWN__".to_string(),
                 assigned_category_id: "__UNKNOWN__".to_string(),
@@ -1525,11 +1551,24 @@ mod tests {
         }
     }
 
+    fn make_auto_assign(
+        asset_id: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+        weight: i32,
+    ) -> AssetTaxonomyAssignment {
+        AssetTaxonomyAssignment {
+            source: AUTO_SOURCE.to_string(),
+            ..make_assignment(asset_id, taxonomy_id, category_id, weight)
+        }
+    }
+
     fn make_holding(asset_id: &str, base_value: Decimal) -> Holding {
         Holding {
             id: asset_id.to_string(),
             account_id: "acc".to_string(),
             holding_type: HoldingType::Security,
+            is_closed: false,
             instrument: Some(Instrument {
                 id: asset_id.to_string(),
                 symbol: asset_id.to_string(),
@@ -1581,6 +1620,7 @@ mod tests {
             id: format!("cash_{currency}"),
             account_id: "acc".to_string(),
             holding_type: HoldingType::Cash,
+            is_closed: false,
             instrument: None,
             asset_kind: None,
             quantity: base_value,
@@ -1702,6 +1742,166 @@ mod tests {
         assert_eq!(north_america.percentage, dec!(60));
         assert_eq!(unknown.value, dec!(400));
         assert_eq!(unknown.percentage, dec!(40));
+    }
+
+    /// Provider asset-class breakdowns routinely land a few bps under 100% (an "other" sleeve we
+    /// don't map, or provider weights not summing to exactly 1.0). That noise must be absorbed
+    /// pro rata, not promoted to an "Unknown" row sitting next to the same holding's real
+    /// categories. Weights here are VOO's actual provider-derived assignments.
+    #[test]
+    fn sub_tolerance_weight_shortfall_is_absorbed_instead_of_unknown() {
+        let svc = svc();
+        let holdings = vec![make_holding("VOO", dec!(1000))];
+        let categories = vec![
+            make_category("EQUITY", None),
+            make_category("CASH_BANK_DEPOSITS", None),
+        ];
+
+        // 99.57% equity + 0.22% cash = 99.79%, a 21 bp shortfall.
+        let mut assignments: HashMap<String, Vec<AssetTaxonomyAssignment>> = HashMap::new();
+        assignments.insert(
+            "VOO".to_string(),
+            vec![
+                make_auto_assign("VOO", "asset_classes", "EQUITY", 9957),
+                make_auto_assign("VOO", "asset_classes", "CASH_BANK_DEPOSITS", 22),
+            ],
+        );
+
+        let result = svc.aggregate_by_taxonomy(
+            &holdings,
+            "asset_classes",
+            "Asset Classes",
+            "#ccc",
+            &categories,
+            &assignments,
+            dec!(1000),
+            false,
+            &HashMap::new(),
+        );
+
+        assert!(
+            !result
+                .categories
+                .iter()
+                .any(|c| c.category_id == "__UNKNOWN__"),
+            "a 21 bp shortfall must not produce an Unknown category"
+        );
+
+        let total: Decimal = result.categories.iter().map(|c| c.value).sum();
+        assert!(
+            (total - dec!(1000)).abs() < dec!(0.0001),
+            "absorbed shares should still account for the full market value, got {total}"
+        );
+
+        let equity = result
+            .categories
+            .iter()
+            .find(|c| c.category_id == "EQUITY")
+            .expect("EQUITY category missing");
+        // 9957 / 9979 * 1000
+        assert!(
+            (equity.value - dec!(997.7954)).abs() < dec!(0.001),
+            "equity should absorb its pro-rata share of the shortfall, got {}",
+            equity.value
+        );
+    }
+
+    /// The tolerance is a boundary, not a blanket: a shortfall at the limit is absorbed, one
+    /// basis point past it is real missing coverage and still surfaces as Unknown.
+    #[test]
+    fn weight_shortfall_beyond_tolerance_still_reports_unknown() {
+        let svc = svc();
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let categories = vec![make_category("EQUITY", None)];
+
+        let has_unknown = |weight: i32| {
+            let mut assignments: HashMap<String, Vec<AssetTaxonomyAssignment>> = HashMap::new();
+            assignments.insert(
+                "AAPL".to_string(),
+                vec![make_auto_assign("AAPL", "asset_classes", "EQUITY", weight)],
+            );
+            svc.aggregate_by_taxonomy(
+                &holdings,
+                "asset_classes",
+                "Asset Classes",
+                "#ccc",
+                &categories,
+                &assignments,
+                dec!(1000),
+                false,
+                &HashMap::new(),
+            )
+            .categories
+            .iter()
+            .any(|c| c.category_id == "__UNKNOWN__")
+        };
+
+        assert!(!has_unknown(9925), "a 75 bp shortfall is within tolerance");
+        assert!(has_unknown(9924), "a 76 bp shortfall exceeds tolerance");
+    }
+
+    /// Absorption only applies to what auto-classification wrote into `asset_classes`. A shortfall
+    /// a user entered by hand is deliberate, and other taxonomies never carry provider composition
+    /// noise, so both must keep reporting Unknown.
+    #[test]
+    fn residual_absorption_is_scoped_to_auto_asset_class_assignments() {
+        let svc = svc();
+        let holdings = vec![make_holding("VOO", dec!(1000))];
+        let categories = vec![
+            make_category("EQUITY", None),
+            make_category("CASH_BANK_DEPOSITS", None),
+        ];
+
+        let has_unknown = |taxonomy_id: &str, holding_assignments: Vec<AssetTaxonomyAssignment>| {
+            let mut assignments: HashMap<String, Vec<AssetTaxonomyAssignment>> = HashMap::new();
+            assignments.insert("VOO".to_string(), holding_assignments);
+            svc.aggregate_by_taxonomy(
+                &holdings,
+                taxonomy_id,
+                "Taxonomy",
+                "#ccc",
+                &categories,
+                &assignments,
+                dec!(1000),
+                false,
+                &HashMap::new(),
+            )
+            .categories
+            .iter()
+            .any(|c| c.category_id == "__UNKNOWN__")
+        };
+
+        assert!(
+            !has_unknown(
+                "asset_classes",
+                vec![make_auto_assign("VOO", "asset_classes", "EQUITY", 9979)],
+            ),
+            "an AUTO asset-class residual is provider noise"
+        );
+        assert!(
+            has_unknown(
+                "asset_classes",
+                vec![make_assignment("VOO", "asset_classes", "EQUITY", 9979)],
+            ),
+            "a manual asset-class shortfall is intentional and must stay Unknown"
+        );
+        assert!(
+            has_unknown(
+                "asset_classes",
+                vec![
+                    make_auto_assign("VOO", "asset_classes", "EQUITY", 9957),
+                    make_assignment("VOO", "asset_classes", "CASH_BANK_DEPOSITS", 22),
+                ],
+            ),
+            "a hand-edited assignment opts the whole asset out of absorption"
+        );
+        assert!(
+            has_unknown(
+                "regions",
+                vec![make_auto_assign("VOO", "regions", "EQUITY", 9979)],
+            ),
+            "absorption must not apply outside the asset-class taxonomy"
+        );
     }
 
     /// When an asset is assigned to both a parent region (Americas) and a child (United_States),

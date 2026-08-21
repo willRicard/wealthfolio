@@ -1,10 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "@/test/render";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
-
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecentActivityCard } from "./recent-activity-card";
 import type { CashActivity } from "../types/cash-activity";
 import type { CategoryMetaMap } from "./category-chips";
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueries: vi.fn(() => []),
+}));
 
 function renderRecentActivityCard(
   activities: CashActivity[] = [],
@@ -18,6 +21,10 @@ function renderRecentActivityCard(
 }
 
 describe("RecentActivityCard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("shows the standard empty state without a setup link", () => {
     renderRecentActivityCard();
 

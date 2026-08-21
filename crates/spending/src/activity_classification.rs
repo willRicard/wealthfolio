@@ -140,11 +140,88 @@ pub(crate) fn decimal_to_f64(amount: Decimal) -> f64 {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
+    use proptest::prelude::*;
     use rust_decimal::Decimal;
+    use serde::Deserialize;
     use serde_json::Value;
+    use std::str::FromStr;
     use wealthfolio_core::activities::{Activity, ActivityStatus};
 
     use super::*;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AccountingContract {
+        cases: Vec<AccountingContractCase>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AccountingContractCase {
+        name: String,
+        account_type: String,
+        activity_type: String,
+        subtype: Option<String>,
+        amount: String,
+        expected: AccountingContractExpected,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AccountingContractExpected {
+        spending_delta: Option<String>,
+        income_delta: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LedgerContract {
+        scenarios: Vec<LedgerScenario>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LedgerScenario {
+        name: String,
+        account_type: String,
+        activities: Vec<LedgerActivity>,
+        expected: LedgerExpected,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LedgerActivity {
+        activity_type: String,
+        subtype: Option<String>,
+        amount: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LedgerExpected {
+        net_spending: String,
+        income: String,
+    }
+
+    fn accounting_contract() -> AccountingContract {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/accounting/activity_semantics.json"
+        )))
+        .expect("accounting activity contract should be valid JSON")
+    }
+
+    fn ledger_contract() -> LedgerContract {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/accounting/ledger_scenarios.json"
+        )))
+        .expect("accounting ledger contract should be valid JSON")
+    }
+
+    fn decimal(value: &str) -> Decimal {
+        Decimal::from_str(value).expect("accounting contract decimal should be valid")
+    }
 
     fn activity(activity_type: &str, source_group_id: Option<&str>) -> Activity {
         activity_with_subtype(activity_type, None, source_group_id)
@@ -184,6 +261,93 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn accounting_contract_reconciles_spending_and_income_semantics() {
+        for case in accounting_contract().cases {
+            let (Some(expected_spending), Some(expected_income)) = (
+                case.expected.spending_delta.as_deref(),
+                case.expected.income_delta.as_deref(),
+            ) else {
+                continue;
+            };
+            let amount = decimal(&case.amount);
+            let activity =
+                activity_with_subtype(&case.activity_type, case.subtype.as_deref(), None);
+            let classification = classify_activity(&activity, &case.account_type);
+
+            assert_eq!(
+                classification.spending_amount(amount),
+                decimal(expected_spending),
+                "accounting contract spending case: {}",
+                case.name
+            );
+            assert_eq!(
+                classification.income_amount(amount),
+                decimal(expected_income),
+                "accounting contract income case: {}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn ledger_contract_reconciles_spending_and_income_totals() {
+        for scenario in ledger_contract().scenarios {
+            let mut spending = Decimal::ZERO;
+            let mut income = Decimal::ZERO;
+
+            for entry in scenario.activities {
+                let amount = decimal(&entry.amount);
+                let activity =
+                    activity_with_subtype(&entry.activity_type, entry.subtype.as_deref(), None);
+                let classification = classify_activity(&activity, &scenario.account_type);
+                spending += classification.spending_amount(amount);
+                income += classification.income_amount(amount);
+            }
+
+            assert_eq!(
+                spending,
+                decimal(&scenario.expected.net_spending),
+                "accounting ledger spending scenario: {}",
+                scenario.name
+            );
+            assert_eq!(
+                income,
+                decimal(&scenario.expected.income),
+                "accounting ledger income scenario: {}",
+                scenario.name
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn purchase_refunds_reduce_spending_by_exactly_the_refunded_amount(
+            purchase_minor in 1i64..10_000_000,
+            refund_seed in 0i64..10_000_000,
+        ) {
+            let refund_minor = refund_seed % (purchase_minor + 1);
+            let purchase = Decimal::new(purchase_minor, 2);
+            let refund = Decimal::new(refund_minor, 2);
+            let withdrawal = classify_activity(
+                &activity("WITHDRAWAL", None),
+                account_types::CASH,
+            );
+            let refund_credit = classify_activity(
+                &activity_with_subtype("CREDIT", Some("REFUND"), None),
+                account_types::CASH,
+            );
+
+            prop_assert_eq!(
+                withdrawal.spending_amount(purchase)
+                    + refund_credit.spending_amount(refund),
+                purchase - refund
+            );
         }
     }
 

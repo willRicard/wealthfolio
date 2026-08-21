@@ -99,6 +99,11 @@
     "tab": "快照",
     "deleted": "快照已删除",
     "delete_failed": "删除快照失败",
+    "invalid_date_title": "此持仓日期无法使用",
+    "invalid_date_desc": "您的投资组合历史记录未发生变化。请删除突出显示的条目，我们会自动更新您的投资组合。",
+    "invalid_date_update_failed": "部分历史记录未更新",
+    "invalid_date_update_desc": "一个账户因包含不支持的日期而被跳过，其他账户已正常更新。",
+    "review_health": "查看问题",
     "history_title": "快照历史",
     "history_desc": "按日期查看已保存的持仓和现金余额。",
     "add": "添加快照",
@@ -117,7 +122,6 @@
     "source_csv": "CSV",
     "source_broker": "券商",
     "source_calculated": "计算所得",
-    "source_synthetic": "合成",
     "summary_one": "{{count}} 项持仓，{{cash}} 现金",
     "summary_other": "{{count}} 项持仓，{{cash}} 现金"
   },
@@ -147,5 +151,6 @@
     "period_irr": "期间 IRR",
     "twr_hover_hint": " 将鼠标悬停在该值上以查看累计 TWR。",
     "irr_hover_hint": " 将鼠标悬停在该值上以查看所选期间的 IRR。"
-  }
+  },
+  "more_count_other": "+{{count}} 更多"
 }

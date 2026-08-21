@@ -24,6 +24,12 @@ pub enum ExternalFlowSource {
     RemovedLotBasisFallback,
     LegacyActivityAmountFallback,
     UnknownBoundaryTransfer,
+    /// A HOLDINGS keyframe transition that could not be fully priced (an
+    /// unpriced position on either side), so its external flow could not be
+    /// inferred. Distinct from Unknown so the marker survives aggregation:
+    /// bare Unknown on persisted rows is legacy data that flow stamping is
+    /// allowed to heal.
+    UnpricedHoldingsTransition,
     /// Legacy compatibility value for rows written before compiler-owned flow sources.
     ActivityDerived,
     /// Compatibility-only value for persisted rows that already have gross flow columns.
@@ -65,6 +71,7 @@ mod tests {
             ExternalFlowSource::RemovedLotBasisFallback,
             ExternalFlowSource::LegacyActivityAmountFallback,
             ExternalFlowSource::UnknownBoundaryTransfer,
+            ExternalFlowSource::UnpricedHoldingsTransition,
             ExternalFlowSource::ActivityDerived,
             ExternalFlowSource::StoredGross,
             ExternalFlowSource::NetContributionFallback,
@@ -107,6 +114,10 @@ mod tests {
 
         assert!(ExternalFlowSource::Unknown.is_unavailable_for_returns());
         assert!(ExternalFlowSource::UnknownBoundaryTransfer.is_unavailable_for_returns());
+
+        assert!(ExternalFlowSource::UnpricedHoldingsTransition.is_unavailable_for_returns());
+        assert!(ExternalFlowSource::UnpricedHoldingsTransition.is_degraded());
+        assert!(!ExternalFlowSource::UnpricedHoldingsTransition.is_explicit_gross());
     }
 
     #[test]
@@ -165,7 +176,7 @@ mod tests {
 }
 
 impl ExternalFlowSource {
-    pub const ALL: [ExternalFlowSource; 12] = [
+    pub const ALL: [ExternalFlowSource; 13] = [
         ExternalFlowSource::NoFlow,
         ExternalFlowSource::Unknown,
         ExternalFlowSource::CashAmount,
@@ -174,6 +185,7 @@ impl ExternalFlowSource {
         ExternalFlowSource::RemovedLotBasisFallback,
         ExternalFlowSource::LegacyActivityAmountFallback,
         ExternalFlowSource::UnknownBoundaryTransfer,
+        ExternalFlowSource::UnpricedHoldingsTransition,
         ExternalFlowSource::ActivityDerived,
         ExternalFlowSource::StoredGross,
         ExternalFlowSource::NetContributionFallback,
@@ -190,6 +202,7 @@ impl ExternalFlowSource {
             Self::RemovedLotBasisFallback => "REMOVED_LOT_BASIS_FALLBACK",
             Self::LegacyActivityAmountFallback => "LEGACY_ACTIVITY_AMOUNT_FALLBACK",
             Self::UnknownBoundaryTransfer => "UNKNOWN_BOUNDARY_TRANSFER",
+            Self::UnpricedHoldingsTransition => "UNPRICED_HOLDINGS_TRANSITION",
             Self::ActivityDerived => "ACTIVITY_DERIVED",
             Self::StoredGross => "STORED_GROSS",
             Self::NetContributionFallback => "NET_CONTRIBUTION_FALLBACK",
@@ -208,6 +221,7 @@ impl ExternalFlowSource {
                 Self::LegacyActivityAmountFallback
             }
             "UNKNOWN_BOUNDARY_TRANSFER" => Self::UnknownBoundaryTransfer,
+            "UNPRICED_HOLDINGS_TRANSITION" => Self::UnpricedHoldingsTransition,
             "ACTIVITY_DERIVED" => Self::ActivityDerived,
             "STORED_GROSS" => Self::StoredGross,
             "NET_CONTRIBUTION_FALLBACK" => Self::NetContributionFallback,
@@ -234,6 +248,7 @@ impl ExternalFlowSource {
         matches!(
             self,
             Self::Unknown
+                | Self::UnpricedHoldingsTransition
                 | Self::CostBasisFallback
                 | Self::RemovedLotBasisFallback
                 | Self::LegacyActivityAmountFallback
@@ -246,7 +261,10 @@ impl ExternalFlowSource {
     }
 
     pub fn is_unavailable_for_returns(self) -> bool {
-        matches!(self, Self::Unknown | Self::UnknownBoundaryTransfer)
+        matches!(
+            self,
+            Self::Unknown | Self::UnknownBoundaryTransfer | Self::UnpricedHoldingsTransition
+        )
     }
 
     pub fn combine(self, next: Self) -> Self {
@@ -257,6 +275,9 @@ impl ExternalFlowSource {
                 Self::UnknownBoundaryTransfer
             }
             (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
+            (Self::UnpricedHoldingsTransition, _) | (_, Self::UnpricedHoldingsTransition) => {
+                Self::UnpricedHoldingsTransition
+            }
             (Self::RemovedLotBasisFallback, _) | (_, Self::RemovedLotBasisFallback) => {
                 Self::RemovedLotBasisFallback
             }
@@ -371,6 +392,11 @@ pub struct CurrentAccountValuation {
     pub account_id: String,
     pub account_currency: String,
     pub base_currency: String,
+    /// Latest conversion rate from the account currency to the base currency.
+    ///
+    /// `None` means the rate could not be resolved safely, so consumers must
+    /// not label base-currency amounts as account-currency amounts.
+    pub fx_rate_to_base: Option<Decimal>,
     pub cash_balance: Decimal,
     pub investment_market_value: Decimal,
     pub total_value: Decimal,

@@ -13,6 +13,7 @@ export interface StepNavigationProps {
   canGoBack: boolean;
   canGoNext: boolean;
   nextLabel?: string;
+  nextLoadingLabel?: string;
   backLabel?: string;
   isNextLoading?: boolean;
   showNext?: boolean;
@@ -38,12 +39,14 @@ export function StepNavigation({
   canGoBack,
   canGoNext,
   nextLabel,
+  nextLoadingLabel,
   backLabel,
   isNextLoading = false,
   showNext = true,
 }: StepNavigationProps) {
   const { t } = useTranslation();
   const resolvedNextLabel = nextLabel ?? t("activity:import.toolbar.continue");
+  const resolvedNextLoadingLabel = nextLoadingLabel ?? t("activity:import.toolbar.processing");
   const resolvedBackLabel = backLabel ?? t("activity:import.toolbar.back");
   return (
     <div className="flex flex-col-reverse justify-between gap-3 border-t pt-4 sm:flex-row">
@@ -81,7 +84,7 @@ export function StepNavigation({
             {isNextLoading ? (
               <>
                 <Icons.Spinner className="mr-2 h-4 w-4 animate-spin" />
-                {t("activity:import.toolbar.processing")}
+                {resolvedNextLoadingLabel}
               </>
             ) : (
               <>

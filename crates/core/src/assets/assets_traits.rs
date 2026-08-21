@@ -23,6 +23,19 @@ pub trait AssetServiceTrait: Send + Sync {
         asset_id: &str,
         payload: UpdateAssetProfile,
     ) -> Result<Asset>;
+    /// Updates only asset metadata. Implementations should avoid re-resolving market identity.
+    async fn update_asset_metadata(
+        &self,
+        asset_id: &str,
+        metadata: serde_json::Value,
+    ) -> Result<Asset> {
+        let asset = self.get_asset_by_id(asset_id)?;
+        self.update_asset_profile(
+            asset_id,
+            UpdateAssetProfile::metadata_only(&asset, metadata),
+        )
+        .await
+    }
     /// Creates a new asset directly without network lookups.
     /// Used for alternative assets and other manually created assets.
     async fn create_asset(&self, new_asset: NewAsset) -> Result<Asset>;
@@ -180,6 +193,14 @@ pub trait AssetRepositoryTrait: Send + Sync {
     /// Creates multiple assets in a single transaction. All-or-nothing.
     async fn create_batch(&self, new_assets: Vec<NewAsset>) -> Result<Vec<Asset>>;
     async fn update_profile(&self, asset_id: &str, payload: UpdateAssetProfile) -> Result<Asset>;
+    async fn update_metadata(&self, asset_id: &str, metadata: serde_json::Value) -> Result<Asset> {
+        let asset = self.get_by_id(asset_id)?;
+        self.update_profile(
+            asset_id,
+            UpdateAssetProfile::metadata_only(&asset, metadata),
+        )
+        .await
+    }
     async fn update_quote_mode(&self, asset_id: &str, quote_mode: &str) -> Result<Asset>;
     fn get_by_id(&self, asset_id: &str) -> Result<Asset>;
     fn list(&self) -> Result<Vec<Asset>>;

@@ -2,9 +2,10 @@ import { deleteSnapshot, getSnapshots } from "@/adapters";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { QueryKeys } from "@/lib/query-keys";
 import type { Account, SnapshotInfo } from "@/lib/types";
-import { formatAmount, formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { HoldingsEditMode } from "@/pages/holdings/components/holdings-edit-mode";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAmountFormatting, type FormattingApi, useDateFormatting } from "@wealthfolio/ui";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,22 +34,32 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@wealthfolio/ui/components/ui/tooltip";
-import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 interface AccountSnapshotHistoryProps {
   account: Account;
   canEditSnapshots: boolean;
   onAddSnapshot?: () => void;
+  highlightedSnapshotDate?: string;
+  highlightedSnapshotId?: string;
+  invalidSnapshotContext?: boolean;
+  onInvalidSnapshotRemediated?: () => void;
 }
 
 export function AccountSnapshotHistory({
   account,
   canEditSnapshots,
   onAddSnapshot,
+  highlightedSnapshotDate,
+  highlightedSnapshotId,
+  invalidSnapshotContext = false,
+  onInvalidSnapshotRemediated,
 }: AccountSnapshotHistoryProps) {
+  const dateFormatting = useDateFormatting();
+  const formatting = useAmountFormatting();
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const isMobile = useIsMobileViewport();
@@ -63,10 +74,26 @@ export function AccountSnapshotHistory({
   });
 
   const orderedSnapshots = useMemo(() => {
-    return snapshots
-      .filter((snapshot) => snapshot.source !== "SYNTHETIC")
-      .sort((a, b) => b.snapshotDate.localeCompare(a.snapshotDate));
+    return [...snapshots].sort((a, b) => b.snapshotDate.localeCompare(a.snapshotDate));
   }, [snapshots]);
+
+  const hasHighlightedInvalidSnapshot =
+    invalidSnapshotContext &&
+    (!!highlightedSnapshotId || !!highlightedSnapshotDate) &&
+    orderedSnapshots.some((snapshot) =>
+      highlightedSnapshotId
+        ? snapshot.id === highlightedSnapshotId
+        : snapshot.snapshotDate === highlightedSnapshotDate,
+    );
+
+  const highlightedSnapshotRef = useCallback(
+    (node: HTMLElement | null) => {
+      if (node && invalidSnapshotContext && (highlightedSnapshotId || highlightedSnapshotDate)) {
+        node.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    },
+    [highlightedSnapshotDate, highlightedSnapshotId, invalidSnapshotContext],
+  );
 
   const invalidateSnapshotQueries = (date?: string) => {
     queryClient.invalidateQueries({ queryKey: QueryKeys.snapshots(account.id) });
@@ -93,8 +120,11 @@ export function AccountSnapshotHistory({
     if (!deletingSnapshot) return;
     setIsDeleting(true);
     try {
-      await deleteSnapshot(account.id, deletingSnapshot.snapshotDate);
+      await deleteSnapshot(account.id, deletingSnapshot.snapshotDate, deletingSnapshot.id);
       invalidateSnapshotQueries(deletingSnapshot.snapshotDate);
+      if (isHighlightedInvalidSnapshot(deletingSnapshot)) {
+        onInvalidSnapshotRemediated?.();
+      }
       toast.success(t("account:snapshot.deleted"));
       setDeletingSnapshot(null);
     } catch (error) {
@@ -104,8 +134,16 @@ export function AccountSnapshotHistory({
     }
   };
 
-  const canManageSnapshot = (snapshot: SnapshotInfo) =>
-    canEditSnapshots && snapshot.source !== "CALCULATED" && snapshot.source !== "SYNTHETIC";
+  const canEditSnapshot = (snapshot: SnapshotInfo) =>
+    canEditSnapshots && snapshot.isDateValid && snapshot.source !== "CALCULATED";
+  const isHighlightedInvalidSnapshot = (snapshot: SnapshotInfo) =>
+    hasHighlightedInvalidSnapshot &&
+    (highlightedSnapshotId
+      ? snapshot.id === highlightedSnapshotId
+      : snapshot.snapshotDate === highlightedSnapshotDate);
+  const canDeleteSnapshot = (snapshot: SnapshotInfo) =>
+    isHighlightedInvalidSnapshot(snapshot) ||
+    (snapshot.source !== "CALCULATED" && canEditSnapshots);
 
   if (isLoading) {
     return (
@@ -143,6 +181,13 @@ export function AccountSnapshotHistory({
         )}
       </div>
 
+      {hasHighlightedInvalidSnapshot && (
+        <div className="border-destructive/40 bg-destructive/5 rounded-md border px-4 py-3 text-sm">
+          <p className="font-medium">{t("account:snapshot.invalid_date_title")}</p>
+          <p className="text-muted-foreground mt-1">{t("account:snapshot.invalid_date_desc")}</p>
+        </div>
+      )}
+
       {orderedSnapshots.length === 0 ? (
         <div className="flex items-center justify-center py-12">
           <div className="space-y-3 text-center">
@@ -160,45 +205,55 @@ export function AccountSnapshotHistory({
           {orderedSnapshots.map((snapshot) => (
             <div
               key={snapshot.id}
-              className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
+              id={`snapshot-${snapshot.snapshotDate}`}
+              ref={isHighlightedInvalidSnapshot(snapshot) ? highlightedSnapshotRef : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-lg border px-3 py-2.5",
+                isHighlightedInvalidSnapshot(snapshot) &&
+                  "border-destructive bg-destructive/5 ring-destructive/20 ring-2",
+              )}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <p className="truncate text-sm font-medium">
-                    {formatDate(snapshot.snapshotDate)}
+                    {formatDate(snapshot.snapshotDate, dateFormatting)}
                   </p>
                   <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
                     {formatSnapshotSource(snapshot.source, t)}
                   </Badge>
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  {formatSnapshotSummary(snapshot, account.currency, t)}
+                  {formatSnapshotSummary(snapshot, account.currency, t, formatting)}
                 </p>
               </div>
-              {canManageSnapshot(snapshot) && (
+              {(canEditSnapshot(snapshot) || canDeleteSnapshot(snapshot)) && (
                 <div className="flex shrink-0 items-center gap-0.5">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8"
-                    aria-label={t("account:snapshot.edit_aria", {
-                      date: formatDate(snapshot.snapshotDate),
-                    })}
-                    onClick={() => setEditingDate(snapshot.snapshotDate)}
-                  >
-                    <Icons.Pencil className="size-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive size-8"
-                    aria-label={t("account:snapshot.delete_aria", {
-                      date: formatDate(snapshot.snapshotDate),
-                    })}
-                    onClick={() => setDeletingSnapshot(snapshot)}
-                  >
-                    <Icons.Trash className="size-4" />
-                  </Button>
+                  {canEditSnapshot(snapshot) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      aria-label={t("account:snapshot.edit_aria", {
+                        date: formatDate(snapshot.snapshotDate, dateFormatting),
+                      })}
+                      onClick={() => setEditingDate(snapshot.snapshotDate)}
+                    >
+                      <Icons.Pencil className="size-4" />
+                    </Button>
+                  )}
+                  {canDeleteSnapshot(snapshot) && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive size-8"
+                      aria-label={t("account:snapshot.delete_aria", {
+                        date: formatDate(snapshot.snapshotDate, dateFormatting),
+                      })}
+                      onClick={() => setDeletingSnapshot(snapshot)}
+                    >
+                      <Icons.Trash className="size-4" />
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -215,13 +270,23 @@ export function AccountSnapshotHistory({
                   {t("account:snapshot.header_positions")}
                 </TableHead>
                 <TableHead className="text-right">{t("account:snapshot.header_cash")}</TableHead>
-                <TableHead className="w-[96px]" />
+                <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {orderedSnapshots.map((snapshot) => (
-                <TableRow key={snapshot.id}>
-                  <TableCell className="font-medium">{formatDate(snapshot.snapshotDate)}</TableCell>
+                <TableRow
+                  key={snapshot.id}
+                  id={`snapshot-${snapshot.snapshotDate}`}
+                  ref={isHighlightedInvalidSnapshot(snapshot) ? highlightedSnapshotRef : undefined}
+                  className={cn(
+                    isHighlightedInvalidSnapshot(snapshot) &&
+                      "bg-destructive/5 ring-destructive/20 ring-2 ring-inset",
+                  )}
+                >
+                  <TableCell className="font-medium">
+                    {formatDate(snapshot.snapshotDate, dateFormatting)}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                       {formatSnapshotSource(snapshot.source, t)}
@@ -229,33 +294,37 @@ export function AccountSnapshotHistory({
                   </TableCell>
                   <TableCell className="text-right">{snapshot.positionCount}</TableCell>
                   <TableCell className="text-right">
-                    {formatAmount(snapshot.cashTotalAccountCurrency, account.currency)}
+                    {formatting.formatAmount(snapshot.cashTotalAccountCurrency, account.currency)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {canManageSnapshot(snapshot) && (
+                    {(canEditSnapshot(snapshot) || canDeleteSnapshot(snapshot)) && (
                       <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          aria-label={t("account:snapshot.edit_aria", {
-                            date: formatDate(snapshot.snapshotDate),
-                          })}
-                          onClick={() => setEditingDate(snapshot.snapshotDate)}
-                        >
-                          <Icons.Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive size-8"
-                          aria-label={t("account:snapshot.delete_aria", {
-                            date: formatDate(snapshot.snapshotDate),
-                          })}
-                          onClick={() => setDeletingSnapshot(snapshot)}
-                        >
-                          <Icons.Trash className="size-4" />
-                        </Button>
+                        {canEditSnapshot(snapshot) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            aria-label={t("account:snapshot.edit_aria", {
+                              date: formatDate(snapshot.snapshotDate, dateFormatting),
+                            })}
+                            onClick={() => setEditingDate(snapshot.snapshotDate)}
+                          >
+                            <Icons.Pencil className="size-4" />
+                          </Button>
+                        )}
+                        {canDeleteSnapshot(snapshot) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive size-8"
+                            aria-label={t("account:snapshot.delete_aria", {
+                              date: formatDate(snapshot.snapshotDate, dateFormatting),
+                            })}
+                            onClick={() => setDeletingSnapshot(snapshot)}
+                          >
+                            <Icons.Trash className="size-4" />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </TableCell>
@@ -291,7 +360,9 @@ export function AccountSnapshotHistory({
             <AlertDialogTitle>{t("account:snapshot.delete_title")}</AlertDialogTitle>
             <AlertDialogDescription>
               {t("account:snapshot.delete_desc", {
-                date: deletingSnapshot ? formatDate(deletingSnapshot.snapshotDate) : "",
+                date: deletingSnapshot
+                  ? formatDate(deletingSnapshot.snapshotDate, dateFormatting)
+                  : "",
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -321,8 +392,6 @@ function formatSnapshotSource(source: string, t: TFunction): string {
       return t("account:snapshot.source_broker");
     case "CALCULATED":
       return t("account:snapshot.source_calculated");
-    case "SYNTHETIC":
-      return t("account:snapshot.source_synthetic");
     default:
       return source;
   }
@@ -332,10 +401,11 @@ function formatSnapshotSummary(
   snapshot: SnapshotInfo,
   accountCurrency: string,
   t: TFunction,
+  formatting: Pick<FormattingApi, "formatAmount">,
 ): string {
   return t("account:snapshot.summary", {
     count: snapshot.positionCount,
-    cash: formatAmount(snapshot.cashTotalAccountCurrency, accountCurrency),
+    cash: formatting.formatAmount(snapshot.cashTotalAccountCurrency, accountCurrency),
   });
 }
 

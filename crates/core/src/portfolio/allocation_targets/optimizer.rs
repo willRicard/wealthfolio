@@ -68,6 +68,11 @@ pub struct RebalanceInput {
     pub scenario_mode: ScenarioMode,
     pub available_cash: Decimal,
     pub total_value: Decimal,
+    /// Whether `total_value` already contains the scope cash (taxonomies with a
+    /// deployable-cash category: asset_classes, instrument_type). When false,
+    /// deployed cash grows the classified universe, so target sizing and
+    /// post-trade weights must plan against `total_value + available_cash`.
+    pub total_includes_cash: bool,
     pub categories: Vec<CategoryState>,
     pub candidates: Vec<AssetCandidate>,
     pub sell_candidates: Vec<SellCandidate>,
@@ -831,12 +836,26 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             scenario_mode,
             available_cash,
             total_value,
+            total_includes_cash,
             categories,
             mut candidates,
             sell_candidates,
             mut warnings,
             max_turnover_bps,
         } = input;
+
+        // Basis for target sizing and post-trade weights. When scope cash is not
+        // part of total_value (taxonomy without a cash sleeve), cash deployed by
+        // this plan grows the classified total; sizing sleeves against the old
+        // total under-sizes every target and pushes the surplus onto already
+        // overweight sleeves. SellToRebalance recycles proceeds inside the
+        // universe, so its basis never changes.
+        let planning_total =
+            if total_includes_cash || matches!(scenario_mode, ScenarioMode::SellToRebalance) {
+                total_value
+            } else {
+                total_value + available_cash
+            };
 
         if total_value == Decimal::ZERO && available_cash == Decimal::ZERO {
             return Ok(RebalancePlan {
@@ -878,7 +897,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             ScenarioMode::SellToRebalance => {
                 let (updated_values, proceeds, trades) = Self::run_sell_phase(
                     &values,
-                    total_value,
+                    planning_total,
                     &categories,
                     &sell_candidates,
                     &profile,
@@ -907,7 +926,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             let cat_band_bps = profile.effective_band_bps(cat.target_bps);
             let desired_bps =
                 Self::desired_bps_for_goal(cat.target_bps, &profile.rebalance_goal, cat_band_bps);
-            let desired_value = desired_bps / scale * total_value;
+            let desired_value = desired_bps / scale * planning_total;
             if cat.current_value >= desired_value {
                 continue;
             }
@@ -957,7 +976,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     available_cash,
                     &categories,
                     &profile,
-                    total_value,
+                    planning_total,
                     scale,
                 );
 
@@ -965,11 +984,11 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     .iter()
                     .filter(|c| c.is_required && !c.is_cash)
                     .any(|c| {
-                        if total_value == Decimal::ZERO {
+                        if planning_total == Decimal::ZERO {
                             return false;
                         }
                         let v = values.get(&c.category_id).copied().unwrap_or_default();
-                        let bps = v / total_value * scale;
+                        let bps = v / planning_total * scale;
                         let cat_band = Decimal::from(profile.effective_band_bps(c.target_bps));
                         let threshold = match profile.rebalance_goal {
                             RebalanceGoal::ExactTarget => Decimal::from(c.target_bps),
@@ -983,7 +1002,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 if still_overweight && !sell_candidates.is_empty() {
                     let (updated_values, proceeds, extra_sell_trades) = Self::run_sell_phase(
                         &values,
-                        total_value,
+                        planning_total,
                         &categories,
                         &sell_candidates,
                         &profile,
@@ -997,7 +1016,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                         proceeds,
                         &categories,
                         &profile,
-                        total_value,
+                        planning_total,
                         scale,
                     );
                     for (i, s) in sb2.into_iter().enumerate() {
@@ -1015,7 +1034,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 buy_pool,
                 &categories,
                 &profile,
-                total_value,
+                planning_total,
                 scale,
             ),
         };
@@ -1034,7 +1053,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             let topup_cash = (topup_pool - greedy_used).max(Decimal::ZERO);
             let topup_cash = match Self::remaining_cash_excess_after_buys(
                 &categories,
-                total_value,
+                planning_total,
                 &profile,
                 sell_proceeds,
                 greedy_used,
@@ -1086,7 +1105,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 })
                 .unwrap_or_else(|| ("unknown".to_string(), "Unknown".to_string()));
 
-            let buy_reason = if total_value > Decimal::ZERO {
+            let buy_reason = if planning_total > Decimal::ZERO {
                 let cat_target_bps = categories
                     .iter()
                     .find(|c| c.category_id == primary_cat_id)
@@ -1097,7 +1116,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     .find(|c| c.category_id == primary_cat_id)
                     .and_then(|c| buy_reason_values.get(&c.category_id).copied())
                     .unwrap_or_default();
-                let current_bps: i32 = (cat_current_value / total_value * dec!(10000))
+                let current_bps: i32 = (cat_current_value / planning_total * dec!(10000))
                     .round()
                     .to_string()
                     .parse()
@@ -1157,7 +1176,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             let desired_bps =
                 Self::desired_bps_for_goal(cat.target_bps, &profile.rebalance_goal, cat_band_bps);
             let shortfall =
-                ((desired_bps / scale * total_value) - cat.current_value).max(Decimal::ZERO);
+                ((desired_bps / scale * planning_total) - cat.current_value).max(Decimal::ZERO);
             let amount = shortfall.min(manual_cash);
             if amount > Decimal::ZERO {
                 manual_cash -= amount;
@@ -1230,13 +1249,23 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             let entry = after_values.entry(cat.category_id.clone()).or_default();
             *entry = (*entry - net_cash_change).max(Decimal::ZERO);
         }
-        let max_drift_after = Self::max_drift_bps(&after_values, &categories, total_value);
+        // After-metrics basis. planning_total assumes available_cash fully
+        // deploys, but min_trade_amount / whole-share constraints can drop
+        // buys; when scope cash is external, only the cash actually deployed
+        // by kept trades enters the classified universe.
+        let reporting_total =
+            if total_includes_cash || matches!(scenario_mode, ScenarioMode::SellToRebalance) {
+                total_value
+            } else {
+                total_value + cash_used - sell_proceeds
+            };
+        let max_drift_after = Self::max_drift_bps(&after_values, &categories, reporting_total);
 
-        let after_bps_by_category: HashMap<String, i32> = if total_value > Decimal::ZERO {
+        let after_bps_by_category: HashMap<String, i32> = if reporting_total > Decimal::ZERO {
             after_values
                 .iter()
                 .map(|(cat_id, val)| {
-                    let bps: i32 = (*val / total_value * scale)
+                    let bps: i32 = (*val / reporting_total * scale)
                         .round()
                         .to_string()
                         .parse()
@@ -1377,6 +1406,7 @@ mod tests {
             scenario_mode: ScenarioMode::CashFlowOnly,
             available_cash: dec!(500),
             total_value: dec!(10000),
+            total_includes_cash: true,
             categories: vec![
                 CategoryState {
                     category_id: "equity".to_string(),
@@ -1478,6 +1508,7 @@ mod tests {
             scenario_mode: ScenarioMode::SellToRebalance,
             available_cash: Decimal::ZERO,
             total_value: dec!(10000),
+            total_includes_cash: true,
             categories: vec![
                 CategoryState {
                     category_id: "equity".to_string(),
@@ -1665,6 +1696,7 @@ mod tests {
             scenario_mode: ScenarioMode::CashFlowOnly,
             available_cash: dec!(250),
             total_value: dec!(10000),
+            total_includes_cash: true,
             categories: vec![CategoryState {
                 category_id: "equity".to_string(),
                 category_name: "Equity".to_string(),
@@ -1713,5 +1745,139 @@ mod tests {
             stale_reason_count, 1,
             "only the first buy should report the original underweight: {equity_reasons:?}"
         );
+    }
+
+    /// Custom-groups-style target: no cash sleeve, so deployed cash is not part
+    /// of total_value. Regression for sizing against the stale pre-deployment
+    /// total, which bought already-overweight sleeves with the surplus and made
+    /// after-weights sum past 100%.
+    fn make_cash_outside_total_input() -> RebalanceInput {
+        // A: target 40%, current 800 → exactly at target on the post-deployment
+        //    basis (800 / (1000 + 1000) = 40%), must receive NO buys.
+        // B: target 60%, current 200 → absorbs the entire 1000 of new cash.
+        RebalanceInput {
+            profile: RebalanceProfile {
+                target_id: "test".to_string(),
+                drift_band_bps: 0,
+                band_type: BandType::Absolute,
+                relative_factor_bps: 2000,
+                rebalance_goal: RebalanceGoal::ExactTarget,
+                min_trade_amount: Decimal::ZERO,
+                whole_shares_only: false,
+            },
+            scenario_mode: ScenarioMode::CashFlowOnly,
+            available_cash: dec!(1000),
+            total_value: dec!(1000),
+            total_includes_cash: false,
+            categories: vec![
+                CategoryState {
+                    category_id: "a".to_string(),
+                    category_name: "A".to_string(),
+                    target_bps: 4000,
+                    current_value: dec!(800),
+                    is_cash: false,
+                    is_required: true,
+                },
+                CategoryState {
+                    category_id: "b".to_string(),
+                    category_name: "B".to_string(),
+                    target_bps: 6000,
+                    current_value: dec!(200),
+                    is_cash: false,
+                    is_required: true,
+                },
+            ],
+            candidates: vec![
+                AssetCandidate {
+                    holding_id: "h-a".to_string(),
+                    asset_id: "a-a".to_string(),
+                    symbol: "AAA".to_string(),
+                    name: None,
+                    price: dec!(1),
+                    exposure_per_share: HashMap::from([("a".to_string(), dec!(1))]),
+                },
+                AssetCandidate {
+                    holding_id: "h-b".to_string(),
+                    asset_id: "a-b".to_string(),
+                    symbol: "BBB".to_string(),
+                    name: None,
+                    price: dec!(1),
+                    exposure_per_share: HashMap::from([("b".to_string(), dec!(1))]),
+                },
+            ],
+            sell_candidates: vec![],
+            warnings: vec![],
+            max_turnover_bps: None,
+        }
+    }
+
+    #[test]
+    fn cash_flow_sizes_targets_against_post_deployment_basis_when_cash_outside_total() {
+        let optimizer = DriftPriorityOptimizer;
+        let plan = optimizer.plan(make_cash_outside_total_input()).unwrap();
+
+        assert_eq!(
+            buy_amount_for(&plan, "AAA"),
+            Decimal::ZERO,
+            "sleeve at target on the post-deployment basis must not be bought"
+        );
+        assert_eq!(buy_amount_for(&plan, "BBB"), dec!(1000));
+        assert_eq!(plan.cash_used, dec!(1000));
+        assert_eq!(plan.cash_remaining, Decimal::ZERO);
+    }
+
+    #[test]
+    fn after_weights_sum_to_100_percent_when_cash_outside_total() {
+        let optimizer = DriftPriorityOptimizer;
+        let plan = optimizer.plan(make_cash_outside_total_input()).unwrap();
+
+        let after_sum: i32 = plan.after_bps_by_category.values().sum();
+        assert_eq!(
+            after_sum, 10000,
+            "after weights must be a share of the post-deployment total: {:?}",
+            plan.after_bps_by_category
+        );
+        assert_eq!(plan.after_bps_by_category.get("a").copied(), Some(4000));
+        assert_eq!(plan.after_bps_by_category.get("b").copied(), Some(6000));
+        assert_eq!(plan.max_drift_bps_after, 0);
+    }
+
+    #[test]
+    fn after_weights_reflect_only_deployed_cash_when_buys_filtered_out() {
+        // min_trade_amount above the sole $1000 buy drops every trade; the
+        // after-metrics must then describe the unchanged portfolio (80/20 of
+        // total_value), not a phantom post-deployment basis.
+        let mut input = make_cash_outside_total_input();
+        input.profile.min_trade_amount = dec!(1001);
+
+        let optimizer = DriftPriorityOptimizer;
+        let plan = optimizer.plan(input).unwrap();
+
+        assert!(plan.trades.is_empty(), "trades: {:?}", plan.trades);
+        assert_eq!(plan.cash_used, Decimal::ZERO);
+        assert_eq!(plan.cash_remaining, dec!(1000));
+        assert_eq!(plan.after_bps_by_category.get("a").copied(), Some(8000));
+        assert_eq!(plan.after_bps_by_category.get("b").copied(), Some(2000));
+        assert_eq!(plan.max_drift_bps_after, plan.max_drift_bps_before);
+    }
+
+    #[test]
+    fn sell_to_rebalance_ignores_external_cash_in_planning_basis() {
+        // SellToRebalance recycles proceeds inside the universe; external cash
+        // must not widen the basis even when total_includes_cash is false.
+        let mut input = make_sell_rebalance_input();
+        input.total_includes_cash = false;
+        input.available_cash = dec!(5000);
+
+        let mut baseline = make_sell_rebalance_input();
+        baseline.total_includes_cash = true;
+        baseline.available_cash = Decimal::ZERO;
+
+        let optimizer = DriftPriorityOptimizer;
+        let plan = optimizer.plan(input).unwrap();
+        let expected = optimizer.plan(baseline).unwrap();
+
+        assert_eq!(plan.after_bps_by_category, expected.after_bps_by_category);
+        assert_eq!(plan.trades.len(), expected.trades.len());
     }
 }

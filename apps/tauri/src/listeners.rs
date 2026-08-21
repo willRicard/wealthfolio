@@ -1,14 +1,15 @@
-use futures::future::join_all;
 use log::{error, info, warn};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{async_runtime::spawn, AppHandle, Emitter, Listener, Manager};
 use wealthfolio_core::health::HealthServiceTrait;
 use wealthfolio_core::portfolio::snapshot::{
-    reconcile_quote_sync_from_latest_account_snapshots, SnapshotRecalcMode,
+    reconcile_quote_sync_from_latest_account_snapshots, snapshot_date_requires_remediation,
+    SnapshotRecalcMode,
 };
 use wealthfolio_core::portfolio::valuation::ValuationRecalcMode;
 use wealthfolio_core::quotes::MarketSyncMode;
+use wealthfolio_core::utils::time_utils::{parse_user_timezone_or_default, user_today};
 
 use crate::context::ServiceContext;
 use crate::events::{
@@ -49,6 +50,26 @@ fn resolve_listener_account_ids(
         .collect())
 }
 
+fn recalculation_modes(
+    force_recalc: bool,
+    since_date: Option<chrono::NaiveDate>,
+    today: chrono::NaiveDate,
+) -> (SnapshotRecalcMode, ValuationRecalcMode) {
+    let safe_since_date =
+        since_date.filter(|date| !snapshot_date_requires_remediation(*date, today));
+    match safe_since_date {
+        Some(date) => (
+            SnapshotRecalcMode::SinceDate(date),
+            ValuationRecalcMode::SinceDate(date),
+        ),
+        None if force_recalc => (SnapshotRecalcMode::Full, ValuationRecalcMode::Full),
+        None => (
+            SnapshotRecalcMode::IncrementalFromLast,
+            ValuationRecalcMode::IncrementalFromLast,
+        ),
+    }
+}
+
 /// Handles the common logic for both portfolio update and recalculation requests.
 fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: bool) {
     let event_name = if force_recalc {
@@ -65,6 +86,7 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
             spawn(async move {
                 let market_sync_mode = payload.market_sync_mode.clone();
                 let accounts_to_recalc = payload.account_ids.clone();
+                let since_date = payload.since_date;
                 let context_result = handle_clone.try_state::<Arc<ServiceContext>>();
 
                 if let Some(context) = context_result {
@@ -153,16 +175,13 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
                                 }
 
                                 // Trigger calculation after successful sync
-                                let snap_mode = if force_recalc {
-                                    SnapshotRecalcMode::Full
-                                } else {
-                                    SnapshotRecalcMode::IncrementalFromLast
-                                };
-                                let val_mode = if force_recalc {
-                                    ValuationRecalcMode::Full
-                                } else {
-                                    ValuationRecalcMode::IncrementalFromLast
-                                };
+                                let (snap_mode, val_mode) = recalculation_modes(
+                                    force_recalc,
+                                    since_date,
+                                    user_today(parse_user_timezone_or_default(
+                                        &context.get_timezone(),
+                                    )),
+                                );
                                 handle_portfolio_calculation(
                                     handle_clone.clone(),
                                     accounts_to_recalc,
@@ -182,16 +201,11 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
                     } else {
                         // MarketSyncMode::None - skip market sync, just recalculate
                         info!("Skipping market sync (MarketSyncMode::None)");
-                        let snap_mode = if force_recalc {
-                            SnapshotRecalcMode::Full
-                        } else {
-                            SnapshotRecalcMode::IncrementalFromLast
-                        };
-                        let val_mode = if force_recalc {
-                            ValuationRecalcMode::Full
-                        } else {
-                            ValuationRecalcMode::IncrementalFromLast
-                        };
+                        let (snap_mode, val_mode) = recalculation_modes(
+                            force_recalc,
+                            since_date,
+                            user_today(parse_user_timezone_or_default(&context.get_timezone())),
+                        );
                         handle_portfolio_calculation(
                             handle_clone.clone(),
                             accounts_to_recalc,
@@ -327,34 +341,26 @@ fn handle_portfolio_calculation(
         let accounts_for_valuation = account_ids;
 
         if !accounts_for_valuation.is_empty() {
-            let history_futures = accounts_for_valuation.iter().map(|account_id| {
-                let valuation_service_clone = valuation_service.clone();
-                let account_id_clone = account_id.clone();
-                let valuation_mode_clone = valuation_mode.clone();
-                async move {
-                    let result = valuation_service_clone
-                        .calculate_valuation_history(&account_id_clone, valuation_mode_clone)
-                        .await;
-                    (account_id_clone, result)
+            match valuation_service
+                .calculate_valuation_histories(&accounts_for_valuation, valuation_mode)
+                .await
+            {
+                Ok(outcome) => {
+                    for failure in outcome.failures {
+                        error!(
+                            "Failed to calculate valuation history for account '{}': {}",
+                            failure.account_id, failure.message
+                        );
+                        if let Err(emit_error) = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &failure) {
+                            error!("Failed to emit portfolio error: {}", emit_error);
+                        }
+                    }
                 }
-            });
-
-            let history_results = join_all(history_futures).await;
-
-            let mut history_errors: Vec<String> = Vec::new();
-            for (account_id, result) in history_results {
-                if let Err(e) = result {
-                    let err_detail = format!("Account '{}': {}", account_id, e);
-                    error!("Failed to calculate valuation history: {}", err_detail);
-                    history_errors.push(err_detail);
+                Err(error) => {
+                    let message = format!("Failed to load shared valuation facts: {}", error);
+                    error!("{}", message);
+                    let _ = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &message);
                 }
-            }
-
-            if !history_errors.is_empty() {
-                error!(
-                    "Valuation history calculation completed with errors: {}",
-                    history_errors.join("; ")
-                );
             }
         }
 
@@ -364,4 +370,53 @@ fn handle_portfolio_calculation(
             error!("Failed to emit {} event: {}", PORTFOLIO_UPDATE_COMPLETE, e);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn dated_recalculation_request_uses_since_date_for_both_engines() {
+        let date = NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
+        let (snapshot_mode, valuation_mode) = recalculation_modes(true, Some(date), date);
+
+        assert!(matches!(snapshot_mode, SnapshotRecalcMode::SinceDate(value) if value == date));
+        assert!(matches!(valuation_mode, ValuationRecalcMode::SinceDate(value) if value == date));
+    }
+
+    #[test]
+    fn invalid_dated_recalculation_request_falls_back_to_full() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
+        let invalid = NaiveDate::from_ymd_opt(224, 7, 20).unwrap();
+        let (snapshot_mode, valuation_mode) = recalculation_modes(true, Some(invalid), today);
+
+        assert!(matches!(snapshot_mode, SnapshotRecalcMode::Full));
+        assert!(matches!(valuation_mode, ValuationRecalcMode::Full));
+    }
+
+    #[test]
+    fn undated_force_recalculation_remains_full() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
+        let (snapshot_mode, valuation_mode) = recalculation_modes(true, None, today);
+
+        assert!(matches!(snapshot_mode, SnapshotRecalcMode::Full));
+        assert!(matches!(valuation_mode, ValuationRecalcMode::Full));
+    }
+
+    #[test]
+    fn ordinary_undated_update_remains_incremental() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
+        let (snapshot_mode, valuation_mode) = recalculation_modes(false, None, today);
+
+        assert!(matches!(
+            snapshot_mode,
+            SnapshotRecalcMode::IncrementalFromLast
+        ));
+        assert!(matches!(
+            valuation_mode,
+            ValuationRecalcMode::IncrementalFromLast
+        ));
+    }
 }

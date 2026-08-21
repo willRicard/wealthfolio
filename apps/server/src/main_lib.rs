@@ -555,6 +555,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
             quote_service.clone(),
             core_import_run_repository,
         )
+        .with_timezone(timezone.clone())
         .with_event_sink(domain_event_sink.clone()),
     );
 
@@ -701,6 +702,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
             snapshot_repository.clone(),
         )
         .with_event_sink(domain_event_sink.clone())
+        .with_timezone(timezone.clone())
         .with_snapshot_service(snapshot_service.clone())
         .with_quote_store(market_data_repository.clone()),
     );

@@ -13,6 +13,7 @@ use wealthfolio_connect::{
 use wealthfolio_core::{
     accounts::AccountService,
     activities::ActivityService,
+    addons::AddonService,
     assets::{AlternativeAssetService, AssetClassificationService, AssetService},
     events::DomainEvent,
     fx::{FxService, FxServiceTrait},
@@ -375,6 +376,7 @@ pub async fn initialize_context(
             quote_service.clone(),
             core_import_run_repository,
         )
+        .with_timezone(timezone.clone())
         .with_event_sink(domain_event_sink.clone()),
     );
     let goal_service = Arc::new(GoalService::new(goal_repo.clone(), account_service.clone()));
@@ -512,6 +514,7 @@ pub async fn initialize_context(
             snapshot_repository.clone(),
         )
         .with_event_sink(domain_event_sink.clone())
+        .with_timezone(timezone.clone())
         .with_snapshot_service(snapshot_service.clone())
         .with_quote_store(market_data_repo.clone()),
     );
@@ -572,6 +575,11 @@ pub async fn initialize_context(
     // Durable per-addon key-value storage repository
     let addon_storage_repository: Arc<dyn wealthfolio_core::addons::AddonStorageRepositoryTrait> =
         Arc::new(AddonStorageRepository::new(pool.clone(), writer.clone()));
+    let addon_service = Arc::new(AddonService::new(
+        app_data_dir,
+        rating_instance_id.as_str(),
+        addon_storage_repository.clone(),
+    ));
 
     // Device enroll service for E2EE sync
     let cloud_api_url = crate::services::cloud_api_base_url().unwrap_or_default();
@@ -632,7 +640,7 @@ pub async fn initialize_context(
             agent_environment,
             mcp_audit_repository,
             pat_repository,
-            addon_storage_repository,
+            addon_service,
             device_enroll_service,
             device_sync_runtime,
             broker_sync_running,

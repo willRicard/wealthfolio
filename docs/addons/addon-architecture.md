@@ -80,12 +80,14 @@ Each addon receives an isolated context:
 
 ```typescript
 interface AddonContext {
+  ui: { root: HTMLElement };
   sidebar: {
     addItem(config: SidebarItemConfig): SidebarItemHandle;
   };
   router: {
     add(route: RouteConfig): void;
   };
+  assets: AddonAssets;
   onDisable(callback: () => void): void;
   api: HostAPI; // Financial data and operations
 }
@@ -95,6 +97,9 @@ The context provides:
 
 - **Sidebar**: Add navigation items
 - **Router**: Register new routes/pages
+- **UI**: Access the sandbox-owned root element
+- **Assets**: Lazily load private files packaged under `assets/` or
+  `dist/assets/`
 - **onDisable**: Register cleanup functions
 - **API**: Access to financial data and operations
 
@@ -152,10 +157,11 @@ Based on the actual code, these are the permission categories:
 | `network`             | request (brokered fetch to declared hosts)  | High       |
 | `secrets`             | set, get, delete                            | High       |
 
-> **Baseline capabilities are not permissions.** `ui`, `query`, `toast`,
-> `logger`, and `storage` are granted to every addon and are **not** declared in
-> `manifest.json`. Only data categories plus `files`, `network`, `secrets`,
-> `events`, `snapshots`, and `settings` require declaration and consent.
+> **Baseline capabilities are not permissions.** `ui`, packaged `assets`,
+> `query`, `toast`, `logger`, and `storage` are granted to every addon and are
+> **not** declared in `manifest.json`. Only data categories plus `files`,
+> `network`, `secrets`, `events`, `snapshots`, and `settings` require
+> declaration and consent.
 
 ### Permission Enforcement
 
@@ -300,30 +306,32 @@ Development addons run from local servers:
 │  │ • Auto-discover │              │                 │           │
 │  │ • Load addons   │              │ /health    ✓    │           │
 │  │ • Hot reload    │              │ /status    ✓    │           │
-│  └─────────────────┘              │ /manifest.json  │           │
-│           │                       │ /addon.js       │           │
+│  └─────────────────┘              │ /runtime-package│          │
+│           │                       │ /runtime-assets │           │
 │           │                       └─────────────────┘           │
 │           │                                                     │
 │  ┌─────────────────┐              ┌─────────────────┐           │
-│  │     Port Scan   │              │ More Dev Servers│           │
+│  │ Runtime package │              │ Asset snapshots │           │
 │  │                 │              │                 │           │
-│  │ • Check 3001    │              │ localhost:3002  │           │
-│  │ • Check 3002    │              │ localhost:3003  │           │
-│  │ • Check 3003    │              │ ...             │           │
+│  │ • Generation ID │              │ • Lazy bytes    │           │
+│  │ • File metadata │              │ • Same build    │           │
+│  │ • Asset metadata│              │ • Opaque IDs    │           │
 │  └─────────────────┘              └─────────────────┘           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ```
 Development Server (localhost:3001)
-├─ /health          # Health check
-├─ /status          # Build status
-├─ /manifest.json   # Addon manifest
-└─ /addon.js        # Built addon code
+├─ /health                         # Health check
+├─ /status                         # Build status and generation
+├─ /runtime-package                # Coherent manifest/files/asset metadata
+├─ /runtime-files                  # Runtime JavaScript and CSS
+└─ /runtime-assets/:id?generation= # Lazy asset bytes from that snapshot
 ```
 
-The host application discovers running dev servers by checking common ports
-(3001, 3002, 3003) for health endpoints.
+The host application discovers the development server on port 3001. Wealthfolio
+3.7 requires `@wealthfolio/addon-dev-tools` 3.7 or newer because earlier servers
+do not publish `/runtime-package`.
 
 ### Build Process
 
@@ -520,13 +528,15 @@ export default enable;
 
 ### Dynamic Loading
 
-As of 3.6, each addon module is loaded and executed inside an **isolated sandbox
-iframe** (`sandbox="allow-scripts"`, opaque origin) rather than in the host's
-main runtime — the host shares React and the QueryClient with the sandbox at
-runtime. See the
+Each addon module is loaded and executed inside an **isolated sandbox iframe**
+(`sandbox="allow-scripts"`, opaque origin) rather than in the host's main
+runtime. The parent delivers the host-provided dependency runtime and addon
+package as Blobs. React is provided at a pinned version; each addon owns a local
+QueryClient whose invalidations/refetches are bridged back to the host. See the
 [v3.5 → v3.6 migration guide](./addon-migration-guide-v3.5-to-v3.6.md) for the
-sandbox model. Within the sandbox the loader still resolves the module via a
-dynamic `import()`:
+sandbox model and the
+[v3.6 → v3.7 guide](./addon-migration-guide-v3.6-to-v3.7.md) for assets. Within
+the sandbox the loader resolves rewritten modules via dynamic `import()`:
 
 ```typescript
 // Create blob URL from addon code
@@ -548,7 +558,8 @@ When addons are disabled:
 1. Their disable function is called
 2. UI elements are removed
 3. Event listeners are unregistered
-4. Context is destroyed
+4. Packaged asset Blob URLs are revoked and cached bytes are released
+5. The addon QueryClient and context are destroyed
 
 ## Manifest Structure
 
@@ -561,8 +572,8 @@ Each addon includes a manifest.json file:
   "version": "1.0.0",
   "description": "Does something useful",
   "main": "dist/addon.js",
-  "sdkVersion": "3.6.1",
-  "minWealthfolioVersion": "3.6.1",
+  "sdkVersion": "3.7.0",
+  "minWealthfolioVersion": "3.7.0",
   "contributes": {
     "routes": [{ "id": "my-addon" }],
     "links": {
@@ -607,7 +618,7 @@ Optional fields:
   render before booting the addon
 - `permissions`: Declared data access (array of
   `{ category, functions, purpose }`)
-- `sdkVersion`: SDK version the addon targets (`"3.6.1"`)
+- `sdkVersion`: SDK version the addon targets (`"3.7.0"`)
 - `minWealthfolioVersion`: Minimum host version required to load the addon
 
 The host mounts every contributed route below `/addons/<manifest.id>`. Omit
@@ -618,9 +629,11 @@ a nested page; manifests cannot choose an absolute route namespace.
 
 ```
 addon-package.zip
-├─ manifest.json     # Addon metadata
-├─ addon.js         # Main entry point
-└─ assets/          # Optional assets
+├─ manifest.json       # Addon metadata
+├─ dist/
+│  ├─ addon.js         # Main entry point
+│  └─ assets/          # Generated assets, chunks, and CSS
+└─ assets/             # Optional hand-authored private assets
    └─ icon.png
 ```
 
@@ -669,3 +682,9 @@ my-addon/
 │ └─────────────────┘                                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+No manifest asset list is needed. The host indexes `assets/**` and
+`dist/assets/**`, keeps host paths private, and sends metadata to the sandbox.
+Bytes are requested later by opaque identity and exposed to addon code only as
+verified `Blob` objects or lifecycle-scoped Blob URLs. JavaScript and CSS stay
+in the runtime file set so code splitting and styles continue to work.

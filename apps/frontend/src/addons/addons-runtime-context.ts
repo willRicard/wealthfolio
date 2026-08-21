@@ -575,6 +575,8 @@ export function createAddonHostAPI(
 }
 
 export function createAddonContext(addonId: string, permissions?: Permission[]): AddonContext {
+  const unavailableAsset = (path: string) =>
+    Promise.reject(new Error(`Packaged asset '${path}' is only available in the addon sandbox`));
   return {
     ui: {
       root: document.createElement("div"),
@@ -596,6 +598,12 @@ export function createAddonContext(addonId: string, permissions?: Permission[]):
           title: route.title,
         });
       },
+    },
+    assets: {
+      list: () => [],
+      has: () => false,
+      getBlob: unavailableAsset,
+      getUrl: unavailableAsset,
     },
     onDisable: (cb) => {
       const callbacks = disableCallbacks.get(addonId) ?? new Set<() => void>();

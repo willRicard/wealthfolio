@@ -9,6 +9,24 @@ pub struct AddonFile {
     pub is_main: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonAsset {
+    /// Opaque, add-on-scoped identifier used to retrieve the asset bytes.
+    pub id: String,
+    /// Logical package path exposed to the add-on (for example `assets/logo.png`).
+    pub path: String,
+    pub mime_type: String,
+    pub size: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonAssetContent {
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionPermission {
@@ -152,6 +170,8 @@ impl AddonManifest {
 pub struct ExtractedAddon {
     pub metadata: AddonManifest,
     pub files: Vec<AddonFile>,
+    #[serde(default)]
+    pub assets: Vec<AddonAsset>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

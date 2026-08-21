@@ -176,8 +176,11 @@ export const cashActivitySchema = baseActivitySchema.extend({
 export const incomeActivitySchema = baseActivitySchema.extend({
   activityType: z.enum([ActivityType.DIVIDEND, ActivityType.INTEREST]),
   assetId: z.string().min(1, { message: "Please select a security" }).optional(),
+  // No .positive() on unitPrice: cash records persist quantity/unitPrice as 0,
+  // so a top-level check would reject edits over these hidden fields. Positivity
+  // for asset-backed subtypes is enforced by validateAssetBackedIncomeFields.
   quantity: z.coerce.number().default(0),
-  unitPrice: z.coerce.number().positive().optional(),
+  unitPrice: z.coerce.number().optional(),
   amount: z.coerce
     .number({
       required_error: "Please enter a valid amount.",

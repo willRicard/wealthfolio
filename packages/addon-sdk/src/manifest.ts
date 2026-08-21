@@ -94,7 +94,7 @@ export interface AddonManifest {
   minWealthfolioVersion?: string;
   /** Keywords for discoverability */
   keywords?: string[];
-  /** Addon icon (base64 or relative path) */
+  /** Addon icon value supported by the consuming host surface */
   icon?: string;
   /** Network hosts this addon may reach through the host broker */
   network?: AddonNetworkAccess;
@@ -158,6 +158,16 @@ export interface AddonFile {
   size?: number;
 }
 
+/** A packaged file available through {@link AddonContext.assets}. */
+export interface AddonAsset {
+  /** Logical package path, such as `assets/logo.png`. */
+  path: string;
+  /** Browser-compatible MIME type inferred by the host. */
+  mimeType: string;
+  /** File size in bytes. */
+  size: number;
+}
+
 /**
  * Extracted addon package
  */
@@ -166,6 +176,12 @@ export interface ExtractedAddon {
   metadata: AddonManifest;
   /** List of files in the addon package */
   files: AddonFile[];
+  /**
+   * Packaged static files under `assets/**` and `dist/assets/**` (metadata only).
+   * Wealthfolio 3.7 hosts always return an array; optionality preserves source
+   * compatibility with values constructed against earlier SDK versions.
+   */
+  assets?: AddonAsset[];
 }
 
 /**

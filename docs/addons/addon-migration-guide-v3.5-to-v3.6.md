@@ -1,5 +1,9 @@
 # Migration Guide: Wealthfolio Addons v3.5 to v3.6
 
+> Migrating beyond v3.6? Continue with the
+> [v3.6 to v3.7 guide](./addon-migration-guide-v3.6-to-v3.7.md) for packaged
+> assets and development-server compatibility.
+
 Wealthfolio 3.6 runs every addon inside an **isolated sandbox iframe**
 (`sandbox="allow-scripts"`, opaque origin) instead of in the main app runtime.
 The iframe boundary cannot pass live functions or React elements across it, so
@@ -282,6 +286,7 @@ const hostProvidedDependencies = [
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
     lib: {
       entry: "src/addon.tsx",
       fileName: () => "addon.js",

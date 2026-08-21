@@ -12,7 +12,8 @@ use crate::events::{DomainEvent, DomainEventSink, NoOpDomainEventSink};
 use crate::fx::FxServiceTrait;
 use crate::lots::{check_lot_quantity_consistency, LotRepositoryTrait};
 use crate::portfolio::snapshot::{
-    AccountStateSnapshot, HoldingsCalculationWarning, SnapshotSource,
+    validate_snapshot_read_date, validate_snapshot_write_date, AccountStateSnapshot,
+    HoldingsCalculationWarning, HoldingsTimeline, SnapshotMetadata, SnapshotSource,
 };
 use crate::utils::time_utils::{
     activity_date_in_tz, get_days_between, parse_user_timezone_or_default, user_today,
@@ -65,15 +66,25 @@ pub trait SnapshotServiceTrait: Send + Sync {
         end_date: Option<NaiveDate>,
     ) -> Result<Vec<AccountStateSnapshot>>;
 
-    /// Retrieves **holdings** snapshots for a specific real account within a date range,
-    /// reconstructing daily snapshots between saved keyframes by carrying forward holdings.
-    /// Valuation fields in the returned snapshots will be zero or default.
-    fn get_daily_holdings_snapshots(
+    /// Retrieves lightweight snapshot metadata, including malformed stored
+    /// dates that cannot be represented by `AccountStateSnapshot`.
+    fn get_snapshot_metadata(
         &self,
         account_id: &str,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
-    ) -> Result<Vec<AccountStateSnapshot>>;
+    ) -> Result<Vec<SnapshotMetadata>> {
+        self.get_holdings_keyframes(account_id, start_date, end_date)
+            .map(|snapshots| snapshots.iter().map(SnapshotMetadata::from).collect())
+    }
+
+    /// Builds a sparse holdings timeline whose day iterator borrows active keyframes.
+    fn get_holdings_timeline(
+        &self,
+        account_id: &str,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<HoldingsTimeline>;
 
     /// Retrieves the most recent calculated **holdings** snapshot for a specific account.
     /// Returns `Ok(None)` when no snapshot exists yet. Valuation fields will be zero or default.
@@ -98,11 +109,6 @@ pub trait SnapshotServiceTrait: Send + Sync {
     /// Returns the number of snapshots updated.
     async fn update_snapshots_source(&self, account_id: &str, new_source: &str) -> Result<usize>;
 
-    /// Legacy compatibility hook for holdings-history setup.
-    /// Synthetic backfill snapshots are no longer created because they make
-    /// charts and valuation history show holdings before they existed.
-    async fn ensure_holdings_history(&self, account_id: &str) -> Result<()>;
-
     /// Delete snapshot(s) on the given dates.
     /// Keep UI/API callers behind the snapshot service boundary even though
     /// deletion currently delegates directly to storage. Higher-level
@@ -112,6 +118,27 @@ pub trait SnapshotServiceTrait: Send + Sync {
         account_id: &str,
         dates: &[NaiveDate],
     ) -> Result<()>;
+
+    /// Deletes one snapshot by row ID, including a row whose stored date is
+    /// malformed and therefore cannot use the date-based API.
+    async fn delete_snapshot_for_account_by_id(
+        &self,
+        account_id: &str,
+        snapshot_id: &str,
+    ) -> Result<()> {
+        let metadata = self
+            .get_snapshot_metadata(account_id, None, None)?
+            .into_iter()
+            .find(|snapshot| snapshot.id == snapshot_id)
+            .ok_or_else(|| {
+                Error::Repository(format!(
+                    "Snapshot {snapshot_id} for account {account_id} was not found"
+                ))
+            })?;
+        let date = NaiveDate::parse_from_str(&metadata.snapshot_date, "%Y-%m-%d")
+            .map_err(|error| Error::Repository(error.to_string()))?;
+        self.delete_snapshot_for_account(account_id, &[date]).await
+    }
 }
 
 // --- Service Implementation ---
@@ -209,11 +236,17 @@ impl SnapshotService {
     }
 
     /// Emits a HoldingsChanged event for the given accounts and assets.
-    fn emit_holdings_changed(&self, account_ids: Vec<String>, asset_ids: Vec<String>) {
+    fn emit_holdings_changed(
+        &self,
+        account_ids: Vec<String>,
+        asset_ids: Vec<String>,
+        earliest_snapshot_date: NaiveDate,
+    ) {
         if !account_ids.is_empty() {
             self.event_sink.emit(DomainEvent::HoldingsChanged {
                 account_ids,
                 asset_ids,
+                earliest_snapshot_date,
             });
         }
     }
@@ -448,8 +481,8 @@ impl SnapshotService {
             calculation_end_date,
         )?;
 
-        let (start_keyframes, effective_start_dates, calculation_min_date) = self
-            .determine_calculation_range_and_initial_state(
+        let (start_keyframes, effective_start_dates, calculation_min_date, mut range_failures) =
+            self.determine_calculation_range_and_initial_state(
                 &accounts_to_process,
                 &activities_by_account_date,
                 &account_ids_with_activity,
@@ -457,6 +490,9 @@ impl SnapshotService {
                 calculation_end_date,
             )
             .await?;
+        // `accounts_to_process` is a HashMap; make the surfaced failure stable
+        // while Health Center independently reports every affected account.
+        range_failures.sort_by(|left, right| right.0.cmp(&left.0));
 
         let accounts_needing_calculation: AccountsMap = accounts_to_process
             .iter()
@@ -466,6 +502,9 @@ impl SnapshotService {
 
         if accounts_needing_calculation.is_empty() {
             debug!("No accounts require snapshot calculation in the specified range.");
+            if let Some((_, error)) = range_failures.pop() {
+                return Err(error);
+            }
             return Ok(0);
         }
 
@@ -638,9 +677,14 @@ impl SnapshotService {
         // were skipped by determine_calculation_range_and_initial_state, so their
         // old snapshots must be removed here.
         if let SnapshotRecalcMode::SinceDate(since) = &mode {
+            let failed_account_ids: HashSet<_> = range_failures
+                .iter()
+                .map(|(account_id, _)| account_id.as_str())
+                .collect();
             let stale_account_ids: Vec<String> = accounts_to_process
                 .keys()
                 .filter(|acc_id| !accounts_needing_calculation.contains_key(*acc_id))
+                .filter(|acc_id| !failed_account_ids.contains(acc_id.as_str()))
                 .cloned()
                 .collect();
             self.clear_stale_account_state(
@@ -659,6 +703,10 @@ impl SnapshotService {
         // dual-write contract was partially broken and a retry / Full
         // recalc is needed to bring things back in sync.
         Self::ensure_no_lot_sync_errors(&lot_sync_errors)?;
+
+        if let Some((_, error)) = range_failures.pop() {
+            return Err(error);
+        }
 
         Ok(keyframes_to_save.len())
     }
@@ -834,7 +882,12 @@ impl SnapshotService {
         account_ids_with_activity: &HashSet<String>, // Accounts that actually have activities
         mode: &SnapshotRecalcMode,
         calculation_end_date: NaiveDate,
-    ) -> Result<(StartSnapshotsMap, StartDatesMap, NaiveDate)> {
+    ) -> Result<(
+        StartSnapshotsMap,
+        StartDatesMap,
+        NaiveDate,
+        Vec<(String, Error)>,
+    )> {
         debug!(
             "Determining calculation range. Accounts with activity: {:?}. Mode: {:?}",
             account_ids_with_activity.len(),
@@ -843,6 +896,7 @@ impl SnapshotService {
         let mut start_keyframes: StartSnapshotsMap = HashMap::new();
         let mut effective_start_dates: StartDatesMap = HashMap::new();
         let mut overall_min_calc_date = calculation_end_date;
+        let mut range_failures = Vec::new();
 
         for (acc_id, account) in accounts_to_process {
             if !account_ids_with_activity.contains(acc_id)
@@ -956,6 +1010,22 @@ impl SnapshotService {
             }
 
             if effective_start_date <= calculation_end_date {
+                // Activity dates and planner-provided SinceDate values can come
+                // from existing or synced data, bypassing snapshot write checks.
+                // Bound the effective range before get_days_between allocates it.
+                if let Err(error) = validate_snapshot_read_date(
+                    acc_id,
+                    effective_start_date,
+                    SnapshotSource::Calculated.as_str(),
+                    calculation_end_date,
+                ) {
+                    warn!(
+                        "Skipping snapshot recalculation for account {} because its effective start date is invalid: {}",
+                        acc_id, error
+                    );
+                    range_failures.push((acc_id.clone(), error));
+                    continue;
+                }
                 if let Some(mut snapshot) = initial_snapshot_for_acc {
                     // A seed snapshot only reaches here for the append-only
                     // modes — `IncrementalFromLast` (resumes from the latest
@@ -1009,6 +1079,7 @@ impl SnapshotService {
             start_keyframes,
             effective_start_dates,
             overall_min_calc_date,
+            range_failures,
         ))
     }
 
@@ -1176,16 +1247,6 @@ impl SnapshotService {
             let mut keyframes_today = Vec::new();
 
             for (account_id, account) in accounts_to_process_today {
-                let previous_holdings_snapshot = current_holdings_snapshots
-                    .get(account_id)
-                     .ok_or_else(|| {
-                         error!("CRITICAL: Missing previous holdings snapshot for account {} in memory map for date {}", account_id, current_date);
-                         Error::Calculation(CalculatorError::Calculation(format!(
-                             "Missing previous holdings snapshot for account {} for date {}",
-                             account_id, current_date
-                         )))
-                     })?;
-
                 // Get activities for this specific account.
                 let activities_today = activities_by_account_date
                     .get(account_id)
@@ -1195,6 +1256,22 @@ impl SnapshotService {
 
                 let is_first_day = effective_start_dates.get(account_id) == Some(&current_date);
                 let has_activities = !activities_today.is_empty();
+
+                // Saved holdings are keyframes, so an empty calendar day does not
+                // change the state and does not need a deep clone of positions/lots.
+                if !is_first_day && !has_activities {
+                    continue;
+                }
+
+                let previous_holdings_snapshot = current_holdings_snapshots
+                    .get(account_id)
+                     .ok_or_else(|| {
+                         error!("CRITICAL: Missing previous holdings snapshot for account {} in memory map for date {}", account_id, current_date);
+                         Error::Calculation(CalculatorError::Calculation(format!(
+                             "Missing previous holdings snapshot for account {} for date {}",
+                             account_id, current_date
+                         )))
+                     })?;
 
                 let current_holdings_snapshot: AccountStateSnapshot; // Final state for today
 
@@ -1294,42 +1371,6 @@ impl SnapshotService {
 
     // --- Helpers ---
 
-    fn get_non_synthetic_snapshots_by_account(
-        &self,
-        account_id: &str,
-        start_date_opt: Option<NaiveDate>,
-        end_date_opt: Option<NaiveDate>,
-    ) -> Result<Vec<AccountStateSnapshot>> {
-        Ok(self
-            .snapshot_repository
-            .get_snapshots_by_account(account_id, start_date_opt, end_date_opt)?
-            .into_iter()
-            .filter(|snapshot| snapshot.source != SnapshotSource::Synthetic)
-            .collect())
-    }
-
-    fn get_earliest_non_synthetic_snapshot_date(
-        &self,
-        account_id: &str,
-    ) -> Result<Option<NaiveDate>> {
-        Ok(self
-            .get_non_synthetic_snapshots_by_account(account_id, None, None)?
-            .into_iter()
-            .map(|snapshot| snapshot.snapshot_date)
-            .min())
-    }
-
-    fn get_latest_non_synthetic_snapshot_before_date(
-        &self,
-        account_id: &str,
-        target_date: NaiveDate,
-    ) -> Result<Option<AccountStateSnapshot>> {
-        Ok(self
-            .get_non_synthetic_snapshots_by_account(account_id, None, Some(target_date))?
-            .into_iter()
-            .max_by_key(|snapshot| snapshot.snapshot_date))
-    }
-
     // create_initial_snapshot creates a snapshot with default values
     fn create_initial_snapshot(account: &Account, date: NaiveDate) -> AccountStateSnapshot {
         AccountStateSnapshot {
@@ -1359,6 +1400,27 @@ impl SnapshotService {
     // split factor.
 }
 
+#[cfg(test)]
+impl SnapshotService {
+    pub fn get_daily_holdings_snapshots(
+        &self,
+        account_id: &str,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<Vec<AccountStateSnapshot>> {
+        let timeline = self.get_holdings_timeline(account_id, start_date, end_date)?;
+        Ok(timeline
+            .iter()
+            .map(|day| {
+                let mut snapshot = day.snapshot.clone();
+                snapshot.snapshot_date = day.date;
+                snapshot.id = AccountStateSnapshot::stable_id(account_id, day.date);
+                snapshot
+            })
+            .collect())
+    }
+}
+
 #[async_trait]
 impl SnapshotServiceTrait for SnapshotService {
     async fn recalculate_holdings_snapshots(
@@ -1385,19 +1447,64 @@ impl SnapshotServiceTrait for SnapshotService {
             .get_snapshots_by_account(account_id, start_date_opt, end_date_opt)
     }
 
-    fn get_daily_holdings_snapshots(
+    fn get_holdings_timeline(
         &self,
         account_id: &str,
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
-    ) -> Result<Vec<AccountStateSnapshot>> {
+    ) -> Result<HoldingsTimeline> {
         debug!(
-            "Reconstructing daily holdings snapshots for {} from {:?} to {:?}",
+            "Building holdings timeline for {} from {:?} to {:?}",
             account_id, start_date_opt, end_date_opt
         );
 
-        // Determine start date: Use provided, else earliest non-synthetic snapshot date.
-        let earliest_snapshot_date = self.get_earliest_non_synthetic_snapshot_date(account_id)?;
+        let today = self.user_today();
+        if let Some(start_date) = start_date_opt {
+            validate_snapshot_read_date(
+                account_id,
+                start_date,
+                SnapshotSource::Calculated.as_str(),
+                today,
+            )?;
+        }
+        if let Some(end_date) = end_date_opt {
+            validate_snapshot_read_date(
+                account_id,
+                end_date,
+                SnapshotSource::Calculated.as_str(),
+                today,
+            )?;
+        }
+        let all_keyframes = self
+            .snapshot_repository
+            .get_snapshots_by_account(account_id, None, None)?;
+        let deferred_future_snapshots = all_keyframes
+            .iter()
+            .any(|snapshot| snapshot.snapshot_date > today);
+        for snapshot in &all_keyframes {
+            validate_snapshot_read_date(
+                account_id,
+                snapshot.snapshot_date,
+                snapshot.source.as_str(),
+                today,
+            )?;
+        }
+        let eligible_keyframes: Vec<_> = all_keyframes
+            .into_iter()
+            .filter(|snapshot| snapshot.snapshot_date <= today)
+            .collect();
+        // Match the former dense engine's BTreeMap behavior: for duplicate dates,
+        // the last repository row wins.
+        let eligible_keyframes: Vec<_> = eligible_keyframes
+            .into_iter()
+            .map(|snapshot| (snapshot.snapshot_date, snapshot))
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
+            .collect();
+        let earliest_snapshot_date = eligible_keyframes
+            .iter()
+            .map(|snapshot| snapshot.snapshot_date)
+            .min();
 
         let start_date = match start_date_opt {
             Some(date) => date,
@@ -1408,103 +1515,82 @@ impl SnapshotServiceTrait for SnapshotService {
                         "No snapshots found for account {}. Returning empty.",
                         account_id
                     );
-                    return Ok(Vec::new());
+                    return Ok(HoldingsTimeline::new(
+                        None,
+                        today,
+                        Vec::new(),
+                        None,
+                        deferred_future_snapshots,
+                    ));
                 }
             },
         };
 
-        // Use provided end_date, or latest snapshot date, or today as fallback
-        let end_date = match end_date_opt {
-            Some(date) => date,
-            None => {
-                // Get the latest snapshot to ensure we include all available data
-                // Use a far future date to get the absolute latest snapshot
-                let today = self.user_today();
-                let far_future = today + chrono::Duration::days(365);
-                match self.get_latest_non_synthetic_snapshot_before_date(account_id, far_future)? {
-                    Some(latest_snapshot) => latest_snapshot.snapshot_date.max(today),
-                    None => today,
-                }
-            }
-        };
+        let end_date = end_date_opt.unwrap_or(today).min(today);
 
         if start_date > end_date {
             warn!(
-                "get_daily_holdings_snapshots: Start date {} is after end date {}. Returning empty.",
+                "get_holdings_timeline: Start date {} is after end date {}. Returning empty.",
                 start_date, end_date
             );
-            return Ok(Vec::new());
+            return Ok(HoldingsTimeline::new(
+                None,
+                end_date,
+                Vec::new(),
+                None,
+                deferred_future_snapshots,
+            ));
         }
 
-        // Fetch keyframes within the actual range first, as we might need them to determine the initial state.
-        let keyframes_in_range = self.get_non_synthetic_snapshots_by_account(
-            account_id,
-            Some(start_date),
-            Some(end_date),
-        )?;
-        let keyframes_map: BTreeMap<NaiveDate, AccountStateSnapshot> = keyframes_in_range
-            .into_iter()
-            .map(|kf| (kf.snapshot_date, kf))
-            .collect();
+        let anchor = eligible_keyframes
+            .iter()
+            .filter(|snapshot| snapshot.snapshot_date <= start_date)
+            .max_by_key(|snapshot| snapshot.snapshot_date)
+            .cloned();
+        let mut timeline_keyframes = Vec::new();
+        if let Some(anchor) = anchor {
+            timeline_keyframes.push(anchor);
+        }
+        timeline_keyframes.extend(eligible_keyframes.into_iter().filter(|snapshot| {
+            snapshot.snapshot_date > start_date && snapshot.snapshot_date <= end_date
+        }));
+        timeline_keyframes.sort_by_key(|snapshot| snapshot.snapshot_date);
 
-        // Try to get the state from the day before the loop starts.
-        let initial_state_result =
-            self.get_latest_non_synthetic_snapshot_before_date(account_id, start_date);
+        if timeline_keyframes.is_empty() {
+            return Ok(HoldingsTimeline::new(
+                None,
+                end_date,
+                Vec::new(),
+                None,
+                deferred_future_snapshots,
+            ));
+        }
 
-        let mut current_state = match initial_state_result? {
-            Some(initial_snapshot) => initial_snapshot,
-            None => {
-                // No snapshot found before start date.
-                // If there are no keyframes at all in the requested range, we can't reconstruct.
-                if keyframes_map.is_empty() {
-                    debug!(
-                        "No snapshot found before start date {} and no keyframes in range for account {}. Returning empty.",
-                        start_date, account_id
-                    );
-                    return Ok(Vec::new());
-                }
-
-                // Otherwise, history starts within our date range. We create a default "empty" state
-                // for the day before the loop, and the loop will then pick up the first keyframe correctly.
-                let account_details =
-                    self.account_repository.get_by_id(account_id).map_err(|_| {
-                        Error::Repository(format!(
-                            "Account not found while reconstructing daily snapshots: {}",
-                            account_id
-                        ))
-                    })?;
-                let day_before_start = start_date.pred_opt().unwrap_or(start_date);
-                Self::create_initial_snapshot(&account_details, day_before_start)
-            }
+        let empty_state = if timeline_keyframes
+            .first()
+            .is_some_and(|snapshot| snapshot.snapshot_date > start_date)
+        {
+            let account = self.account_repository.get_by_id(account_id).map_err(|_| {
+                Error::Repository(format!(
+                    "Account not found while building holdings timeline: {}",
+                    account_id
+                ))
+            })?;
+            Some(Self::create_initial_snapshot(
+                &account,
+                start_date.pred_opt().unwrap_or(start_date),
+            ))
+        } else {
+            None
         };
 
-        let capacity = (end_date - start_date).num_days().try_into().unwrap_or(0) + 1;
-        let mut reconstructed_snapshots = Vec::with_capacity(capacity);
-        let date_range = get_days_between(start_date, end_date);
-
-        for current_date in date_range {
-            if let Some(saved_keyframe) = keyframes_map.get(&current_date) {
-                // Use the saved keyframe for this date
-                current_state = saved_keyframe.clone();
-                reconstructed_snapshots.push(saved_keyframe.clone());
-            } else {
-                // Reconstruct by carrying forward the previous day's state
-                let mut reconstructed = current_state.clone();
-                reconstructed.snapshot_date = current_date;
-                reconstructed.id = format!(
-                    "{}_{}",
-                    reconstructed.account_id,
-                    current_date.format("%Y-%m-%d")
-                );
-                // Removed lines attempting to reset non-existent valuation fields
-                reconstructed.calculated_at = Utc::now().naive_utc(); // Mark when it was reconstructed
-
-                current_state = reconstructed.clone(); // Update state for the next day
-                reconstructed_snapshots.push(reconstructed);
-            }
-        }
-
-        Ok(reconstructed_snapshots)
+        Ok(HoldingsTimeline::new(
+            Some(start_date),
+            end_date,
+            timeline_keyframes,
+            empty_state,
+            deferred_future_snapshots,
+        ))
     }
 
     fn get_latest_holdings_snapshot(
@@ -1539,13 +1625,20 @@ impl SnapshotServiceTrait for SnapshotService {
         // Ensure the snapshot has the correct account_id
         snapshot.account_id = account_id.to_string();
 
+        validate_snapshot_write_date(
+            account_id,
+            snapshot.snapshot_date,
+            snapshot.source.as_str(),
+            self.user_today(),
+        )?;
+
         // Note: snapshot.source is preserved from the caller (ManualEntry or CsvImport)
 
         // Generate the snapshot ID based on account_id and date
         snapshot.id = AccountStateSnapshot::stable_id(account_id, snapshot.snapshot_date);
 
         // Check if content is unchanged from existing snapshot on the same date (skip if identical)
-        // Only compare against the same date to avoid false matches with SYNTHETIC backfill snapshots
+        // Only compare against the same date because stable IDs are date-based.
         let same_date_snapshots = self.snapshot_repository.get_snapshots_by_account(
             account_id,
             Some(snapshot.snapshot_date),
@@ -1557,6 +1650,20 @@ impl SnapshotServiceTrait for SnapshotService {
                 debug!(
                     "Snapshot content unchanged for account {} on {}, skipping save",
                     account_id, snapshot.snapshot_date
+                );
+                // ManualSnapshotService may already have updated quote mode or
+                // persisted a manual quote before this snapshot-level no-op.
+                // Keep the dated recalculation signal even when the snapshot
+                // row itself does not need to be rewritten.
+                let asset_ids: Vec<String> = snapshot
+                    .positions
+                    .values()
+                    .map(|position| position.asset_id.clone())
+                    .collect();
+                self.emit_holdings_changed(
+                    vec![account_id.to_string()],
+                    asset_ids,
+                    snapshot.snapshot_date,
                 );
                 return Ok(());
             }
@@ -1581,7 +1688,11 @@ impl SnapshotServiceTrait for SnapshotService {
             .values()
             .map(|p| p.asset_id.clone())
             .collect();
-        self.emit_holdings_changed(vec![account_id.to_string()], asset_ids);
+        self.emit_holdings_changed(
+            vec![account_id.to_string()],
+            asset_ids,
+            snapshot.snapshot_date,
+        );
 
         Ok(())
     }
@@ -1605,14 +1716,6 @@ impl SnapshotServiceTrait for SnapshotService {
         Ok(updated_count)
     }
 
-    async fn ensure_holdings_history(&self, account_id: &str) -> Result<()> {
-        debug!(
-            "Skipping synthetic holdings-history backfill for account {}",
-            account_id
-        );
-        Ok(())
-    }
-
     async fn delete_snapshot_for_account(
         &self,
         account_id: &str,
@@ -1622,6 +1725,26 @@ impl SnapshotServiceTrait for SnapshotService {
             .delete_snapshots_for_account_and_dates(account_id, dates)
             .await?;
         Ok(())
+    }
+
+    fn get_snapshot_metadata(
+        &self,
+        account_id: &str,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<Vec<SnapshotMetadata>> {
+        self.snapshot_repository
+            .get_snapshot_metadata_by_account(account_id, start_date, end_date)
+    }
+
+    async fn delete_snapshot_for_account_by_id(
+        &self,
+        account_id: &str,
+        snapshot_id: &str,
+    ) -> Result<()> {
+        self.snapshot_repository
+            .delete_snapshot_for_account_by_id(account_id, snapshot_id)
+            .await
     }
 }
 

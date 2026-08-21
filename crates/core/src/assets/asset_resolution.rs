@@ -1,7 +1,10 @@
 use serde_json::Value;
 use std::borrow::Cow;
 
-use super::{Asset, AssetKind, InstrumentType, NewAsset, QuoteCcyResolutionSource, QuoteMode};
+use super::{
+    parse_symbol_with_exchange_suffix, Asset, AssetKind, InstrumentType, NewAsset,
+    QuoteCcyResolutionSource, QuoteMode,
+};
 use wealthfolio_market_data::{
     ProviderId, ProviderInstrument, ProviderOverrides, QuoteContext, ResolverChain, SymbolResolver,
 };
@@ -20,6 +23,58 @@ pub struct AssetResolutionInput {
     pub asset_id: Option<String>,
     pub provider_id: Option<String>,
     pub provider_symbol: Option<String>,
+}
+
+impl AssetResolutionInput {
+    /// Returns whether asset review supplied enough identity metadata to skip
+    /// another provider lookup during import validation.
+    pub fn reviewed_metadata_is_sufficient(&self) -> bool {
+        if self
+            .asset_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+        {
+            return true;
+        }
+
+        let Some(instrument_type) = self.instrument_type.as_ref() else {
+            return false;
+        };
+        if !reviewed_quote_ccy_is_valid(self.quote_ccy.as_deref()) {
+            return false;
+        }
+
+        if self.quote_mode == Some(QuoteMode::Manual) {
+            return true;
+        }
+
+        match instrument_type {
+            InstrumentType::Equity => {
+                self.exchange_mic
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|mic| !mic.is_empty())
+                    || parse_symbol_with_exchange_suffix(&self.source_symbol)
+                        .1
+                        .is_some()
+            }
+            InstrumentType::Crypto
+            | InstrumentType::Fx
+            | InstrumentType::Option
+            | InstrumentType::Metal
+            | InstrumentType::Bond => true,
+        }
+    }
+}
+
+fn reviewed_quote_ccy_is_valid(value: Option<&str>) -> bool {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    value
+        .chars()
+        .all(|character| character.is_ascii_alphabetic())
+        && (3..=5).contains(&value.len())
 }
 
 #[derive(Debug, Clone, Default)]

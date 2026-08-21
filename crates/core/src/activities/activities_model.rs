@@ -15,10 +15,54 @@ use crate::assets::NewAsset;
 use crate::Result;
 use crate::{activities::activities_errors::ActivityError, QuoteMode};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono_tz::Tz;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::str::FromStr;
+
+pub(crate) fn validate_activity_date(
+    activity_date: &str,
+) -> std::result::Result<NaiveDate, ActivityError> {
+    let date = DateTime::parse_from_rfc3339(activity_date)
+        .map(|date| date.date_naive())
+        .or_else(|_| NaiveDate::parse_from_str(activity_date, "%Y-%m-%d"))
+        .map_err(|_| {
+            ActivityError::InvalidData(
+                "Invalid date format. Expected ISO 8601/RFC3339 or YYYY-MM-DD".to_string(),
+            )
+        })?;
+    let min_date = crate::portfolio::snapshot::min_supported_snapshot_date();
+    if date < min_date {
+        return Err(ActivityError::InvalidData(format!(
+            "Activity date {} isn't supported. Use a date on or after {}.",
+            date, min_date
+        )));
+    }
+    Ok(date)
+}
+
+pub(crate) fn validate_activity_date_in_timezone(
+    activity_date: &str,
+    timezone: Tz,
+) -> std::result::Result<NaiveDate, ActivityError> {
+    let date = DateTime::parse_from_rfc3339(activity_date)
+        .map(|date| date.with_timezone(&timezone).date_naive())
+        .or_else(|_| NaiveDate::parse_from_str(activity_date, "%Y-%m-%d"))
+        .map_err(|_| {
+            ActivityError::InvalidData(
+                "Invalid date format. Expected ISO 8601/RFC3339 or YYYY-MM-DD".to_string(),
+            )
+        })?;
+    let min_date = crate::portfolio::snapshot::min_supported_snapshot_date();
+    if date < min_date {
+        return Err(ActivityError::InvalidData(format!(
+            "Activity date {} isn't supported. Use a date on or after {}.",
+            date, min_date
+        )));
+    }
+    Ok(date)
+}
 
 /// Discriminator values for `import_account_templates.context_kind`.
 pub mod import_type {
@@ -475,14 +519,7 @@ impl NewActivity {
             ));
         }
 
-        // Validate date format
-        if DateTime::parse_from_rfc3339(&self.activity_date).is_err()
-            && NaiveDate::parse_from_str(&self.activity_date, "%Y-%m-%d").is_err()
-        {
-            return Err(crate::activities::ActivityError::InvalidData(
-                "Invalid date format. Expected ISO 8601/RFC3339 or YYYY-MM-DD".to_string(),
-            ));
-        }
+        validate_activity_date(&self.activity_date)?;
 
         Self::validate_asset_backed_income_values(
             &self.activity_type,
@@ -621,6 +658,7 @@ impl ActivityUpdate {
             )
             .into());
         }
+        validate_activity_date(&self.activity_date)?;
         Ok(())
     }
 
@@ -969,7 +1007,7 @@ pub struct ActivityImport {
     /// DB unique constraint is not violated. Set by the user in the review step.
     #[serde(default)]
     pub force_import: bool,
-    /// True when a TRANSFER_IN/OUT crosses the tracked-account boundary (e.g. RSU grant deposit).
+    /// Whether a transfer or credit crosses the tracked-account boundary.
     /// Persisted as `metadata.flow.is_external` so net-contribution and flow classification work.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1856,14 +1894,18 @@ impl From<ActivityImport> for NewActivity {
             Some(ActivityStatus::Posted)
         };
 
-        // Persist `is_external` as flow metadata so net_contribution and flow classification
-        // see this transfer the same way the manual activity form would.
+        // Persist boundary metadata so imported activities and manually entered activities
+        // have the same net-contribution and flow-classification semantics.
         let is_transfer = import.activity_type == ACTIVITY_TYPE_TRANSFER_IN
             || import.activity_type == ACTIVITY_TYPE_TRANSFER_OUT;
-        let metadata = if is_transfer && import.is_external == Some(true) {
-            Some(serde_json::json!({ "flow": { "is_external": true } }).to_string())
-        } else {
-            None
+        let metadata = match (import.activity_type.as_str(), import.is_external) {
+            (ACTIVITY_TYPE_CREDIT, Some(is_external)) => {
+                Some(serde_json::json!({ "flow": { "is_external": is_external } }).to_string())
+            }
+            (_, Some(true)) if is_transfer => {
+                Some(serde_json::json!({ "flow": { "is_external": true } }).to_string())
+            }
+            _ => None,
         };
 
         NewActivity {

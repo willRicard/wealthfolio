@@ -6,6 +6,8 @@ use wealthfolio_core::portfolios::AccountScope;
 #[derive(Deserialize)]
 pub struct FilterBody {
     pub filter: AccountScope,
+    #[serde(rename = "includeClosed", default)]
+    pub include_closed: bool,
 }
 
 #[derive(Deserialize)]
@@ -21,6 +23,8 @@ pub struct AllocationFilterBody {
 pub struct AccountIdQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,
+    #[serde(rename = "includeClosed", default)]
+    pub include_closed: bool,
 }
 
 #[derive(Deserialize)]
@@ -103,6 +107,8 @@ pub struct DeleteSnapshotQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,
     pub date: String,
+    #[serde(rename = "snapshotId")]
+    pub snapshot_id: Option<String>,
 }
 
 /// Information about a snapshot for UI display
@@ -110,7 +116,9 @@ pub struct DeleteSnapshotQuery {
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotInfo {
     pub id: String,
+    /// Stored date, returned raw so malformed rows can be remediated.
     pub snapshot_date: String,
+    pub is_date_valid: bool,
     pub source: String,
     pub position_count: usize,
     pub cash_currency_count: usize,
@@ -174,6 +182,8 @@ pub struct HoldingsPositionInput {
     pub quote_ccy: Option<String>,
     /// Instrument type resolved during asset review/search
     pub instrument_type: Option<String>,
+    /// Quote mode selected during asset review (MARKET or MANUAL)
+    pub quote_mode: Option<String>,
     /// Market data provider that resolved this position, if selected.
     pub provider_id: Option<String>,
     /// Provider-native symbol/code selected by search/import.
@@ -239,4 +249,6 @@ pub struct CheckHoldingsImportResult {
     pub existing_dates: Vec<String>,
     pub symbols: Vec<SymbolCheckResult>,
     pub validation_errors: Vec<String>,
+    pub valid_snapshot_dates: Vec<String>,
+    pub invalid_snapshot_dates: Vec<String>,
 }

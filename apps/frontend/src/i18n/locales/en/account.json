@@ -99,6 +99,11 @@
     "tab": "Snapshots",
     "deleted": "Snapshot deleted",
     "delete_failed": "Failed to delete snapshot",
+    "invalid_date_title": "This holdings date can't be used",
+    "invalid_date_desc": "Your portfolio history is unchanged. Delete the highlighted entry and we'll update your portfolio automatically.",
+    "invalid_date_update_failed": "Some history wasn't updated",
+    "invalid_date_update_desc": "An account was skipped because it contains an unsupported date. Other accounts updated normally.",
+    "review_health": "Review issue",
     "history_title": "Snapshot History",
     "history_desc": "Review saved holdings and cash balances by date.",
     "add": "Add snapshot",
@@ -117,7 +122,6 @@
     "source_csv": "CSV",
     "source_broker": "Broker",
     "source_calculated": "Calculated",
-    "source_synthetic": "Synthetic",
     "summary_one": "{{count}} position, {{cash}} cash",
     "summary_other": "{{count}} positions, {{cash}} cash"
   },
@@ -147,5 +151,7 @@
     "period_irr": "Period IRR",
     "twr_hover_hint": " Hover the value to see cumulative TWR.",
     "irr_hover_hint": " Hover the value to see the selected-period IRR."
-  }
+  },
+  "more_count_one": "+{{count}} more",
+  "more_count_other": "+{{count}} more"
 }

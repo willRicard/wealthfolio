@@ -1,21 +1,30 @@
+import "./addon-sandbox.css";
 import "@/globals.css";
 
 import * as React from "react";
 import * as ReactDOMClient from "react-dom/client";
 import { QueryClient } from "@tanstack/react-query";
+import { FormattingProvider } from "@wealthfolio/ui";
 import { createHostDependencyModuleUrl, isHostDependencySpecifier } from "./host-dependencies";
 import {
   clearAddonStyles,
   createCssModuleSource,
   installAddonCssFiles,
-  installAddonStyle,
   isCssFile,
   type SandboxAddonFile,
 } from "./addon-sandbox-styles";
+import { SandboxAddonAssetRegistry, type SandboxAddonAsset } from "./addon-sandbox-asset-registry";
 import { applyHostTheme, type AddonThemeSnapshot } from "./addon-sandbox-theme";
 import { rewriteModuleSpecifiers } from "./addon-module-rewriter";
+import type { AddonLocalizationSnapshot } from "./addon-sandbox-localization";
+import {
+  initSandboxI18n,
+  installAddonTranslationRuntime,
+  setSandboxLanguage,
+} from "./addon-sandbox-i18n";
 
 const CHANNEL = "wealthfolio:addon-sandbox:v1";
+const RUNTIME_PROTOCOL_VERSION = 1;
 
 interface PendingCall {
   resolve: (value: unknown) => void;
@@ -51,6 +60,7 @@ interface SandboxMessage {
   requestId?: string;
   code?: string;
   files?: SandboxAddonFile[];
+  assets?: SandboxAddonAsset[];
   routeId?: string;
   location?: RouteLocation;
   ok?: boolean;
@@ -59,13 +69,21 @@ interface SandboxMessage {
   subscriptionId?: string;
   payload?: unknown;
   theme?: AddonThemeSnapshot;
+  localization?: AddonLocalizationSnapshot;
 }
 
 type RouteRenderer = (context: RouteRenderContext) => Promise<void> | void;
 
-const init = new URLSearchParams(window.location.hash.slice(1));
+const init = new URLSearchParams(window.name);
 const ADDON_ID = init.get("addonId") ?? "";
 const NONCE = init.get("nonce") ?? "";
+const HOST_BASE_URL = init.get("hostBaseUrl") ?? "";
+let sandboxLocalization: AddonLocalizationSnapshot = {
+  locale: init.get("locale") || "en-US",
+  uiLocale: init.get("uiLocale") || undefined,
+  timezone: init.get("timezone") || undefined,
+};
+const localizationListeners = new Set<() => void>();
 const rootElement = document.getElementById("addon-root");
 const routes = new Map<string, RouteRenderer>();
 const pending = new Map<string, PendingCall>();
@@ -75,13 +93,19 @@ let addonDisable: (() => Promise<void> | void) | undefined;
 let addonCodeUrl: string | undefined;
 let addonQueryClient: QueryClient | undefined;
 let addonModuleUrls = new Map<string, string>();
+let addonAssetRegistry: SandboxAddonAssetRegistry;
 let reactRouteRoot: ReactDOMClient.Root | undefined;
 
-if (!ADDON_ID || !NONCE || !rootElement) {
+if (!ADDON_ID || !NONCE || !HOST_BASE_URL || !rootElement) {
   throw new Error("Invalid addon sandbox bootstrap parameters");
 }
 
 const root = rootElement;
+
+// Bootstrap i18next before any addon (and its `@wealthfolio/ui` components)
+// render, seeded from the bootstrap params so there is no flash of raw keys.
+initSandboxI18n(sandboxLocalization.uiLocale);
+installAddonTranslationRuntime(ADDON_ID);
 
 function post(type: string, payload: Record<string, unknown> = {}) {
   parent.postMessage({ channel: CHANNEL, addonId: ADDON_ID, nonce: NONCE, type, ...payload }, "*");
@@ -94,6 +118,18 @@ function callHost(type: string, payload: Record<string, unknown> = {}) {
     post(type, { requestId, ...payload });
   });
 }
+
+globalThis.__wealthfolioRequestTickerLogo = (symbol: string) =>
+  callHost("hostAssetRequest", { kind: "tickerLogo", symbol }) as Promise<Blob | null>;
+
+function createAddonAssetRegistry(assets: SandboxAddonAsset[] = []) {
+  return new SandboxAddonAssetRegistry(
+    assets,
+    (assetId) => callHost("addonAssetRequest", { assetId }) as Promise<Blob>,
+  );
+}
+
+addonAssetRegistry = createAddonAssetRegistry();
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -108,6 +144,43 @@ function reportHostCallError(action: string, error: unknown) {
 function reportLoadPhase(phase: string) {
   post("loadPhase", { phase });
 }
+
+function updateSandboxLocalization(localization?: AddonLocalizationSnapshot) {
+  if (!localization?.locale) return;
+  if (
+    sandboxLocalization.locale === localization.locale &&
+    sandboxLocalization.uiLocale === localization.uiLocale &&
+    sandboxLocalization.timezone === localization.timezone
+  ) {
+    return;
+  }
+  sandboxLocalization = localization;
+  setSandboxLanguage(localization.uiLocale);
+  for (const listener of localizationListeners) listener();
+}
+
+function SandboxFormattingProvider({ children }: { children: React.ReactNode }) {
+  const localization = React.useSyncExternalStore(
+    (listener) => {
+      localizationListeners.add(listener);
+      return () => localizationListeners.delete(listener);
+    },
+    () => sandboxLocalization,
+  );
+
+  return (
+    <FormattingProvider
+      locale={localization.locale}
+      uiLocale={localization.uiLocale}
+      timezone={localization.timezone}
+    >
+      {children}
+    </FormattingProvider>
+  );
+}
+
+globalThis.__wealthfolioWrapAddonReactNode = (children) =>
+  React.createElement(SandboxFormattingProvider, null, children);
 
 // Resolve on the next paint, but with a timer fallback. Legacy `render` routes
 // (which never call `onRendered`) rely on this to signal completion — and a
@@ -230,9 +303,7 @@ function createAddonModuleRegistry(code: string, files: SandboxAddonFile[] = [])
       let cssModuleUrl = objectUrls.get(cssUrlKey);
       if (!cssModuleUrl) {
         cssModuleUrl = URL.createObjectURL(
-          new Blob([createCssModuleSource(cssEntry.path, cssEntry.source)], {
-            type: "text/javascript",
-          }),
+          new Blob([createCssModuleSource(cssEntry.source)], { type: "text/javascript" }),
         );
         objectUrls.set(cssUrlKey, cssModuleUrl);
       }
@@ -273,7 +344,6 @@ function createAddonModuleRegistry(code: string, files: SandboxAddonFile[] = [])
 
   Object.assign(globalThis, {
     __wealthfolioImport: importModule,
-    __wealthfolioInstallAddonStyle: installAddonStyle,
   });
 
   return {
@@ -295,9 +365,9 @@ function toInternalRoute(rawHref: string) {
     return null;
   }
 
-  const currentUrl = new URL(window.location.href);
-  const targetUrl = new URL(rawHref, currentUrl);
-  if (targetUrl.origin !== currentUrl.origin) {
+  const hostBaseUrl = new URL(HOST_BASE_URL);
+  const targetUrl = new URL(rawHref, hostBaseUrl);
+  if (targetUrl.origin !== hostBaseUrl.origin) {
     return null;
   }
 
@@ -453,12 +523,16 @@ function createReactRouteRenderer(component: unknown): RouteRenderer {
       React.startTransition(() => {
         reactRoot.render(
           React.createElement(
-            React.Suspense,
-            { fallback: null },
-            // The sandbox has no react-router provider, so the component gets
-            // the host location as a prop (re-passed on each navigation).
-            React.createElement(Component, { location }),
-            React.createElement(RouteRenderCommit, { onRendered: handleRendered }),
+            SandboxFormattingProvider,
+            null,
+            React.createElement(
+              React.Suspense,
+              { fallback: null },
+              // The sandbox has no react-router provider, so the component gets
+              // the host location as a prop (re-passed on each navigation).
+              React.createElement(Component, { location }),
+              React.createElement(RouteRenderCommit, { onRendered: handleRendered }),
+            ),
           ),
         );
       });
@@ -543,6 +617,12 @@ function createContext() {
         });
       },
     },
+    assets: {
+      list: () => addonAssetRegistry.list(),
+      has: (path: string) => addonAssetRegistry.has(path),
+      getBlob: (path: string) => addonAssetRegistry.getBlob(path),
+      getUrl: (path: string) => addonAssetRegistry.getUrl(path),
+    },
     onDisable(callback: unknown) {
       if (typeof callback === "function") {
         disableCallbacks.add(callback as () => Promise<void> | void);
@@ -573,9 +653,15 @@ function resolveEnable(mod: Record<string, unknown>) {
   return null;
 }
 
-async function loadAddon(code: string, files: SandboxAddonFile[] = []) {
+async function loadAddon(
+  code: string,
+  files: SandboxAddonFile[] = [],
+  assets: SandboxAddonAsset[] = [],
+) {
+  addonAssetRegistry.clear();
+  addonAssetRegistry = createAddonAssetRegistry(assets);
   reportLoadPhase("installing addon styles");
-  installAddonCssFiles(files);
+  await installAddonCssFiles(files, (path) => addonAssetRegistry.getUrl(path));
   reportLoadPhase("creating addon module registry");
   const moduleRegistry = createAddonModuleRegistry(code, files);
   addonModuleUrls = moduleRegistry.objectUrls;
@@ -641,6 +727,7 @@ async function disableAddon() {
     }
   }
   addonModuleUrls.clear();
+  addonAssetRegistry.clear();
   clearAddonStyles();
   root.replaceChildren();
 }
@@ -655,7 +742,12 @@ window.addEventListener("unhandledrejection", (event) => {
 
 window.addEventListener("message", (event: MessageEvent<SandboxMessage>) => {
   const message = event.data;
-  if (message?.channel !== CHANNEL || message.addonId !== ADDON_ID || message.nonce !== NONCE) {
+  if (
+    event.source !== parent ||
+    message?.channel !== CHANNEL ||
+    message.addonId !== ADDON_ID ||
+    message.nonce !== NONCE
+  ) {
     return;
   }
 
@@ -686,6 +778,11 @@ window.addEventListener("message", (event: MessageEvent<SandboxMessage>) => {
     return;
   }
 
+  if (message.type === "localizationUpdate") {
+    updateSandboxLocalization(message.localization);
+    return;
+  }
+
   void (async () => {
     try {
       if (message.type === "disable") {
@@ -699,7 +796,8 @@ window.addEventListener("message", (event: MessageEvent<SandboxMessage>) => {
         }
       } else if (message.type === "loadAddon" && typeof message.code === "string") {
         applyHostTheme(message.theme);
-        await loadAddon(message.code, message.files);
+        updateSandboxLocalization(message.localization);
+        await loadAddon(message.code, message.files, message.assets);
         post("loaded");
       } else if (message.type === "renderRoute" && message.routeId && message.location) {
         await renderRoute(message.routeId, message.location);
@@ -721,4 +819,4 @@ window.addEventListener("message", (event: MessageEvent<SandboxMessage>) => {
   })();
 });
 
-post("ready");
+post("ready", { runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION });

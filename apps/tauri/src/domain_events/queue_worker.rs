@@ -14,7 +14,8 @@ use tokio::sync::mpsc;
 use wealthfolio_core::events::DomainEvent;
 use wealthfolio_core::health::HealthServiceTrait;
 use wealthfolio_core::portfolio::snapshot::{
-    reconcile_quote_sync_from_latest_account_snapshots, SnapshotRecalcMode,
+    reconcile_quote_sync_from_latest_account_snapshots, snapshot_date_requires_remediation,
+    SnapshotRecalcMode,
 };
 use wealthfolio_core::portfolio::valuation::{CurrentAccountValuationService, ValuationRecalcMode};
 use wealthfolio_core::utils::time_utils::{parse_user_timezone_or_default, user_today};
@@ -314,11 +315,18 @@ async fn run_portfolio_job(
 ) {
     let market_sync_mode = payload.market_sync_mode.clone();
     let accounts_to_recalc = payload.account_ids.clone();
-    let snapshot_mode = match payload.since_date {
+    let today = user_today(parse_user_timezone_or_default(&context.get_timezone()));
+    let safe_since_date = payload
+        .since_date
+        .filter(|date| !snapshot_date_requires_remediation(*date, today));
+    if payload.since_date.is_some() && safe_since_date.is_none() {
+        warn!("Ignoring an invalid portfolio recalculation boundary and rebuilding safely");
+    }
+    let snapshot_mode = match safe_since_date {
         Some(date) => SnapshotRecalcMode::SinceDate(date),
         None => SnapshotRecalcMode::Full,
     };
-    let valuation_mode = match payload.since_date {
+    let valuation_mode = match safe_since_date {
         Some(date) => ValuationRecalcMode::SinceDate(date),
         None => ValuationRecalcMode::Full,
     };
@@ -512,19 +520,32 @@ async fn run_portfolio_calculation(
         );
     }
 
-    // Calculate valuation history for each account
+    // Calculate valuation histories as one bounded batch.
     let valuation_service = context.valuation_service();
-    for account_id in account_ids_vec {
-        if let Err(err) = valuation_service
-            .calculate_valuation_history(&account_id, valuation_mode.clone())
-            .await
-        {
-            let err_msg = format!(
-                "Valuation history calculation failed for {}: {}",
-                account_id, err
-            );
-            warn!("{}", err_msg);
-            let _ = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &err_msg);
+    match valuation_service
+        .calculate_valuation_histories(&account_ids_vec, valuation_mode)
+        .await
+    {
+        Ok(outcome) => {
+            if outcome
+                .failures
+                .iter()
+                .any(|failure| failure.code == "INVALID_SNAPSHOT_DATE")
+            {
+                context.health_service().clear_cache().await;
+            }
+            for failure in outcome.failures {
+                warn!(
+                    "Valuation history calculation failed for {}: {}",
+                    failure.account_id, failure.message
+                );
+                let _ = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &failure);
+            }
+        }
+        Err(error) => {
+            let message = format!("Failed to load shared valuation facts: {}", error);
+            warn!("{}", message);
+            let _ = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &message);
         }
     }
 

@@ -17,7 +17,7 @@ import {
   type DraftActivity,
 } from "../context";
 import { buildImportAssetCandidateFromDraft } from "../utils/asset-review-utils";
-import { validateDraft } from "../utils/draft-utils";
+import { reconcileExpenseReversalBoundary, validateDraft } from "../utils/draft-utils";
 import { getActivityImportProfileForResolvedAccountIds } from "../utils/activity-import-profile";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -235,6 +235,11 @@ export function ReviewStep() {
       // Find the current draft and merge with updates
       const currentDraft = draftActivities.find((d) => d.rowIndex === rowIndex);
       if (currentDraft) {
+        const reconciledUpdates = reconcileExpenseReversalBoundary(
+          currentDraft,
+          updates,
+          accountTypeById,
+        );
         const changesAssetIdentity = [
           "symbol",
           "exchangeMic",
@@ -244,10 +249,10 @@ export function ReviewStep() {
           "isin",
           "accountId",
           "activityType",
-        ].some((field) => field in updates);
+        ].some((field) => field in reconciledUpdates);
         const mergedDraft = {
           ...currentDraft,
-          ...updates,
+          ...reconciledUpdates,
         } as DraftActivity;
         const nextCandidate = buildImportAssetCandidateFromDraft(mergedDraft);
         // Re-validate the merged draft
@@ -256,7 +261,7 @@ export function ReviewStep() {
         const shouldRevalidateStatus = currentDraft.status !== "skipped";
         dispatch(
           updateDraft(rowIndex, {
-            ...updates,
+            ...reconciledUpdates,
             ...(changesAssetIdentity
               ? {
                   assetId: undefined,
@@ -311,17 +316,19 @@ export function ReviewStep() {
         const currentDraft = draftActivities.find((draft) => draft.rowIndex === rowIndex);
         if (!currentDraft) continue;
 
-        const mergedDraft = {
-          ...currentDraft,
-          accountId: newAccountId,
-        } as DraftActivity;
+        const accountUpdates = reconcileExpenseReversalBoundary(
+          currentDraft,
+          { accountId: newAccountId },
+          accountTypeById,
+        );
+        const mergedDraft = { ...currentDraft, ...accountUpdates } as DraftActivity;
         const nextCandidate = buildImportAssetCandidateFromDraft(mergedDraft);
         const validation = validateDraft(mergedDraft, accountTypeById);
         const shouldRevalidateStatus = currentDraft.status !== "skipped";
 
         dispatch(
           updateDraft(rowIndex, {
-            accountId: newAccountId,
+            ...accountUpdates,
             assetId: undefined,
             importAssetKey: undefined,
             assetCandidateKey: nextCandidate?.key,

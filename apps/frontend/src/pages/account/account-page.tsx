@@ -94,7 +94,7 @@ import {
   SheetTrigger,
 } from "@wealthfolio/ui/components/ui/sheet";
 import { format, subMonths } from "date-fns";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AccountContributionLimit } from "./account-contribution-limit";
 import AccountHoldings from "./account-holdings";
 import AccountMetrics from "./account-metrics";
@@ -114,6 +114,10 @@ interface HistoryChartData {
 }
 
 type AccountDetailTab = "holdings" | "activities" | "snapshots";
+
+function parseAccountDetailTab(value: string | null): AccountDetailTab {
+  return value === "activities" || value === "snapshots" ? value : "holdings";
+}
 
 // Map account types to icons for visual distinction
 const accountTypeIcons: Record<AccountType, Icon> = {
@@ -169,6 +173,13 @@ const AccountPage = () => {
   const baseCurrency = settings?.baseCurrency ?? "USD";
   const appTimezone = settings?.timezone?.trim() || undefined;
   const { id = "" } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const invalidSnapshotDate = searchParams.get("snapshotDate")?.trim() || undefined;
+  const invalidSnapshotId = searchParams.get("snapshotId")?.trim() || undefined;
+  const isInvalidSnapshotContext =
+    searchParams.get("healthContext") === "invalidSnapshot" &&
+    (!!invalidSnapshotId || !!invalidSnapshotDate);
+  const requestedAccountDetailTab = parseAccountDetailTab(searchParams.get("tab"));
   const navigate = useNavigate();
   const isMobile = useIsMobileViewport();
   const [dateRange, setDateRange] = useState<DateRange | undefined>(getInitialDateRange());
@@ -183,7 +194,6 @@ const AccountPage = () => {
   const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
   const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
   const [showBulkHoldingsForm, setShowBulkHoldingsForm] = useState(false);
-  const [accountDetailTab, setAccountDetailTab] = useState<AccountDetailTab>("holdings");
   const [accountActivitiesSorting, setAccountActivitiesSorting] = useState<SortingState>([
     { id: "date", desc: true },
   ]);
@@ -245,7 +255,6 @@ const AccountPage = () => {
 
   // Check if account has any holdings (including cash)
   const hasHoldings = useMemo(() => {
-    if (!holdings) return false;
     return holdings.length > 0;
   }, [holdings]);
 
@@ -254,7 +263,8 @@ const AccountPage = () => {
     return holdings.some((holding) => holding.holdingType !== HoldingType.CASH);
   }, [holdings]);
 
-  const shouldShowSnapshotHistory = isHoldingsMode && hasHoldings && !isHoldingsLoading;
+  const shouldShowSnapshotHistory =
+    (isHoldingsMode && hasHoldings && !isHoldingsLoading) || isInvalidSnapshotContext;
 
   const accountDetailTabs = useMemo(() => {
     if (!account) return [];
@@ -273,9 +283,49 @@ const AccountPage = () => {
     return tabs;
   }, [account, hasNonCashHoldings, isCashOnlyAccount, shouldShowSnapshotHistory, t]);
 
-  const activeAccountDetailTab = accountDetailTabs.some((tab) => tab.value === accountDetailTab)
-    ? accountDetailTab
-    : (accountDetailTabs[0]?.value ?? "activities");
+  // When the preferred tab isn't available (e.g. no "holdings" tab on a
+  // cash-only HOLDINGS-mode account), default to snapshots over activities:
+  // snapshots are the primary record for holdings-tracked accounts.
+  const activeAccountDetailTab = accountDetailTabs.some(
+    (tab) => tab.value === requestedAccountDetailTab,
+  )
+    ? requestedAccountDetailTab
+    : shouldShowSnapshotHistory
+      ? "snapshots"
+      : (accountDetailTabs[0]?.value ?? "activities");
+
+  const clearInvalidSnapshotContext = () => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("snapshotDate");
+        next.delete("snapshotId");
+        next.delete("healthContext");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const handleAccountDetailTabChange = (tab: AccountDetailTab) => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (tab === "holdings") {
+          next.delete("tab");
+        } else {
+          next.set("tab", tab);
+        }
+        if (tab !== "snapshots") {
+          next.delete("snapshotDate");
+          next.delete("snapshotId");
+          next.delete("healthContext");
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   const isAccountActivitiesTabActive = activeAccountDetailTab === "activities";
   const accountActivityAccountIds = useMemo(
@@ -321,7 +371,7 @@ const AccountPage = () => {
   // Extract snapshot dates for chart markers (used in HOLDINGS mode)
   const snapshotDates = useMemo(() => {
     if (!snapshots) return [];
-    return snapshots.map((s) => s.snapshotDate);
+    return snapshots.filter((snapshot) => snapshot.isDateValid).map((s) => s.snapshotDate);
   }, [snapshots]);
 
   // In TRANSACTIONS mode, fetch activity dates for markers (snapshot dates include
@@ -652,7 +702,7 @@ const AccountPage = () => {
             <AnimatedToggleGroup<AccountDetailTab>
               items={accountDetailTabs}
               value={activeAccountDetailTab}
-              onValueChange={setAccountDetailTab}
+              onValueChange={handleAccountDetailTabChange}
               size={isMobile ? "compact" : "default"}
               className="min-w-0"
             />
@@ -684,6 +734,10 @@ const AccountPage = () => {
         <AccountSnapshotHistory
           account={account}
           canEditSnapshots={canEditHoldingsDirectly}
+          highlightedSnapshotDate={invalidSnapshotDate}
+          highlightedSnapshotId={invalidSnapshotId}
+          invalidSnapshotContext={isInvalidSnapshotContext}
+          onInvalidSnapshotRemediated={clearInvalidSnapshotContext}
           onAddSnapshot={() => {
             setEditingSnapshotDate(null);
             setIsEditingHoldings(true);
@@ -1118,7 +1172,7 @@ const AccountPage = () => {
             </SheetHeader>
             <div className="flex-1 overflow-hidden px-6">
               <HoldingsEditMode
-                holdings={holdings ?? []}
+                holdings={holdings}
                 account={account}
                 isLoading={isHoldingsLoading}
                 onClose={() => {

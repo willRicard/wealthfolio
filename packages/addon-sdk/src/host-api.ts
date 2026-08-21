@@ -742,8 +742,10 @@ export interface ToastAPI {
  */
 export interface QueryAPI {
   /**
-   * Get the shared QueryClient instance from the main application
-   * @returns The shared QueryClient instance
+   * Get the QueryClient scoped to this addon sandbox. Its invalidate/refetch
+   * operations are mirrored to the host, but its cache is not shared with the
+   * main application or other addons.
+   * @returns The addon-scoped QueryClient instance
    */
   getClient(): unknown; // QueryClient from @tanstack/react-query
 

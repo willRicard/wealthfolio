@@ -1,8 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -636,14 +636,148 @@ fn archive_file_to_addon_file(file: AddonArchiveFile) -> AddonFile {
     }
 }
 
-fn archive_files_to_text_files(files: &[AddonArchiveFile]) -> Vec<AddonFile> {
+fn normalized_addon_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn is_brokered_addon_asset_path(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let lower_path = path.to_ascii_lowercase();
+    (path.starts_with("assets/") || path.starts_with("dist/assets/"))
+        && !lower_path.ends_with(".js")
+        && !lower_path.ends_with(".css")
+        && !lower_path.ends_with(".map")
+        && !lower_path.ends_with("/.gitkeep")
+        && !lower_path.ends_with("/.ds_store")
+}
+
+fn addon_package_root_from_main_path(file_name: &str, main_file: &str) -> Option<String> {
+    let file_name = file_name.replace('\\', "/");
+    let main_file = main_file.replace('\\', "/");
+    let main_file = main_file.trim_start_matches('/');
+    if main_file.is_empty() {
+        return None;
+    }
+    if file_name == main_file {
+        return Some(String::new());
+    }
+
+    file_name
+        .strip_suffix(&format!("/{main_file}"))
+        .map(str::to_string)
+}
+
+fn addon_package_relative_path(path: &str, package_root: &str) -> Option<String> {
+    let path = path.replace('\\', "/");
+    if package_root.is_empty() {
+        return Some(path);
+    }
+
+    path.strip_prefix(&format!("{package_root}/"))
+        .map(str::to_string)
+}
+
+fn addon_asset_id(path: &str, content: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut digest = Sha256::new();
+    digest.update(path.as_bytes());
+    digest.update([0]);
+    digest.update(content);
+    hex::encode(digest.finalize())
+}
+
+fn addon_asset_mime_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("avif") => "image/avif",
+        Some("bmp") => "image/bmp",
+        Some("gif") => "image/gif",
+        Some("ico") => "image/x-icon",
+        Some("jpeg" | "jpg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("svg") => "image/svg+xml",
+        Some("webp") => "image/webp",
+        Some("css") => "text/css",
+        Some("csv") => "text/csv",
+        Some("html") => "text/html",
+        Some("json") => "application/json",
+        Some("md") => "text/markdown",
+        Some("txt") => "text/plain",
+        Some("otf") => "font/otf",
+        Some("ttf") => "font/ttf",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("mp3") => "audio/mpeg",
+        Some("ogg") => "audio/ogg",
+        Some("wav") => "audio/wav",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("pdf") => "application/pdf",
+        Some("wasm") => "application/wasm",
+        Some("xml") => "application/xml",
+        _ => "application/octet-stream",
+    }
+}
+
+fn addon_asset_descriptor(path: &str, content: &[u8]) -> AddonAsset {
+    AddonAsset {
+        id: addon_asset_id(path, content),
+        path: path.to_string(),
+        mime_type: addon_asset_mime_type(Path::new(path)).to_string(),
+        size: content.len() as u64,
+    }
+}
+
+fn archive_addon_package_root(
+    files: &[AddonArchiveFile],
+    main_file: &str,
+) -> Result<String, String> {
+    let roots = files
+        .iter()
+        .filter(|file| file.is_main)
+        .filter_map(|file| addon_package_root_from_main_path(&file.name, main_file))
+        .collect::<Vec<_>>();
+    match roots.as_slice() {
+        [root] => Ok(root.clone()),
+        [] => Err("Main addon file not found".to_string()),
+        _ => Err("Multiple addon files match the declared main file".to_string()),
+    }
+}
+
+fn archive_addon_assets(files: &[AddonArchiveFile], package_root: &str) -> Vec<AddonAsset> {
     files
         .iter()
         .filter_map(|file| {
+            let path = addon_package_relative_path(&file.name, package_root)?;
+            is_brokered_addon_asset_path(&path)
+                .then(|| addon_asset_descriptor(&path, &file.content))
+        })
+        .collect()
+}
+
+fn archive_files_to_text_files(files: &[AddonArchiveFile], package_root: &str) -> Vec<AddonFile> {
+    files
+        .iter()
+        .filter_map(|file| {
+            let path = addon_package_relative_path(&file.name, package_root)?;
+            if is_brokered_addon_asset_path(&path) {
+                return None;
+            }
             String::from_utf8(file.content.clone())
                 .ok()
                 .map(|content| AddonFile {
-                    name: file.name.clone(),
+                    name: path,
                     content,
                     is_main: file.is_main,
                 })
@@ -763,9 +897,9 @@ fn extract_addon_zip_archive(zip_data: Vec<u8>) -> Result<ExtractedAddonArchive,
     };
 
     // Now set the is_main flag correctly based on the metadata.main path
-    let main_file = metadata.get_main()?;
+    let main_file = normalized_addon_path(&validated_addon_archive_path(metadata.get_main()?)?);
     for file in &mut files {
-        file.is_main = archive_path_matches_manifest_main(&file.name, main_file);
+        file.is_main = archive_path_matches_manifest_main(&file.name, &main_file);
     }
 
     // Verify that we found the main file
@@ -787,7 +921,8 @@ fn extract_addon_zip_archive(zip_data: Vec<u8>) -> Result<ExtractedAddonArchive,
         "Starting permission detection for extracted addon: {}",
         metadata.id
     );
-    let permission_files = archive_files_to_text_files(&files);
+    let package_root = archive_addon_package_root(&files, &main_file)?;
+    let permission_files = archive_files_to_text_files(&files, &package_root);
     log::debug!("Number of files to analyze: {}", permission_files.len());
     for file in &permission_files {
         log::debug!(
@@ -845,13 +980,27 @@ fn extract_addon_zip_archive(zip_data: Vec<u8>) -> Result<ExtractedAddonArchive,
 
 pub fn extract_addon_zip_internal(zip_data: Vec<u8>) -> Result<ExtractedAddon, String> {
     let extracted = extract_addon_zip_archive(zip_data)?;
+    let main_file = normalized_addon_path(&validated_addon_archive_path(
+        extracted.metadata.get_main()?,
+    )?);
+    let package_root = archive_addon_package_root(&extracted.files, &main_file)?;
+    let assets = archive_addon_assets(&extracted.files, &package_root);
     Ok(ExtractedAddon {
         metadata: extracted.metadata,
         files: extracted
             .files
             .into_iter()
-            .map(archive_file_to_addon_file)
+            .filter_map(|mut file| {
+                let path = addon_package_relative_path(&file.name, &package_root)?;
+                if is_brokered_addon_asset_path(&path) {
+                    return None;
+                }
+                file.is_main = path == main_file;
+                file.name = path;
+                Some(archive_file_to_addon_file(file))
+            })
             .collect(),
+        assets,
     })
 }
 
@@ -1251,6 +1400,10 @@ pub fn read_addon_files_recursive(
                 .map_err(|e| format!("Failed to get relative path: {}", e))?;
             let relative_path_str = relative_path.to_string_lossy().to_string();
 
+            if is_brokered_addon_asset_path(&relative_path_str) {
+                continue;
+            }
+
             if relative_path_str.ends_with(".map") {
                 log::debug!("Skipping addon source map '{}'", relative_path_str);
                 continue;
@@ -1286,6 +1439,191 @@ pub fn read_addon_files_recursive(
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct IndexedAddonAsset {
+    descriptor: AddonAsset,
+    file_path: PathBuf,
+}
+
+#[derive(Clone)]
+struct CachedAddonAssets {
+    package_dir: PathBuf,
+    index: Arc<Vec<IndexedAddonAsset>>,
+}
+
+fn collect_addon_asset_files(
+    current_dir: &Path,
+    base_dir: &Path,
+    assets: &mut Vec<IndexedAddonAsset>,
+    total_size: &mut u64,
+) -> Result<(), String> {
+    let entries = fs::read_dir(current_dir)
+        .map_err(|e| format!("Failed to read addon asset directory: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read addon asset entry: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to inspect addon asset entry: {}", e))?;
+        let file_path = entry.path();
+
+        if file_type.is_symlink() {
+            return Err("Addon asset directories cannot contain symbolic links".to_string());
+        }
+        if file_type.is_dir() {
+            collect_addon_asset_files(&file_path, base_dir, assets, total_size)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative_path = file_path
+            .strip_prefix(base_dir)
+            .map_err(|e| format!("Failed to resolve addon asset path: {}", e))?;
+        let logical_path = normalized_addon_path(relative_path);
+        if !is_brokered_addon_asset_path(&logical_path) {
+            continue;
+        }
+
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("Failed to read addon asset metadata: {}", e))?;
+        if metadata.len() > MAX_ADDON_ARCHIVE_FILE_SIZE {
+            return Err(format!(
+                "Addon asset is too large: {} bytes exceeds {} byte limit",
+                metadata.len(),
+                MAX_ADDON_ARCHIVE_FILE_SIZE
+            ));
+        }
+
+        let content =
+            fs::read(&file_path).map_err(|e| format!("Failed to read addon asset: {}", e))?;
+        if content.len() as u64 > MAX_ADDON_ARCHIVE_FILE_SIZE {
+            return Err(format!(
+                "Addon asset is too large: {} bytes exceeds {} byte limit",
+                content.len(),
+                MAX_ADDON_ARCHIVE_FILE_SIZE
+            ));
+        }
+
+        *total_size = total_size
+            .checked_add(content.len() as u64)
+            .ok_or_else(|| "Addon asset size overflowed".to_string())?;
+        if *total_size > MAX_ADDON_ARCHIVE_TOTAL_SIZE {
+            return Err(format!(
+                "Addon assets are too large: {} bytes exceeds {} byte limit",
+                total_size, MAX_ADDON_ARCHIVE_TOTAL_SIZE
+            ));
+        }
+        if assets.len() >= MAX_ADDON_ARCHIVE_ENTRIES {
+            return Err(format!(
+                "Addon has more than {} packaged assets",
+                MAX_ADDON_ARCHIVE_ENTRIES
+            ));
+        }
+
+        assets.push(IndexedAddonAsset {
+            descriptor: addon_asset_descriptor(&logical_path, &content),
+            file_path,
+        });
+    }
+
+    Ok(())
+}
+
+fn collect_installed_addon_package_roots(
+    current_dir: &Path,
+    addon_dir: &Path,
+    main_file: &str,
+    roots: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(current_dir).map_err(|e| {
+        format!(
+            "Failed to read addon directory while locating main file: {}",
+            e
+        )
+    })?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read addon directory entry: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to inspect addon directory entry: {}", e))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_installed_addon_package_roots(&path, addon_dir, main_file, roots)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative_path = path
+            .strip_prefix(addon_dir)
+            .map_err(|e| format!("Failed to resolve installed addon path: {}", e))?;
+        let logical_path = normalized_addon_path(relative_path);
+        let Some(package_root) = addon_package_root_from_main_path(&logical_path, main_file) else {
+            continue;
+        };
+        roots.push(if package_root.is_empty() {
+            addon_dir.to_path_buf()
+        } else {
+            addon_dir.join(package_root)
+        });
+    }
+
+    Ok(())
+}
+
+fn installed_addon_package_dir(addon_dir: &Path, main_file: &str) -> Result<PathBuf, String> {
+    let main_path = validated_addon_archive_path(main_file)?;
+    let normalized_main = normalized_addon_path(&main_path);
+
+    let mut roots = Vec::new();
+    collect_installed_addon_package_roots(addon_dir, addon_dir, &normalized_main, &mut roots)?;
+    roots.sort();
+    roots.dedup();
+    match roots.as_slice() {
+        [package_dir] => Ok(package_dir.clone()),
+        [] => Err("Main addon file not found".to_string()),
+        _ => Err("Multiple addon package roots contain the declared main file".to_string()),
+    }
+}
+
+fn index_addon_assets(addon_dir: &Path) -> Result<Vec<IndexedAddonAsset>, String> {
+    let mut assets = Vec::new();
+    let mut total_size = 0;
+
+    for asset_root in [
+        addon_dir.join("assets"),
+        addon_dir.join("dist").join("assets"),
+    ] {
+        if !asset_root.exists() {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&asset_root)
+            .map_err(|e| format!("Failed to inspect addon asset directory: {}", e))?;
+        if metadata.file_type().is_symlink() {
+            return Err("Addon asset directory cannot be a symbolic link".to_string());
+        }
+        if !metadata.is_dir() {
+            return Err(format!(
+                "Addon asset root '{}' is not a directory",
+                normalized_addon_path(asset_root.strip_prefix(addon_dir).unwrap_or(&asset_root))
+            ));
+        }
+        collect_addon_asset_files(&asset_root, addon_dir, &mut assets, &mut total_size)?;
+    }
+
+    assets.sort_by(|left, right| left.descriptor.path.cmp(&right.descriptor.path));
+    Ok(assets)
 }
 
 /// Check for addon updates from the API server
@@ -1889,6 +2227,8 @@ pub struct AddonService {
     addons_root: PathBuf,
     rating_instance_id: String,
     storage_repo: Arc<dyn AddonStorageRepositoryTrait>,
+    package_access: RwLock<()>,
+    asset_indexes: Mutex<HashMap<PathBuf, CachedAddonAssets>>,
 }
 
 impl AddonService {
@@ -1901,7 +2241,81 @@ impl AddonService {
             addons_root: addons_root.into(),
             rating_instance_id: rating_instance_id.into(),
             storage_repo,
+            package_access: RwLock::new(()),
+            asset_indexes: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn package_read_guard(
+        &self,
+        addon_id: &str,
+    ) -> Result<(RwLockReadGuard<'_, ()>, PathBuf), String> {
+        let read_guard = self
+            .package_access
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Ok(addon_dir) = self.existing_addon_dir_without_recovery(addon_id) {
+            return Ok((read_guard, addon_dir));
+        }
+        drop(read_guard);
+
+        if validate_addon_id(addon_id).is_ok() {
+            let _write_guard = self
+                .package_access
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            self.recover_incomplete_replacement_for_addon(addon_id)?;
+        }
+
+        let read_guard = self
+            .package_access
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let addon_dir = self.existing_addon_dir_without_recovery(addon_id)?;
+        Ok((read_guard, addon_dir))
+    }
+
+    fn refresh_addon_asset_index(
+        &self,
+        addon_dir: &Path,
+        package_dir: &Path,
+    ) -> Result<CachedAddonAssets, String> {
+        let index = Arc::new(index_addon_assets(package_dir)?);
+        let cached = CachedAddonAssets {
+            package_dir: package_dir.to_path_buf(),
+            index,
+        };
+        self.asset_indexes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(addon_dir.to_path_buf(), cached.clone());
+        Ok(cached)
+    }
+
+    fn addon_assets_for_request(
+        &self,
+        addon_dir: &Path,
+        main_file: &str,
+    ) -> Result<CachedAddonAssets, String> {
+        if let Some(cached) = self
+            .asset_indexes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(addon_dir)
+            .cloned()
+        {
+            return Ok(cached);
+        }
+
+        let package_dir = installed_addon_package_dir(addon_dir, main_file)?;
+        self.refresh_addon_asset_index(addon_dir, &package_dir)
+    }
+
+    fn invalidate_addon_asset_indexes(&self, addon_dir: &Path) {
+        self.asset_indexes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(addon_dir);
     }
 
     fn validate_storage_key(key: &str) -> Result<(), String> {
@@ -1979,9 +2393,8 @@ impl AddonService {
         Err("Addon not found".to_string())
     }
 
-    fn existing_addon_dir(&self, addon_id: &str) -> Result<PathBuf, String> {
+    fn existing_addon_dir_without_recovery(&self, addon_id: &str) -> Result<PathBuf, String> {
         if validate_addon_id(addon_id).is_ok() {
-            self.recover_incomplete_replacement_for_addon(addon_id)?;
             let addon_dir = get_addon_path(&self.addons_root, addon_id)?;
             if addon_dir.exists() {
                 return Ok(addon_dir);
@@ -1989,6 +2402,13 @@ impl AddonService {
         }
 
         self.find_installed_addon_dir_by_manifest_id(addon_id)
+    }
+
+    fn existing_addon_dir(&self, addon_id: &str) -> Result<PathBuf, String> {
+        if validate_addon_id(addon_id).is_ok() {
+            self.recover_incomplete_replacement_for_addon(addon_id)?;
+        }
+        self.existing_addon_dir_without_recovery(addon_id)
     }
 
     fn write_addon_archive_files(
@@ -2145,6 +2565,10 @@ impl AddonService {
         files: &[AddonArchiveFile],
         metadata: &AddonManifest,
     ) -> Result<(), String> {
+        let _package_guard = self
+            .package_access
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let addon_dir = get_addon_path(&self.addons_root, addon_id)?;
         let addons_dir = ensure_addons_directory(&self.addons_root)?;
         let nonce = uuid::Uuid::new_v4();
@@ -2180,6 +2604,7 @@ impl AddonService {
                 if had_existing_addon {
                     let _ = fs::remove_dir_all(&backup_dir);
                 }
+                self.invalidate_addon_asset_indexes(&addon_dir);
                 Ok(())
             }
             Err(err) => {
@@ -2193,7 +2618,7 @@ impl AddonService {
     }
 
     fn enabled_manifest_for_addon(&self, addon_id: &str) -> Result<AddonManifest, String> {
-        let addon_dir = self.existing_addon_dir(addon_id)?;
+        let (_package_guard, addon_dir) = self.package_read_guard(addon_id)?;
         let manifest = self.read_manifest_or_error(&addon_dir)?;
         if !manifest.is_enabled() {
             return Err("Addon is disabled".to_string());
@@ -2465,11 +2890,18 @@ impl AddonServiceTrait for AddonService {
     }
 
     async fn uninstall_addon(&self, addon_id: &str) -> Result<(), String> {
-        let addon_dir = self.existing_addon_dir(addon_id)?;
-        if !addon_dir.exists() {
-            return Err("Addon not found".to_string());
+        {
+            let _package_guard = self
+                .package_access
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let addon_dir = self.existing_addon_dir(addon_id)?;
+            if !addon_dir.exists() {
+                return Err("Addon not found".to_string());
+            }
+            fs::remove_dir_all(&addon_dir).map_err(|e| format!("Failed to remove addon: {}", e))?;
+            self.invalidate_addon_asset_indexes(&addon_dir);
         }
-        fs::remove_dir_all(&addon_dir).map_err(|e| format!("Failed to remove addon: {}", e))?;
         if let Err(error) = self.clear_addon_storage(addon_id).await {
             log::warn!("Failed to remove storage for addon '{addon_id}': {error}");
         }
@@ -2477,6 +2909,10 @@ impl AddonServiceTrait for AddonService {
     }
 
     fn list_installed_addons(&self) -> Result<Vec<InstalledAddon>, String> {
+        let _package_guard = self
+            .package_access
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.recover_incomplete_replacements()?;
         let addons_dir = ensure_addons_directory(&self.addons_root)?;
         let mut installed = Vec::new();
@@ -2516,19 +2952,20 @@ impl AddonServiceTrait for AddonService {
     }
 
     fn load_addon_for_runtime(&self, addon_id: &str) -> Result<ExtractedAddon, String> {
-        let addon_dir = self.existing_addon_dir(addon_id)?;
+        let (_package_guard, addon_dir) = self.package_read_guard(addon_id)?;
         let manifest = self.read_manifest_or_error(&addon_dir)?;
 
         if !manifest.is_enabled() {
             return Err("Addon is disabled".to_string());
         }
 
+        let main_file = normalized_addon_path(&validated_addon_archive_path(manifest.get_main()?)?);
+        let package_dir = installed_addon_package_dir(&addon_dir, &main_file)?;
         let mut files = Vec::new();
-        read_addon_files_recursive(&addon_dir, &addon_dir, &mut files)?;
+        read_addon_files_recursive(&package_dir, &package_dir, &mut files)?;
 
-        let main_file = manifest.get_main()?;
         for f in &mut files {
-            f.is_main = archive_path_matches_manifest_main(&f.name, main_file);
+            f.is_main = f.name.replace('\\', "/") == main_file;
         }
 
         if !files.iter().any(|f| f.is_main) {
@@ -2542,7 +2979,67 @@ impl AddonServiceTrait for AddonService {
             detected_permissions,
         ));
 
-        Ok(ExtractedAddon { metadata, files })
+        let assets = self
+            .refresh_addon_asset_index(&addon_dir, &package_dir)?
+            .index
+            .iter()
+            .map(|asset| asset.descriptor.clone())
+            .collect();
+
+        Ok(ExtractedAddon {
+            metadata,
+            files,
+            assets,
+        })
+    }
+
+    fn load_addon_asset(
+        &self,
+        addon_id: &str,
+        asset_id: &str,
+    ) -> Result<AddonAssetContent, String> {
+        if asset_id.len() != 64
+            || !asset_id
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        {
+            return Err("Invalid addon asset id".to_string());
+        }
+        let (_package_guard, addon_dir) = self.package_read_guard(addon_id)?;
+        let manifest = self.read_manifest_or_error(&addon_dir)?;
+        if !manifest.is_enabled() {
+            return Err("Addon is disabled".to_string());
+        }
+
+        let cached_assets = self.addon_assets_for_request(&addon_dir, manifest.get_main()?)?;
+        let indexed_asset = cached_assets
+            .index
+            .iter()
+            .find(|asset| asset.descriptor.id == asset_id)
+            .ok_or_else(|| "Addon asset not found".to_string())?;
+        let canonical_package_dir = fs::canonicalize(&cached_assets.package_dir)
+            .map_err(|e| format!("Failed to resolve addon package directory: {}", e))?;
+        let canonical_asset_path = fs::canonicalize(&indexed_asset.file_path)
+            .map_err(|e| format!("Failed to resolve addon asset: {}", e))?;
+        if !canonical_asset_path.starts_with(&canonical_package_dir) {
+            return Err("Addon asset resolves outside its package directory".to_string());
+        }
+        let bytes = fs::read(&canonical_asset_path)
+            .map_err(|e| format!("Failed to read addon asset: {}", e))?;
+        if bytes.len() as u64 > MAX_ADDON_ARCHIVE_FILE_SIZE {
+            return Err(format!(
+                "Addon asset exceeds {} byte limit",
+                MAX_ADDON_ARCHIVE_FILE_SIZE
+            ));
+        }
+        if addon_asset_id(&indexed_asset.descriptor.path, &bytes) != indexed_asset.descriptor.id {
+            return Err("Addon asset changed after its package was indexed".to_string());
+        }
+
+        Ok(AddonAssetContent {
+            bytes,
+            mime_type: indexed_asset.descriptor.mime_type.clone(),
+        })
     }
 
     fn get_enabled_addons_on_startup(&self) -> Result<Vec<ExtractedAddon>, String> {
@@ -2560,59 +3057,68 @@ impl AddonServiceTrait for AddonService {
     }
 
     async fn check_addon_update(&self, addon_id: &str) -> Result<AddonUpdateCheckResult, String> {
-        let addon_dir = self.existing_addon_dir(addon_id)?;
-        let manifest = self.read_manifest_or_error(&addon_dir)?;
-        check_addon_update_from_api(addon_id, &manifest.version).await
+        let version = {
+            let (_package_guard, addon_dir) = self.package_read_guard(addon_id)?;
+            self.read_manifest_or_error(&addon_dir)?.version
+        };
+        check_addon_update_from_api(addon_id, &version).await
     }
 
     async fn check_all_addon_updates(&self) -> Result<Vec<AddonUpdateCheckResult>, String> {
-        self.recover_incomplete_replacements()?;
-        let addons_dir = ensure_addons_directory(&self.addons_root)?;
-        let mut results = Vec::new();
-
-        if addons_dir.exists() {
-            for entry in fs::read_dir(&addons_dir)
-                .map_err(|e| format!("Failed to read addons directory: {}", e))?
-            {
-                let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-                let dir = entry.path();
-                if !dir.is_dir() {
-                    continue;
-                }
-                if Self::is_hidden_addon_dir(&dir) {
-                    continue;
-                }
-                let manifest = match self.read_manifest_if_exists(&dir) {
-                    Ok(Some(m)) => m,
-                    Ok(None) => continue,
-                    Err(err) => {
-                        log::error!("Skipping invalid addon manifest in {:?}: {}", dir, err);
+        let manifests = {
+            let _package_guard = self
+                .package_access
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            self.recover_incomplete_replacements()?;
+            let addons_dir = ensure_addons_directory(&self.addons_root)?;
+            let mut manifests = Vec::new();
+            if addons_dir.exists() {
+                for entry in fs::read_dir(&addons_dir)
+                    .map_err(|e| format!("Failed to read addons directory: {}", e))?
+                {
+                    let entry =
+                        entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+                    let dir = entry.path();
+                    if !dir.is_dir() || Self::is_hidden_addon_dir(&dir) {
                         continue;
                     }
-                };
-                let addon_id = manifest.id.clone();
-                match check_addon_update_from_api(&addon_id, &manifest.version).await {
-                    Ok(result) => results.push(result),
-                    Err(err) => {
-                        log::error!("Failed to check update for addon {}: {}", addon_id, err);
-                        results.push(AddonUpdateCheckResult {
-                            addon_id,
-                            update_info: AddonUpdateInfo {
-                                current_version: manifest.version,
-                                latest_version: "unknown".to_string(),
-                                update_available: false,
-                                download_url: None,
-                                sha256: None,
-                                release_notes: None,
-                                release_date: None,
-                                changelog_url: None,
-                                is_critical: None,
-                                has_breaking_changes: None,
-                                min_wealthfolio_version: None,
-                            },
-                            error: Some(err),
-                        });
+                    match self.read_manifest_if_exists(&dir) {
+                        Ok(Some(manifest)) => manifests.push(manifest),
+                        Ok(None) => continue,
+                        Err(err) => {
+                            log::error!("Skipping invalid addon manifest in {:?}: {}", dir, err);
+                        }
                     }
+                }
+            }
+            manifests
+        };
+
+        let mut results = Vec::new();
+        for manifest in manifests {
+            let addon_id = manifest.id.clone();
+            match check_addon_update_from_api(&addon_id, &manifest.version).await {
+                Ok(result) => results.push(result),
+                Err(err) => {
+                    log::error!("Failed to check update for addon {}: {}", addon_id, err);
+                    results.push(AddonUpdateCheckResult {
+                        addon_id,
+                        update_info: AddonUpdateInfo {
+                            current_version: manifest.version,
+                            latest_version: "unknown".to_string(),
+                            update_available: false,
+                            download_url: None,
+                            sha256: None,
+                            release_notes: None,
+                            release_date: None,
+                            changelog_url: None,
+                            is_critical: None,
+                            has_breaking_changes: None,
+                            min_wealthfolio_version: None,
+                        },
+                        error: Some(err),
+                    });
                 }
             }
         }
@@ -2620,8 +3126,10 @@ impl AddonServiceTrait for AddonService {
     }
 
     async fn update_addon_from_store(&self, addon_id: &str) -> Result<AddonManifest, String> {
-        let addon_dir = self.existing_addon_dir(addon_id)?;
-        let previous_manifest = self.read_manifest_if_exists(&addon_dir)?;
+        let previous_manifest = {
+            let (_package_guard, addon_dir) = self.package_read_guard(addon_id)?;
+            self.read_manifest_if_exists(&addon_dir)?
+        };
         let was_enabled = previous_manifest
             .as_ref()
             .and_then(|m| m.enabled)
@@ -2680,6 +3188,10 @@ impl AddonServiceTrait for AddonService {
         addon_id: &str,
         approved_network_hosts: Vec<String>,
     ) -> Result<AddonManifest, String> {
+        let _package_guard = self
+            .package_access
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let addon_dir = self.existing_addon_dir(addon_id)?;
         let manifest = self.read_manifest_or_error(&addon_dir)?;
         let manifest = Self::apply_network_approvals(manifest, &approved_network_hosts);
@@ -2688,6 +3200,10 @@ impl AddonServiceTrait for AddonService {
     }
 
     fn toggle_addon(&self, addon_id: &str, enabled: bool) -> Result<(), String> {
+        let _package_guard = self
+            .package_access
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let addon_dir = self.existing_addon_dir(addon_id)?;
         let mut manifest = self.read_manifest_or_error(&addon_dir)?;
         if enabled {

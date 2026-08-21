@@ -63,8 +63,10 @@ export interface DraftActivity {
   comment?: string;
   subtype?: string;
   fxRate?: string | null;
-  /** Whether this is an external transfer (for TRANSFER_IN/TRANSFER_OUT) */
+  /** Whether a transfer or credit crosses the tracked-account boundary. */
   isExternal?: boolean;
+  /** Draft-only provenance used to safely recompute an inferred credit boundary. */
+  boundaryInference?: "expense-reversal";
 
   isin?: string;
 

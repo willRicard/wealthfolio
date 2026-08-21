@@ -23,6 +23,7 @@ import {
 } from "@/lib/query-invalidation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -31,12 +32,10 @@ const TOAST_IDS = {
   marketSyncError: "market-sync-error",
   portfolioUpdateStart: "portfolio-update-start",
   portfolioUpdateError: "portfolio-update-error",
+  portfolioInvalidSnapshotError: "portfolio-invalid-snapshot-error",
 
   brokerSyncStart: "broker-sync-start",
 } as const;
-
-const BROKER_SYNC_FAILURE_DESCRIPTION =
-  "We couldn't sync your broker data. Please try again later.";
 
 const POST_LOGIN_REQUIRED_LISTENERS = new Set(["broker-sync-complete", "broker-sync-error"]);
 
@@ -55,6 +54,7 @@ function getSyncSkips(payload?: MarketSyncCompletePayload | null): [string, stri
 }
 
 const useGlobalEventListener = () => {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [areListenersReady, setAreListenersReady] = useState(false);
@@ -68,6 +68,7 @@ const useGlobalEventListener = () => {
   const syncContextRef = useRef(syncContext);
   const queryClientRef = useRef(queryClient);
   const navigateRef = useRef(navigate);
+  const translationRef = useRef(t);
 
   // Keep refs up to date
   useEffect(() => {
@@ -75,6 +76,7 @@ const useGlobalEventListener = () => {
     syncContextRef.current = syncContext;
     queryClientRef.current = queryClient;
     navigateRef.current = navigate;
+    translationRef.current = t;
   });
 
   useEffect(() => {
@@ -86,7 +88,7 @@ const useGlobalEventListener = () => {
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setMarketSyncing();
       } else {
-        toast.loading("Syncing market data...", {
+        toast.loading(translationRef.current("common:globalEvents.syncingMarket"), {
           id: TOAST_IDS.marketSyncStart,
           duration: 3000,
         });
@@ -106,11 +108,11 @@ const useGlobalEventListener = () => {
       // Show error toast on both mobile and desktop for failed syncs
       if (failed_syncs && failed_syncs.length > 0) {
         const count = failed_syncs.length;
-        toast.error(`Price update failed for ${count} asset${count === 1 ? "" : "s"}`, {
+        toast.error(translationRef.current("common:globalEvents.priceUpdateFailed", { count }), {
           id: TOAST_IDS.marketSyncError,
           duration: 10000,
           action: {
-            label: "View",
+            label: translationRef.current("common:globalEvents.view"),
             onClick: () => navigateRef.current("/health"),
           },
         });
@@ -119,12 +121,12 @@ const useGlobalEventListener = () => {
       if (event.payload?.show_skipped_reasons && skipped_reasons.length > 0) {
         const count = skipped_reasons.length;
         const reasons = [...new Set(skipped_reasons.map(([, reason]) => reason))];
-        toast.warning(`Price update skipped for ${count} asset${count === 1 ? "" : "s"}`, {
+        toast.warning(translationRef.current("common:globalEvents.priceUpdateSkipped", { count }), {
           id: "market-sync-skipped",
           description: reasons.slice(0, 2).join("; "),
           duration: 10000,
           action: {
-            label: "View",
+            label: translationRef.current("common:globalEvents.view"),
             onClick: () => navigateRef.current("/health"),
           },
         });
@@ -132,15 +134,17 @@ const useGlobalEventListener = () => {
     };
 
     const handleMarketSyncError = (event: { payload: string }) => {
-      const errorMsg = event.payload || "Unknown error";
+      const errorMsg = event.payload || translationRef.current("common:globalEvents.unknownError");
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setIdle();
       } else {
         toast.dismiss(TOAST_IDS.marketSyncStart);
       }
-      toast.error("Market Data Sync Failed", {
+      toast.error(translationRef.current("common:globalEvents.marketSyncFailed"), {
         id: TOAST_IDS.marketSyncError,
-        description: `${errorMsg}. Please try again later.`,
+        description: translationRef.current("common:globalEvents.errorTryAgainLater", {
+          error: errorMsg.replace(/[.\s]+$/u, ""),
+        }),
         duration: 10000,
       });
       logger.error("Market sync error: " + errorMsg);
@@ -150,26 +154,70 @@ const useGlobalEventListener = () => {
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setPortfolioCalculating();
       } else {
-        toast.loading("Calculating portfolio performance...", {
-          id: TOAST_IDS.portfolioUpdateStart,
-          duration: 2000,
-        });
+        toast.loading(
+          translationRef.current("common:globalEvents.calculatingPortfolioPerformance"),
+          {
+            id: TOAST_IDS.portfolioUpdateStart,
+            duration: 2000,
+          },
+        );
       }
     };
 
-    const handlePortfolioUpdateError = (error: string) => {
+    const handlePortfolioUpdateError = (error: unknown) => {
+      const errorMessage =
+        typeof error === "string"
+          ? error
+          : error && typeof error === "object" && "message" in error
+            ? String(error.message)
+            : translationRef.current("common:globalEvents.unknownPortfolioUpdateError");
+      const errorCode =
+        error && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+      const invalidSnapshotDate =
+        errorCode === "INVALID_SNAPSHOT_DATE" || errorMessage.includes("INVALID_SNAPSHOT_DATE");
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setIdle();
       } else {
         toast.dismiss(TOAST_IDS.portfolioUpdateStart);
       }
-      toast.error("Portfolio Update Failed", {
-        id: TOAST_IDS.portfolioUpdateError,
-        description:
-          "There was an error updating your portfolio. Please try again or contact support if the issue persists.",
-        duration: 5000,
-      });
-      logger.error("Portfolio Update Error: " + error);
+      toast.error(
+        invalidSnapshotDate
+          ? translationRef.current("account:snapshot.invalid_date_update_failed")
+          : translationRef.current("common:globalEvents.portfolioUpdateFailed"),
+        {
+          id: invalidSnapshotDate
+            ? TOAST_IDS.portfolioInvalidSnapshotError
+            : TOAST_IDS.portfolioUpdateError,
+          description: invalidSnapshotDate
+            ? translationRef.current("account:snapshot.invalid_date_update_desc")
+            : translationRef.current("common:globalEvents.portfolioUpdateFailedDescription"),
+          action: invalidSnapshotDate
+            ? {
+                label: translationRef.current("account:snapshot.review_health"),
+                onClick: () => navigateRef.current("/health"),
+              }
+            : undefined,
+          style: invalidSnapshotDate
+            ? {
+                display: "grid",
+                gridTemplateColumns: "16px minmax(0, 1fr)",
+                alignItems: "start",
+                columnGap: "12px",
+                rowGap: "12px",
+              }
+            : undefined,
+          actionButtonStyle: invalidSnapshotDate
+            ? {
+                gridColumn: 2,
+                gridRow: 2,
+                margin: 0,
+                marginLeft: "auto",
+              }
+            : undefined,
+          duration: invalidSnapshotDate ? 10000 : 5000,
+        },
+      );
+      logger.error("Portfolio Update Error: " + errorMessage);
     };
 
     const handlePortfolioUpdateComplete = () => {
@@ -185,8 +233,8 @@ const useGlobalEventListener = () => {
 
     const handleDatabaseRestored = () => {
       queryClientRef.current.invalidateQueries();
-      toast.success("Database restored successfully", {
-        description: "Please restart the application to ensure all data is properly refreshed.",
+      toast.success(translationRef.current("common:globalEvents.databaseRestored"), {
+        description: translationRef.current("common:globalEvents.databaseRestoredDescription"),
       });
     };
 
@@ -221,7 +269,7 @@ const useGlobalEventListener = () => {
       const { success, message, accountsSynced, activitiesSynced, holdingsSynced, newAccounts } =
         event.payload || {
           success: false,
-          message: "Unknown error",
+          message: translationRef.current("common:globalEvents.unknownError"),
         };
 
       // Dismiss the loading toast
@@ -233,10 +281,12 @@ const useGlobalEventListener = () => {
       if (success) {
         // Check if there are new accounts that need configuration
         if (newAccounts && newAccounts.length > 0) {
-          toast.info("New accounts found", {
-            description: `${newAccounts.length} new account(s) need to be configured`,
+          toast.info(translationRef.current("common:globalEvents.newAccountsFound"), {
+            description: translationRef.current("common:globalEvents.newAccountsDescription", {
+              count: newAccounts.length,
+            }),
             action: {
-              label: "Review",
+              label: translationRef.current("common:globalEvents.review"),
               onClick: () => {
                 navigateRef.current("/settings/accounts");
               },
@@ -264,24 +314,51 @@ const useGlobalEventListener = () => {
           let description: string;
           if (hasChanges) {
             const parts: string[] = [];
-            if (accountsCreated > 0) parts.push(`${accountsCreated} new accounts`);
-            if (accountsUpdated > 0) parts.push(`${accountsUpdated} accounts updated`);
-            if (activities > 0) parts.push(`${activities} activities`);
-            if (positions > 0) parts.push(`${positions} positions (${holdingsAccounts} accounts)`);
-            if (totalNewAssets > 0) parts.push(`${totalNewAssets} new assets`);
+            if (accountsCreated > 0) {
+              parts.push(
+                translationRef.current("common:globalEvents.newAccounts", {
+                  count: accountsCreated,
+                }),
+              );
+            }
+            if (accountsUpdated > 0) {
+              parts.push(
+                translationRef.current("common:globalEvents.accountsUpdated", {
+                  count: accountsUpdated,
+                }),
+              );
+            }
+            if (activities > 0) {
+              parts.push(
+                translationRef.current("common:globalEvents.activities", { count: activities }),
+              );
+            }
+            if (positions > 0) {
+              parts.push(
+                translationRef.current("common:globalEvents.positions", {
+                  count: positions,
+                  accounts: holdingsAccounts,
+                }),
+              );
+            }
+            if (totalNewAssets > 0) {
+              parts.push(
+                translationRef.current("common:globalEvents.newAssets", { count: totalNewAssets }),
+              );
+            }
             description = parts.join(" · ");
           } else {
-            description = "Everything is up to date";
+            description = translationRef.current("common:globalEvents.everythingUpToDate");
           }
 
-          toast.success("Broker Sync Complete", {
+          toast.success(translationRef.current("common:globalEvents.brokerSyncComplete"), {
             description,
             duration: 5000,
           });
         }
       } else {
-        toast.error("Broker Sync Failed", {
-          description: BROKER_SYNC_FAILURE_DESCRIPTION,
+        toast.error(translationRef.current("common:globalEvents.brokerSyncFailed"), {
+          description: translationRef.current("common:globalEvents.brokerSyncFailedDescription"),
           duration: 10000,
         });
         logger.error("Broker sync failed: " + message);
@@ -289,11 +366,13 @@ const useGlobalEventListener = () => {
     };
 
     const handleBrokerSyncError = (event: { payload: { error: string } }) => {
-      const { error } = event.payload || { error: "Unknown error" };
+      const { error } = event.payload || {
+        error: translationRef.current("common:globalEvents.unknownError"),
+      };
       // Dismiss the loading toast
       toast.dismiss(TOAST_IDS.brokerSyncStart);
-      toast.error("Broker Sync Failed", {
-        description: BROKER_SYNC_FAILURE_DESCRIPTION,
+      toast.error(translationRef.current("common:globalEvents.brokerSyncFailed"), {
+        description: translationRef.current("common:globalEvents.brokerSyncFailedDescription"),
         duration: 10000,
       });
       logger.error("Broker sync error: " + error);
@@ -306,7 +385,7 @@ const useGlobalEventListener = () => {
         [
           "portfolio-update-error",
           listenPortfolioUpdateError((event) => {
-            handlePortfolioUpdateError(event.payload as string);
+            handlePortfolioUpdateError(event.payload);
           }),
         ],
         ["market-sync-start", listenMarketSyncStart(handleMarketSyncStart)],

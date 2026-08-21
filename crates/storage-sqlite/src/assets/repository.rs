@@ -281,6 +281,23 @@ impl AssetRepositoryTrait for AssetRepository {
             .await
     }
 
+    async fn update_metadata(&self, asset_id: &str, metadata: serde_json::Value) -> Result<Asset> {
+        let asset_id_owned = asset_id.to_string();
+        let metadata_json = serde_json::to_string(&metadata)?;
+
+        self.writer
+            .exec_tx(move |tx| -> Result<Asset> {
+                let result_db = diesel::update(assets::table.filter(assets::id.eq(asset_id_owned)))
+                    .set(assets::metadata.eq(metadata_json))
+                    .get_result::<AssetDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+                let payload_db = result_db.clone();
+                tx.update(&payload_db)?;
+                Ok(result_db.into())
+            })
+            .await
+    }
+
     /// Updates the quote mode of an asset (MARKET, MANUAL)
     async fn update_quote_mode(&self, asset_id: &str, quote_mode: &str) -> Result<Asset> {
         let asset_id_owned = asset_id.to_string();
@@ -643,6 +660,42 @@ mod tests {
             .select(assets::is_active)
             .first(conn)
             .expect("asset active flag")
+    }
+
+    #[tokio::test]
+    async fn metadata_update_preserves_asset_identity() {
+        let (pool, writer) = setup_db();
+        let repo = AssetRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_asset(&mut conn, "custom-display");
+        diesel::update(assets::table.filter(assets::id.eq("custom-display")))
+            .set((
+                assets::name.eq("User name"),
+                assets::display_code.eq("MY-CODE"),
+                assets::instrument_symbol.eq("BROKER-SYMBOL"),
+            ))
+            .execute(&mut conn)
+            .expect("customize asset");
+        drop(conn);
+
+        let updated = repo
+            .update_metadata(
+                "custom-display",
+                serde_json::json!({ "contractMultiplier": "50" }),
+            )
+            .await
+            .expect("update metadata");
+
+        assert_eq!(updated.name.as_deref(), Some("User name"));
+        assert_eq!(updated.display_code.as_deref(), Some("MY-CODE"));
+        assert_eq!(updated.instrument_symbol.as_deref(), Some("BROKER-SYMBOL"));
+        assert_eq!(
+            updated
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("contractMultiplier")),
+            Some(&serde_json::json!("50"))
+        );
     }
 
     #[tokio::test]

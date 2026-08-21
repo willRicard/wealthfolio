@@ -505,13 +505,21 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     }
     case "get_holdings":
     case "get_holdings_list": {
-      const p = payload as { filter: { type: string; accountId?: string } };
+      const p = payload as {
+        filter: { type: string; accountId?: string };
+        includeClosed?: boolean;
+      };
       if (p.filter?.type === "account" && p.filter.accountId) {
         const path = command === "get_holdings_list" ? "/holdings/list" : "/holdings";
-        url = `${API_PREFIX}${path}?accountId=${encodeURIComponent(p.filter.accountId)}`;
+        const params = new URLSearchParams({ accountId: p.filter.accountId });
+        if (p.includeClosed) params.set("includeClosed", "true");
+        url = `${API_PREFIX}${path}?${params.toString()}`;
         method = "GET";
       } else {
-        body = JSON.stringify({ filter: p.filter });
+        body = JSON.stringify({
+          filter: p.filter,
+          ...(p.includeClosed ? { includeClosed: true } : {}),
+        });
       }
       break;
     }
@@ -636,10 +644,15 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "delete_snapshot": {
-      const { accountId, date } = payload as { accountId: string; date: string };
+      const { accountId, date, snapshotId } = payload as {
+        accountId: string;
+        date: string;
+        snapshotId?: string;
+      };
       const params = new URLSearchParams();
       params.set("accountId", accountId);
       params.set("date", date);
+      if (snapshotId) params.set("snapshotId", snapshotId);
       url += `?${params.toString()}`;
       break;
     }

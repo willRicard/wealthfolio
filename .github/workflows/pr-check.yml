@@ -50,6 +50,14 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+      - name: Install addon sandbox browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      - name: Run addon sandbox browser tests
+        run: pnpm test:e2e:addon-sandbox
+        env:
+          WF_ADDON_SANDBOX_SKIP_BUILD: "true"
+
   rust-check:
     name: Rust Check
     runs-on: ubuntu-latest

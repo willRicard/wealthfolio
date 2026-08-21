@@ -22,14 +22,47 @@ pub enum SnapshotSource {
     BrokerImported,
     /// Imported from CSV file
     CsvImport,
-    /// Legacy synthetic backfill snapshot.
-    Synthetic,
+}
+
+/// Lightweight snapshot metadata used by listing and remediation flows.
+///
+/// `snapshot_date` and `source` intentionally remain raw strings so a corrupt
+/// stored row can still be inspected and deleted without deserializing it as a
+/// valid portfolio snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotMetadata {
+    pub id: String,
+    pub account_id: String,
+    pub snapshot_date: String,
+    pub source: String,
+    pub position_count: usize,
+    pub cash_currency_count: usize,
+    pub cash_total_account_currency: String,
+}
+
+impl From<&AccountStateSnapshot> for SnapshotMetadata {
+    fn from(snapshot: &AccountStateSnapshot) -> Self {
+        Self {
+            id: snapshot.id.clone(),
+            account_id: snapshot.account_id.clone(),
+            snapshot_date: snapshot.snapshot_date.format("%Y-%m-%d").to_string(),
+            source: snapshot.source.as_str().to_string(),
+            position_count: snapshot.positions.len(),
+            cash_currency_count: snapshot.cash_balances.len(),
+            cash_total_account_currency: snapshot.cash_total_account_currency.to_string(),
+        }
+    }
 }
 
 impl SnapshotSource {
-    /// Returns true if this is a non-calculated source (manual, broker, csv, or synthetic).
-    pub fn is_non_calculated(&self) -> bool {
-        !matches!(self, SnapshotSource::Calculated)
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SnapshotSource::Calculated => "CALCULATED",
+            SnapshotSource::ManualEntry => "MANUAL_ENTRY",
+            SnapshotSource::BrokerImported => "BROKER_IMPORTED",
+            SnapshotSource::CsvImport => "CSV_IMPORT",
+        }
     }
 }
 
@@ -168,7 +201,8 @@ impl AccountStateSnapshot {
     /// Returns true if the holdings are effectively the same, ignoring metadata
     /// like id, snapshot_date, calculated_at, source, etc.
     ///
-    /// For positions, compares: asset_id, quantity, average_cost, total_cost_basis.
+    /// For positions, compares: asset_id, quantity, average_cost, total_cost_basis,
+    /// currency, and contract_multiplier.
     /// Ignores: lots, timestamps, inception_date.
     pub fn is_content_equal(&self, other: &Self) -> bool {
         // Compare cash balances
@@ -204,5 +238,6 @@ impl AccountStateSnapshot {
             && a.average_cost == b.average_cost
             && a.total_cost_basis == b.total_cost_basis
             && a.currency == b.currency
+            && a.contract_multiplier == b.contract_multiplier
     }
 }

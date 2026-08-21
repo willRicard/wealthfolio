@@ -17,6 +17,7 @@ export type { EventCallback, UnlistenFn, RunEnv, Logger } from "../types";
 export { RunEnvs } from "../types";
 export type {
   AddonFile,
+  AddonAsset,
   AddonInstallResult,
   AddonManifest,
   AddonNetworkRequest,
@@ -172,6 +173,7 @@ export {
   toggleAddon,
   uninstallAddon,
   loadAddonForRuntime,
+  loadAddonAsset,
   getEnabledAddonsOnStartup,
   getInstalledAddons,
   loadAddon,

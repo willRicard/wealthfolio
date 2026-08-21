@@ -19,6 +19,7 @@ export interface HoldingsRowResolution {
   exchangeMic?: string;
   quoteCcy?: string;
   instrumentType?: string;
+  quoteMode?: string;
   providerId?: string;
   providerSymbol?: string;
   assetId?: string;
@@ -43,6 +44,7 @@ export function buildHoldingsRowResolutionMap(
       !draft.exchangeMic &&
       !draft.quoteCcy &&
       !draft.instrumentType &&
+      !draft.quoteMode &&
       !draft.providerId &&
       !draft.providerSymbol &&
       !resolvedAssetId
@@ -55,6 +57,7 @@ export function buildHoldingsRowResolutionMap(
       ...(draft.exchangeMic ? { exchangeMic: draft.exchangeMic } : {}),
       ...(draft.quoteCcy ? { quoteCcy: draft.quoteCcy } : {}),
       ...(draft.instrumentType ? { instrumentType: draft.instrumentType } : {}),
+      ...(draft.quoteMode ? { quoteMode: draft.quoteMode } : {}),
       ...(draft.providerId ? { providerId: draft.providerId } : {}),
       ...(draft.providerSymbol ? { providerSymbol: draft.providerSymbol } : {}),
       ...(resolvedAssetId ? { assetId: resolvedAssetId } : {}),
@@ -199,11 +202,82 @@ export function parseHoldingsSnapshots(
       exchangeMic?: string;
       quoteCcy?: string;
       instrumentType?: string;
+      quoteMode?: string;
       providerId?: string;
       providerSymbol?: string;
     }
   >,
   rowResolutions?: Record<number, HoldingsRowResolution>,
+): HoldingsSnapshotInput[] {
+  return parseHoldingsSnapshotsInternal(
+    headers,
+    rows,
+    mapping,
+    parseOptions,
+    symbolMappings,
+    symbolMeta,
+    rowResolutions,
+    false,
+  );
+}
+
+/**
+ * Builds the validation/import payload without dropping malformed rows.
+ * Keeping those rows in their date group lets the backend reject the whole
+ * snapshot before any assets or holdings are persisted.
+ */
+export function parseHoldingsSnapshotsForValidation(
+  headers: string[],
+  rows: string[][],
+  mapping: Record<string, string>,
+  parseOptions: ParseOptions,
+  symbolMappings?: Record<string, string>,
+  symbolMeta?: Record<
+    string,
+    {
+      exchangeMic?: string;
+      quoteCcy?: string;
+      instrumentType?: string;
+      quoteMode?: string;
+      providerId?: string;
+      providerSymbol?: string;
+    }
+  >,
+  rowResolutions?: Record<number, HoldingsRowResolution>,
+): HoldingsSnapshotInput[] {
+  return parseHoldingsSnapshotsInternal(
+    headers,
+    rows,
+    mapping,
+    parseOptions,
+    symbolMappings,
+    symbolMeta,
+    rowResolutions,
+    true,
+  );
+}
+
+function parseHoldingsSnapshotsInternal(
+  headers: string[],
+  rows: string[][],
+  mapping: Record<string, string>,
+  parseOptions: ParseOptions,
+  symbolMappings: Record<string, string> | undefined,
+  symbolMeta:
+    | Record<
+        string,
+        {
+          exchangeMic?: string;
+          quoteCcy?: string;
+          instrumentType?: string;
+          quoteMode?: string;
+          providerId?: string;
+          providerSymbol?: string;
+        }
+      >
+    | undefined,
+  rowResolutions: Record<number, HoldingsRowResolution> | undefined,
+  preserveInvalidRows: boolean,
 ): HoldingsSnapshotInput[] {
   const { dateFormat, decimalSeparator, thousandsSeparator, defaultCurrency } = parseOptions;
 
@@ -233,23 +307,24 @@ export function parseHoldingsSnapshots(
     const rawAvgCost = avgCostIndex >= 0 ? row[avgCostIndex]?.trim() : undefined;
     const currency = currencyIndex >= 0 ? row[currencyIndex]?.trim() : defaultCurrency;
 
-    if (!rawDate || !rawSymbol || !rawQuantity) continue;
-
     const normalizedDate = parseDateToYMD(rawDate, dateFormat);
-    if (!normalizedDate) continue;
+    const parsedQuantity = parseNumericValue(rawQuantity, decimalSeparator, thousandsSeparator);
+    const parsedAvgCost = parseNumericValue(rawAvgCost, decimalSeparator, thousandsSeparator);
 
-    const quantity = parseNumericValue(rawQuantity, decimalSeparator, thousandsSeparator);
-    if (!quantity) continue;
-    const avgCost = parseNumericValue(rawAvgCost, decimalSeparator, thousandsSeparator);
+    if (!preserveInvalidRows && (!normalizedDate || !rawSymbol || !parsedQuantity)) continue;
 
-    if (!snapshotsByDate.has(normalizedDate)) {
-      snapshotsByDate.set(normalizedDate, { positions: [], cashBalances: {} });
+    const snapshotDate = normalizedDate ?? rawDate;
+    const quantity = parsedQuantity ?? rawQuantity;
+    const avgCost = parsedAvgCost ?? rawAvgCost;
+
+    if (!snapshotsByDate.has(snapshotDate)) {
+      snapshotsByDate.set(snapshotDate, { positions: [], cashBalances: {} });
     }
 
-    const snapshot = snapshotsByDate.get(normalizedDate)!;
+    const snapshot = snapshotsByDate.get(snapshotDate)!;
     const symbol = rowResolution?.symbol || symbolMappings?.[rawSymbol] || rawSymbol;
 
-    if (symbol === CASH_SYMBOL) {
+    if (symbol === CASH_SYMBOL && parsedQuantity) {
       const cashCurrency = currency || defaultCurrency;
       const existingAmount = parseFloat(snapshot.cashBalances[cashCurrency] || "0");
       const newAmount = parseFloat(quantity) || 0;
@@ -271,6 +346,10 @@ export function parseHoldingsSnapshots(
         rowResolution?.providerId ??
         symbolMeta?.[rawSymbol]?.providerId ??
         symbolMeta?.[symbol]?.providerId;
+      const quoteMode =
+        rowResolution?.quoteMode ??
+        symbolMeta?.[rawSymbol]?.quoteMode ??
+        symbolMeta?.[symbol]?.quoteMode;
       const providerSymbol =
         rowResolution?.providerSymbol ??
         symbolMeta?.[rawSymbol]?.providerSymbol ??
@@ -284,6 +363,7 @@ export function parseHoldingsSnapshots(
         ...(exchangeMic ? { exchangeMic } : {}),
         ...(quoteCcy ? { quoteCcy } : {}),
         ...(instrumentType ? { instrumentType } : {}),
+        ...(quoteMode ? { quoteMode } : {}),
         ...(providerId ? { providerId } : {}),
         ...(providerSymbol ? { providerSymbol } : {}),
         ...(assetId ? { assetId } : {}),

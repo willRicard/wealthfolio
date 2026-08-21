@@ -88,12 +88,12 @@ mod tests {
             unimplemented!()
         }
 
-        fn get_daily_holdings_snapshots(
+        fn get_holdings_timeline(
             &self,
             _account_id: &str,
             _start_date: Option<NaiveDate>,
             _end_date: Option<NaiveDate>,
-        ) -> Result<Vec<AccountStateSnapshot>> {
+        ) -> Result<crate::portfolio::snapshot::HoldingsTimeline> {
             unimplemented!()
         }
 
@@ -117,10 +117,6 @@ mod tests {
             _account_id: &str,
             _new_source: &str,
         ) -> Result<usize> {
-            unimplemented!()
-        }
-
-        async fn ensure_holdings_history(&self, _account_id: &str) -> Result<()> {
             unimplemented!()
         }
 

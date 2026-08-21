@@ -307,18 +307,18 @@ pub struct AccountUniversalActivityOptionSymbol {
     pub underlying_symbol: Option<AccountUniversalActivityUnderlyingSymbol>,
 }
 
-/// Flow metadata for transfer activities
+/// Performance-boundary metadata for transfer and credit activities.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlowMetadata {
-    /// Whether the transfer is external (to/from outside the brokerage)
-    #[serde(default)]
-    pub is_external: bool,
+    /// Whether the activity crosses the tracked-account performance boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_external: Option<bool>,
 }
 
 /// Mapping metadata from the API describing how the activity was classified
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MappingMetadata {
-    /// Flow information for transfer activities
+    /// Performance-boundary information for transfer and credit activities.
     pub flow: Option<FlowMetadata>,
     /// Reasons/warnings from the mapping process
     #[serde(default)]
@@ -499,6 +499,9 @@ pub struct HoldingsPosition {
     pub open_pnl: Option<f64>,
     pub average_purchase_price: Option<f64>,
     pub currency: Option<HoldingsCurrency>,
+    /// Number of underlying units represented by one position unit.
+    #[serde(default)]
+    pub contract_multiplier: Option<f64>,
     #[serde(default)]
     pub cash_equivalent: Option<bool>,
 }
@@ -519,6 +522,10 @@ pub struct HoldingsOptionSymbol {
     pub option_type: Option<String>,
     pub strike_price: Option<f64>,
     pub expiration_date: Option<String>,
+    /// Exact number of underlying units represented by one option contract.
+    #[serde(default)]
+    pub multiplier: Option<f64>,
+    /// Deprecated compatibility flag used when multiplier is absent.
     #[serde(default)]
     pub is_mini_option: Option<bool>,
     pub underlying_symbol: Option<HoldingsUnderlyingSymbol>,

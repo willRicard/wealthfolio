@@ -153,6 +153,36 @@ describe("useActivityMutations", () => {
     );
   });
 
+  it.each([true, false])(
+    "preserves only an explicit %s performance boundary when duplicating",
+    async (isExternal) => {
+      const { result } = renderHook(() => useActivityMutations(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.duplicateActivityMutation.mutateAsync({
+          id: "activity-1",
+          accountId: "acc-1",
+          activityType: ActivityType.CREDIT,
+          subtype: "REIMBURSEMENT",
+          date: "2026-04-30T16:00:00Z",
+          amount: "100",
+          currency: "USD",
+          metadata: {
+            raw_type: "merchant_refund",
+            flow: { confidence: 0.9, is_external: isExternal },
+          },
+        } as any);
+      });
+
+      expect(adapterMocks.createActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subtype: "REIMBURSEMENT",
+          metadata: { flow: { is_external: isExternal } },
+        }),
+      );
+    },
+  );
+
   it("copies bond trade amounts when duplicating buy and sell activities", async () => {
     const { result } = renderHook(() => useActivityMutations(), { wrapper: createWrapper() });
     const bondActivity = (

@@ -1,6 +1,9 @@
 //! Portfolio snapshot module - holdings calculation and state management.
 
+mod date_policy;
 pub mod holdings_calculator;
+mod holdings_import_validation;
+mod holdings_timeline;
 pub mod manual_snapshot_service;
 mod positions_model;
 mod quote_sync_reconciliation;
@@ -9,7 +12,10 @@ mod snapshot_model;
 pub mod snapshot_service;
 mod snapshot_traits;
 
+pub use date_policy::*;
 pub use holdings_calculator::*;
+pub use holdings_import_validation::*;
+pub use holdings_timeline::*;
 pub use manual_snapshot_service::*;
 pub use positions_model::*;
 pub use quote_sync_reconciliation::*;

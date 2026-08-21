@@ -7,6 +7,7 @@ import {
   localizeActivitySubtypeName,
   localizeActivityTypeName,
   needsImportAssetResolution,
+  supportsPerformanceBoundary,
 } from "@/lib/activity-utils";
 import { ActivityTypeBadge } from "../../components/activity-type-badge";
 
@@ -237,7 +238,7 @@ export function useImportColumns<T extends ImportRowData>({
       },
     });
 
-    // 7. External (checkbox for TRANSFER_IN/TRANSFER_OUT only)
+    // 7. Explicit performance boundary for transfers and credits
     columns.push({
       id: "isExternal",
       accessorKey: "isExternal",
@@ -250,11 +251,7 @@ export function useImportColumns<T extends ImportRowData>({
           variant: "checkbox",
           isDisabled: (rowData: unknown) => {
             const row = rowData as ImportRowData;
-            const activityType = row.activityType?.toUpperCase();
-            return (
-              activityType !== ActivityType.TRANSFER_IN &&
-              activityType !== ActivityType.TRANSFER_OUT
-            );
+            return !supportsPerformanceBoundary(row.activityType);
           },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,

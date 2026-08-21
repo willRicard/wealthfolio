@@ -186,6 +186,17 @@ pub enum ValidationError {
 
     #[error("Failed to parse date/time: {0}")]
     DateTimeParse(#[from] ChronoParseError),
+
+    #[error(
+        "INVALID_SNAPSHOT_DATE: {date} can't be used for account {account_id}. Supported dates are {min_date} to {max_date}. Source: {snapshot_source}."
+    )]
+    InvalidSnapshotDate {
+        account_id: String,
+        date: NaiveDate,
+        min_date: NaiveDate,
+        max_date: NaiveDate,
+        snapshot_source: String,
+    },
 }
 
 // === From implementations for common error types ===

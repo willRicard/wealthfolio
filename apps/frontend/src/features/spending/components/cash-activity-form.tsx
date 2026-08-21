@@ -60,7 +60,10 @@ import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
 import type { CashFlowBucket } from "../types/cash-activity";
-import { resolveCashActivitySubtype } from "../lib/cash-activity-form-utils";
+import {
+  cashActivityFlowMetadata,
+  resolveCashActivitySubtype,
+} from "../lib/cash-activity-form-utils";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
@@ -327,6 +330,7 @@ export function CashActivityForm({
           amount: values.amount,
           currency,
           comment: values.notes ?? null,
+          metadata: cashActivityFlowMetadata(values.activityType, subtype, activity?.metadata),
         };
         saved = await updateActivity(update);
       } else {
@@ -338,6 +342,7 @@ export function CashActivityForm({
           amount: values.amount,
           currency,
           comment: values.notes ?? null,
+          metadata: cashActivityFlowMetadata(values.activityType, subtype),
         };
         saved = await createActivity(create);
       }
@@ -641,7 +646,6 @@ export function CashActivityForm({
                             <MoneyInput
                               value={field.value}
                               onValueChange={(v: number | undefined) => field.onChange(v ?? 0)}
-                              placeholder="0.00"
                             />
                           </FormControl>
                           <FormMessage />

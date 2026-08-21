@@ -14,10 +14,14 @@ use serde_json::json;
 use wealthfolio_core::{
     accounts::{account_supports_portfolio_scope, AccountPurpose, AccountServiceTrait},
     portfolio::{
-        snapshot::{reconcile_quote_sync_from_latest_account_snapshots, SnapshotRecalcMode},
+        snapshot::{
+            reconcile_quote_sync_from_latest_account_snapshots, snapshot_date_requires_remediation,
+            SnapshotRecalcMode,
+        },
         valuation::ValuationRecalcMode,
     },
     quotes::MarketSyncMode,
+    utils::time_utils::{parse_user_timezone_or_default, user_today},
 };
 
 // ============================================================================
@@ -146,12 +150,21 @@ pub async fn process_portfolio_job(
     config: PortfolioJobConfig,
 ) -> ApiResult<()> {
     let event_bus = state.event_bus.clone();
-    let snapshot_mode = config
+    let today = user_today(parse_user_timezone_or_default(
+        &state.timezone.read().unwrap(),
+    ));
+    let safe_since_date = config
         .since_date
+        .filter(|date| !snapshot_date_requires_remediation(*date, today));
+    if config.since_date.is_some() && safe_since_date.is_none() {
+        tracing::warn!(
+            "Ignoring an invalid portfolio recalculation boundary and rebuilding safely"
+        );
+    }
+    let snapshot_mode = safe_since_date
         .map(SnapshotRecalcMode::SinceDate)
         .unwrap_or_else(|| config.snapshot_mode.clone());
-    let valuation_mode = config
-        .since_date
+    let valuation_mode = safe_since_date
         .map(ValuationRecalcMode::SinceDate)
         .unwrap_or_else(|| config.valuation_mode.clone());
 
@@ -275,20 +288,37 @@ pub async fn process_portfolio_job(
         );
     }
 
-    for account_id in account_ids {
-        if let Err(err) = state
-            .valuation_service
-            .calculate_valuation_history(&account_id, valuation_mode.clone())
-            .await
-        {
-            let err_msg = format!(
-                "Valuation history calculation failed for {}: {}",
-                account_id, err
-            );
-            tracing::warn!("{}", err_msg);
+    match state
+        .valuation_service
+        .calculate_valuation_histories(&account_ids, valuation_mode)
+        .await
+    {
+        Ok(outcome) => {
+            if outcome
+                .failures
+                .iter()
+                .any(|failure| failure.code == "INVALID_SNAPSHOT_DATE")
+            {
+                state.health_service.clear_cache().await;
+            }
+            for failure in outcome.failures {
+                tracing::warn!(
+                    "Valuation history calculation failed for {}: {}",
+                    failure.account_id,
+                    failure.message
+                );
+                event_bus.publish(ServerEvent::with_payload(
+                    PORTFOLIO_UPDATE_ERROR,
+                    json!(failure),
+                ));
+            }
+        }
+        Err(error) => {
+            let message = format!("Failed to load shared valuation facts: {}", error);
+            tracing::warn!("{}", message);
             event_bus.publish(ServerEvent::with_payload(
                 PORTFOLIO_UPDATE_ERROR,
-                json!(err_msg),
+                json!(message),
             ));
         }
     }

@@ -349,6 +349,15 @@ export function useActivityMutations(
       isBondTrade ||
       (!isBuyOrSell &&
         !isSecuritiesTransfer(restOfActivityData.activityType, assetSymbol, _assetId));
+    const supportsBoundary =
+      restOfActivityData.activityType === ActivityType.CREDIT ||
+      restOfActivityData.activityType === ActivityType.TRANSFER_IN ||
+      restOfActivityData.activityType === ActivityType.TRANSFER_OUT;
+    const flow = activityToDuplicate.metadata?.flow as Record<string, unknown> | undefined;
+    const boundaryMetadata =
+      supportsBoundary && typeof flow?.is_external === "boolean"
+        ? { flow: { is_external: flow.is_external } }
+        : undefined;
 
     // For duplicating, use nested asset object
     const createPayload: ActivityCreate = {
@@ -365,6 +374,7 @@ export function useActivityMutations(
       fxRate: restOfActivityData.fxRate ?? undefined,
       activityDate: date,
       comment: "Duplicated",
+      metadata: boundaryMetadata,
       asset: buildAssetResolutionInput({
         id: _assetId,
         symbol: assetSymbol,

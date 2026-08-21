@@ -233,6 +233,7 @@ fn current_account_valuation_uses_latest_snapshot_positions_without_mutating_dai
     assert_eq!(current[0].investment_market_value, dec!(150));
     assert_eq!(current[0].cash_balance, dec!(5));
     assert_eq!(current[0].total_value, dec!(155));
+    assert_eq!(current[0].fx_rate_to_base, Some(dec!(0.8)));
     assert_eq!(current[0].source_data_as_of, Some(quote_as_of));
     assert_eq!(current[0].calculated_at, calculated_at);
     assert_eq!(stale.total_value_base, dec!(100));
@@ -517,6 +518,7 @@ fn current_valuation_surfaces_fx_fallback_warnings() {
     assert!(response.accounts[0].warnings.contains(
         &"Some exchange rates are missing, so this value may be approximate.".to_string()
     ));
+    assert_eq!(response.accounts[0].fx_rate_to_base, Some(Decimal::ONE));
 }
 
 #[test]
@@ -570,6 +572,7 @@ fn current_valuation_keeps_account_currency_fx_warnings_off_summary() {
     assert!(response.accounts[0].warnings.contains(
         &"Some exchange rates are missing, so this value may be approximate.".to_string()
     ));
+    assert_eq!(response.accounts[0].fx_rate_to_base, None);
 }
 
 #[test]

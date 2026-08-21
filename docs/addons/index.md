@@ -14,12 +14,18 @@
   architecture.
 - [Addon API Reference](./addon-api-reference.md) — Complete API documentation
   for addon development.
+- [Addon Localization](./addon-localization.md) — Formatting and translating
+  addon UI for the user's language and region
 - [Addon Packages](./addon-packages.md) — List of available packages and
   dependencies for addon development.
 - [Addon Migration Guide v2 to v3](./addon-migration-guide-v2-to-v3.md) —
   Migration notes for older addon APIs.
-- [Shared Query Client Design](./shared-query-client-design.md) — Documentation
-  on the design of the shared query client.
+- [Addon Migration Guide v3.5 to v3.6](./addon-migration-guide-v3.5-to-v3.6.md)
+  — Migrate routes and dependencies to the sandbox runtime.
+- [Addon Migration Guide v3.6 to v3.7](./addon-migration-guide-v3.6-to-v3.7.md)
+  — Compatibility notes and the packaged-asset API.
+- [Addon Query Client Design](./shared-query-client-design.md) — Per-addon query
+  caches and host invalidation bridging.
 
 ## 🧭 Quick Start
 
@@ -28,8 +34,10 @@
 
 ## 🛠️ Other Resources
 
+- [Addon Localization](./addon-localization.md)
 - [Addon Packages](./addon-packages.md)
 - [Addon Migration Guide v2 to v3](./addon-migration-guide-v2-to-v3.md)
+- [Addon Migration Guide v3.6 to v3.7](./addon-migration-guide-v3.6-to-v3.7.md)
 - [Addon Architecture](./addon-architecture.md)
 
 ---

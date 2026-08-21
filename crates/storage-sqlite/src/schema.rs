@@ -648,6 +648,9 @@ diesel::table! {
         preset_modified -> Integer,
         created_at -> Text,
         updated_at -> Text,
+        amount_op -> Nullable<Text>,
+        amount_value -> Nullable<Text>,
+        amount_value2 -> Nullable<Text>,
     }
 }
 

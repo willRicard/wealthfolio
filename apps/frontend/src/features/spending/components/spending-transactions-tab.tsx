@@ -58,6 +58,7 @@ import {
   isCreditCardAccountType,
   isSpendingAccountType,
 } from "../lib/constants";
+import { cashActivityFlowMetadata } from "../lib/cash-activity-form-utils";
 import {
   isTransferCashActivity,
   stableArr,
@@ -547,15 +548,30 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const { mutate: duplicateTransaction } = useMutation({
       mutationFn: async (row: TransactionRowVM) => {
         const a = row.activity;
+        const activityType = getEffectiveCashActivityType(a);
+        const supportsBoundary =
+          activityType === ActivityType.CREDIT ||
+          activityType === ActivityType.TRANSFER_IN ||
+          activityType === ActivityType.TRANSFER_OUT;
+        const flow = a.metadata?.flow as Record<string, unknown> | undefined;
+        const boundaryMetadata =
+          supportsBoundary && typeof flow?.is_external === "boolean"
+            ? { flow: { is_external: flow.is_external } }
+            : undefined;
         return createActivity({
           idempotencyKey: generateId("manual-duplicate"),
           accountId: a.accountId,
-          activityType: getEffectiveCashActivityType(a),
+          activityType,
+          subtype: a.subtype,
           currency: a.currency,
           amount: a.amount,
           activityDate:
             typeof a.activityDate === "string" ? a.activityDate : new Date().toISOString(),
           comment: t("spending:txTab.duplicatedComment"),
+          metadata:
+            activityType === ActivityType.CREDIT
+              ? cashActivityFlowMetadata(activityType, a.subtype, boundaryMetadata)
+              : boundaryMetadata,
         });
       },
       onSuccess: () => {
@@ -584,6 +600,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           amount: Math.abs(Number.parseFloat(a.amount ?? "0")),
           currency: a.currency,
           comment: a.notes ?? null,
+          metadata: cashActivityFlowMetadata("CREDIT", "REIMBURSEMENT", a.metadata),
         });
       },
       onSuccess: (_, row) => {

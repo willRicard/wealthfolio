@@ -8,13 +8,21 @@ import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-import { createAsset, importHoldingsCsv, saveAccountImportMapping, logger } from "@/adapters";
+import {
+  checkHoldingsImport,
+  createAsset,
+  importHoldingsCsv,
+  saveAccountImportMapping,
+  logger,
+} from "@/adapters";
 import { useImportContext } from "../context";
 import { setImportResult, nextStep } from "../context/import-actions";
 import { buildNewAssetFromDraft } from "../utils/asset-review-utils";
 import {
   buildHoldingsRowResolutionMap,
+  parseDateToYMD,
   parseHoldingsSnapshots,
+  parseHoldingsSnapshotsForValidation,
 } from "../utils/holdings-import-utils";
 import { HoldingsFormat } from "./holdings-mapping-step";
 import type { HoldingsSnapshotInput, ImportHoldingsCsvResult } from "@/lib/types";
@@ -26,6 +34,7 @@ interface PersistedSymbolResolution {
   quoteCcy?: string;
   instrumentType?: string;
   symbolName?: string;
+  quoteMode?: "MARKET" | "MANUAL";
   providerId?: string;
   providerSymbol?: string;
 }
@@ -40,6 +49,7 @@ function isSamePersistedResolution(
     (left.quoteCcy ?? "") === (right.quoteCcy ?? "") &&
     (left.instrumentType ?? "") === (right.instrumentType ?? "") &&
     (left.symbolName ?? "") === (right.symbolName ?? "") &&
+    (left.quoteMode ?? "") === (right.quoteMode ?? "") &&
     (left.providerId ?? "") === (right.providerId ?? "") &&
     (left.providerSymbol ?? "") === (right.providerSymbol ?? "")
   );
@@ -92,6 +102,7 @@ export function HoldingsConfirmStep() {
         quoteCcy?: string;
         instrumentType?: string;
         symbolName?: string;
+        quoteMode?: "MARKET" | "MANUAL";
         providerId?: string;
         providerSymbol?: string;
       }
@@ -109,6 +120,10 @@ export function HoldingsConfirmStep() {
           quoteCcy: draft.quoteCcy,
           instrumentType: draft.instrumentType,
           symbolName: draft.symbolName,
+          quoteMode:
+            draft.quoteMode === "MARKET" || draft.quoteMode === "MANUAL"
+              ? draft.quoteMode
+              : undefined,
           providerId: draft.providerId,
           providerSymbol: draft.providerSymbol,
         };
@@ -139,6 +154,7 @@ export function HoldingsConfirmStep() {
         resolution.quoteCcy ||
         resolution.instrumentType ||
         resolution.symbolName ||
+        resolution.quoteMode ||
         resolution.providerId ||
         resolution.providerSymbol
       ) {
@@ -147,6 +163,7 @@ export function HoldingsConfirmStep() {
           quoteCcy: resolution.quoteCcy,
           instrumentType: resolution.instrumentType,
           symbolName: resolution.symbolName,
+          quoteMode: resolution.quoteMode,
           providerId: resolution.providerId,
           providerSymbol: resolution.providerSymbol,
         };
@@ -170,6 +187,24 @@ export function HoldingsConfirmStep() {
       const rowResolutions = buildHoldingsRowResolutionMap(draftActivities, createdAssetIdsByKey);
 
       return parseHoldingsSnapshots(
+        headers,
+        parsedRows,
+        fieldMappings,
+        parseOptions,
+        enrichedMapping?.symbolMappings,
+        enrichedMapping?.symbolMappingMeta,
+        rowResolutions,
+      );
+    },
+    [draftActivities, enrichedMapping, headers, parseOptions, parsedRows],
+  );
+
+  const buildValidationSnapshots = useCallback(
+    (createdAssetIdsByKey: Record<string, string> = {}) => {
+      const fieldMappings = (enrichedMapping?.fieldMappings || {}) as Record<string, string>;
+      const rowResolutions = buildHoldingsRowResolutionMap(draftActivities, createdAssetIdsByKey);
+
+      return parseHoldingsSnapshotsForValidation(
         headers,
         parsedRows,
         fieldMappings,
@@ -285,13 +320,39 @@ export function HoldingsConfirmStep() {
 
       const createdAssetIdsByKey: Record<string, string> = {};
       try {
+        const validation = await checkHoldingsImport(accountId, buildValidationSnapshots());
+        if (validation.validSnapshotDates.length === 0) {
+          throw new Error(validation.validationErrors.join(" "));
+        }
+        const validSnapshotDates = new Set(validation.validSnapshotDates);
+        const fieldMappings = (enrichedMapping?.fieldMappings || {}) as Record<string, string>;
+        const dateHeader = fieldMappings[HoldingsFormat.DATE];
+        const dateIndex = dateHeader ? headers.indexOf(dateHeader) : -1;
+        const belongsToValidSnapshot = (rowIndex: number) => {
+          if (dateIndex < 0 || rowIndex < 0) return false;
+          const rawDate = parsedRows[rowIndex]?.[dateIndex] ?? "";
+          const snapshotDate = parseDateToYMD(rawDate, parseOptions.dateFormat);
+          return snapshotDate !== null && validSnapshotDates.has(snapshotDate);
+        };
+        const validAssetKeys = new Set(
+          draftActivities
+            .filter((draft) => belongsToValidSnapshot(draft.rowIndex))
+            .flatMap((draft) =>
+              [draft.importAssetKey, draft.assetCandidateKey].filter((key): key is string =>
+                Boolean(key),
+              ),
+            ),
+        );
+
         const pendingAssets = new Map<string, ReturnType<typeof buildNewAssetFromDraft>>();
 
         for (const pending of Object.values(pendingImportAssets)) {
+          if (!validAssetKeys.has(pending.key)) continue;
           pendingAssets.set(pending.key, pending.draft);
         }
 
         for (const draft of draftActivities) {
+          if (!belongsToValidSnapshot(draft.rowIndex)) continue;
           if (draft.assetId) continue;
 
           const key = draft.importAssetKey || draft.assetCandidateKey;
@@ -310,7 +371,7 @@ export function HoldingsConfirmStep() {
           createdAssetIdsByKey[key] = created.id;
         }
 
-        const snapshotsToImport = buildSnapshots(createdAssetIdsByKey);
+        const snapshotsToImport = buildValidationSnapshots(createdAssetIdsByKey);
         persistCreatedAssets(createdAssetIdsByKey);
         mutateImport(snapshotsToImport);
       } catch (error) {
@@ -324,7 +385,19 @@ export function HoldingsConfirmStep() {
         setIsPreparingAssets(false);
       }
     })();
-  }, [buildSnapshots, draftActivities, mutateImport, pendingImportAssets, persistCreatedAssets, t]);
+  }, [
+    accountId,
+    buildValidationSnapshots,
+    draftActivities,
+    enrichedMapping,
+    headers,
+    mutateImport,
+    parseOptions.dateFormat,
+    pendingImportAssets,
+    persistCreatedAssets,
+    parsedRows,
+    t,
+  ]);
 
   const handleCancel = useCallback(() => {
     navigate(-1);

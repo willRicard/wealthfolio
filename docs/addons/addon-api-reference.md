@@ -2,8 +2,8 @@
 
 Complete reference for Wealthfolio addon APIs. Data APIs require an appropriate
 permission entry in `manifest.json`. The baseline capabilities — `query`,
-`storage`, `toast`, and `logger` — are available to every addon and need no
-declaration.
+`storage`, `toast`, `logger`, UI integration, and packaged assets — are
+available to every addon and need no declaration.
 
 ## Context Overview
 
@@ -14,25 +14,36 @@ export interface AddonContext {
   api: HostAPI;
   sidebar: SidebarAPI;
   router: RouterAPI;
+  ui: { root: HTMLElement };
+  assets: AddonAssets;
   onDisable: (callback: () => void) => void;
 }
 ```
 
 Basic usage:
 
-````typescript
-export default function enable(ctx: AddonContext) {
-  // Access APIs
+```typescript
+export default async function enable(ctx: AddonContext) {
   const accounts = await ctx.api.accounts.getAll();
-  #### `onDropHover(callback: EventCallback): Promise<UnlistenFn>`
-  Fires when files are hovered over for import.
+  const logoUrl = await ctx.assets.getUrl("assets/logo.png");
+  ctx.api.logger.info(`Loaded ${accounts.length} accounts and ${logoUrl}`);
+}
+```
 
-  ```typescript
-  const unlistenHover = await ctx.api.events.import.onDropHover((event) => {
-    console.log('File hover detected');
-    showDropZone();
-  });
-````
+`ctx.assets` refers to files private to the addon package. The similarly named
+`ctx.api.assets` API manages financial instrument records.
+
+## Import Events
+
+#### `onDropHover(callback: EventCallback): Promise<UnlistenFn>`
+
+Fires when files are hovered over for import.
+
+```typescript
+const unlistenHover = await ctx.api.events.import.onDropHover(() => {
+  showDropZone();
+});
+```
 
 #### `onDrop(callback: EventCallback): Promise<UnlistenFn>`
 
@@ -56,6 +67,54 @@ const unlistenCancel = await ctx.api.events.import.onDropCancelled(() => {
   hideDropZone();
 });
 ```
+
+---
+
+## Packaged Assets API
+
+Access static files indexed from `assets/**` and `dist/assets/**`. No manifest
+field or permission is required. Addons using this v3.7 API must set
+`minWealthfolioVersion` to `3.7.0` or newer.
+
+### Methods
+
+#### `list(): readonly AddonAsset[]`
+
+Returns public metadata (`path`, `mimeType`, and `size`). Host paths and opaque
+asset identifiers are never exposed.
+
+#### `has(path: string): boolean`
+
+Checks a logical package path. Invalid and traversing paths return `false`.
+
+#### `getBlob(path: string): Promise<Blob>`
+
+Loads and verifies asset bytes lazily. Concurrent requests for the same asset
+share a load; a failed load can be retried.
+
+#### `getUrl(path: string): Promise<string>`
+
+Returns a cached, sandbox-local Blob URL. The URL is revoked automatically when
+the addon reloads or stops and must not be persisted.
+
+```typescript
+const [logoUrl, wasm] = await Promise.all([
+  ctx.assets.getUrl("assets/logo.png"),
+  ctx.assets.getBlob("dist/assets/module.wasm"),
+]);
+
+await WebAssembly.instantiate(await wasm.arrayBuffer());
+```
+
+Local CSS `url(...)` references are rewritten automatically relative to the CSS
+file. `data:` and `blob:` URLs are preserved. Remote CSS URLs and `@import` are
+rejected; JavaScript/JSX asset strings are not rewritten, so use `getUrl()`. See
+the [v3.6 to v3.7 migration guide](./addon-migration-guide-v3.6-to-v3.7.md) for
+package limits and compatibility details.
+
+Blob URLs may be used by images, fonts, media elements, and WebAssembly. Worker
+and service-worker entry points, popups, direct network access, and remote CSS
+imports are intentionally unavailable inside the addon sandbox.
 
 ---
 
@@ -91,14 +150,16 @@ await ctx.api.navigation.navigate("/settings");
 
 ## Query API
 
-Access and manipulate the shared React Query client for efficient data
-management.
+Access the QueryClient scoped to this addon and coordinate invalidation with the
+host.
 
 ### Methods
 
 #### `getClient(): QueryClient`
 
-Gets the shared QueryClient instance from the main application.
+Gets the sandbox's addon-local QueryClient. It is reused across this addon's
+routes, but its cache is not shared with the host or other addons. Calls to the
+client's `invalidateQueries()` and `refetchQueries()` are mirrored to the host.
 
 ```typescript
 const queryClient = ctx.api.query.getClient();
@@ -895,10 +956,16 @@ Retrieves a secret value (returns null if not found).
 ```typescript
 const apiKey = await ctx.api.secrets.get("api-key");
 if (apiKey) {
-  // Use the API key
-  const data = await fetch(`https://api.example.com/data?key=${apiKey}`);
+  const response = await ctx.api.network.request({
+    url: "https://api.example.com/data",
+    auth: { type: "bearer", secretKey: "api-key" },
+  });
 }
 ```
+
+Prefer brokered `ctx.api.network.request()` over reading a secret into addon
+JavaScript. The request host must be declared in `network.allowedHosts` and its
+response body is text, not a binary transport.
 
 #### `delete(key: string): Promise<void>`
 

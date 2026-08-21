@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use std::collections::HashMap;
 
-use super::{AccountStateSnapshot, Position};
-use crate::errors::Result;
+use super::{AccountStateSnapshot, Position, SnapshotMetadata};
+use crate::errors::{DatabaseError, Error, Result};
 
 /// Repository trait for managing account state snapshots.
 #[async_trait]
@@ -20,6 +20,19 @@ pub trait SnapshotRepositoryTrait: Send + Sync {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
     ) -> Result<Vec<AccountStateSnapshot>>;
+
+    /// Get raw snapshot metadata without requiring the stored date or source
+    /// to deserialize successfully. Storage implementations should override
+    /// this method so malformed rows remain available to remediation flows.
+    fn get_snapshot_metadata_by_account(
+        &self,
+        account_id: &str,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<Vec<SnapshotMetadata>> {
+        self.get_snapshots_by_account(account_id, start_date, end_date)
+            .map(|snapshots| snapshots.iter().map(SnapshotMetadata::from).collect())
+    }
 
     /// Get the latest snapshot before or on the given date.
     fn get_latest_snapshot_before_date(
@@ -50,6 +63,28 @@ pub trait SnapshotRepositoryTrait: Send + Sync {
         account_id: &str,
         dates_to_delete: &[NaiveDate],
     ) -> Result<()>;
+
+    /// Delete one snapshot by its stable row ID. Storage implementations
+    /// should override this to support rows with malformed dates.
+    async fn delete_snapshot_for_account_by_id(
+        &self,
+        account_id: &str,
+        snapshot_id: &str,
+    ) -> Result<()> {
+        let metadata = self
+            .get_snapshot_metadata_by_account(account_id, None, None)?
+            .into_iter()
+            .find(|snapshot| snapshot.id == snapshot_id)
+            .ok_or_else(|| {
+                Error::Database(DatabaseError::NotFound(format!(
+                    "Snapshot {snapshot_id} for account {account_id}"
+                )))
+            })?;
+        let date = NaiveDate::parse_from_str(&metadata.snapshot_date, "%Y-%m-%d")
+            .map_err(|error| Error::Repository(error.to_string()))?;
+        self.delete_snapshots_for_account_and_dates(account_id, &[date])
+            .await
+    }
 
     /// Delete snapshots for a specific account within a date range.
     async fn delete_snapshots_for_account_in_range(
@@ -100,17 +135,6 @@ pub trait SnapshotRepositoryTrait: Send + Sync {
     /// If a snapshot exists for the same date, it is replaced.
     /// If the date is different from existing snapshots, a new one is created.
     async fn save_or_update_snapshot(&self, snapshot: &AccountStateSnapshot) -> Result<()>;
-
-    /// Get the count of non-calculated snapshots for an account.
-    /// Non-calculated sources include user/imported snapshots and legacy Synthetic rows.
-    fn get_non_calculated_snapshot_count(&self, account_id: &str) -> Result<usize>;
-
-    /// Get the earliest non-calculated snapshot for an account.
-    /// Retained for legacy callers.
-    fn get_earliest_non_calculated_snapshot(
-        &self,
-        account_id: &str,
-    ) -> Result<Option<AccountStateSnapshot>>;
 
     /// Load positions from the `snapshot_positions` table for a given snapshot.
     /// Falls back to deserializing the legacy `holdings_snapshots.positions`

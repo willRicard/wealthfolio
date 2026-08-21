@@ -9,9 +9,10 @@ mod valuation_traits;
 pub use current_account_valuation::*;
 pub use valuation_calculator::*;
 pub use valuation_model::*;
-pub use valuation_service::ValuationRecalcMode;
-pub use valuation_service::ValuationService;
-pub use valuation_service::ValuationServiceTrait;
+pub use valuation_service::{
+    ValuationAccountFailure, ValuationBatchOutcome, ValuationRecalcMode, ValuationService,
+    ValuationServiceTrait,
+};
 pub use valuation_traits::*;
 
 #[cfg(test)]

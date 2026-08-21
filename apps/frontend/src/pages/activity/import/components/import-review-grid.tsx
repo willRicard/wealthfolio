@@ -18,6 +18,7 @@ import {
   localizeActivitySubtypeName,
   localizeActivityTypeName,
   needsImportAssetResolution,
+  supportsPerformanceBoundary,
 } from "@/lib/activity-utils";
 import { quoteModeFromSearchResult } from "@/lib/asset-utils";
 import { ActivityTypeBadge } from "../../components/activity-type-badge";
@@ -321,7 +322,7 @@ function useImportReviewColumns({
           },
         },
       },
-      // 7. External (checkbox for TRANSFER_IN/TRANSFER_OUT only)
+      // 7. Explicit performance boundary for transfers and credits
       {
         id: "isExternal",
         accessorKey: "isExternal",
@@ -332,14 +333,9 @@ function useImportReviewColumns({
         meta: {
           cell: {
             variant: "checkbox",
-            // Only enabled for transfer types
             isDisabled: (rowData: unknown) => {
               const row = rowData as DraftActivity;
-              const activityType = row.activityType?.toUpperCase();
-              return (
-                activityType !== ActivityType.TRANSFER_IN &&
-                activityType !== ActivityType.TRANSFER_OUT
-              );
+              return !supportsPerformanceBoundary(row.activityType);
             },
           },
         },

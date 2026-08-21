@@ -1,33 +1,33 @@
 import { importActivitySchema, importMappingSchema, parseConfigSchema } from "@/lib/schemas";
-export { ImportType } from "@/lib/schemas";
 import * as z from "zod";
 import {
   AccountType,
+  ACTIVITY_TYPE_DISPLAY_NAMES,
   ActivityStatus,
   ActivityType,
-  ACTIVITY_TYPE_DISPLAY_NAMES,
   AssetKind,
   HoldingType,
   QuoteMode,
   SUBTYPE_DISPLAY_NAMES,
 } from "./constants";
+export { ImportType } from "@/lib/schemas";
 
 export {
   accountCapabilities,
-  accountPurposeAccountTypes,
   AccountPurpose,
+  accountPurposeAccountTypes,
   accountSupportsPurpose,
   AccountType,
-  ActivityStatus,
-  ActivityType,
   ACTIVITY_SUBTYPES,
   ACTIVITY_TYPE_DISPLAY_NAMES,
   ACTIVITY_TYPES,
-  AlternativeAssetKind,
+  ActivityStatus,
+  ActivityType,
   ALTERNATIVE_ASSET_DEFAULT_GROUPS,
   ALTERNATIVE_ASSET_KIND_DISPLAY_NAMES,
-  AssetKind,
+  AlternativeAssetKind,
   ASSET_KIND_DISPLAY_NAMES,
+  AssetKind,
   createPortfolioAccount,
   DataSource,
   defaultGroupForAccountType,
@@ -703,6 +703,8 @@ export interface CashHolding {
 export interface Holding {
   id: string;
   holdingType: HoldingType;
+  /** Explicit lifecycle state; aggregate quantity alone may net to zero. */
+  isClosed?: boolean;
   accountId: string;
   instrument?: Instrument | null;
   assetKind?: AssetKind | null;
@@ -851,6 +853,7 @@ export interface Settings {
   theme: string;
   font: string;
   language: string;
+  formattingRegion: string;
   baseCurrency: string;
   defaultReturnMetric: "twr" | "irr" | "valueReturn";
   timezone: string;
@@ -1015,6 +1018,7 @@ export interface AccountValuation {
     | "REMOVED_LOT_BASIS_FALLBACK"
     | "LEGACY_ACTIVITY_AMOUNT_FALLBACK"
     | "UNKNOWN_BOUNDARY_TRANSFER"
+    | "UNPRICED_HOLDINGS_TRANSITION"
     | "ACTIVITY_DERIVED"
     | "STORED_GROSS"
     | "NET_CONTRIBUTION_FALLBACK"
@@ -1029,6 +1033,7 @@ export interface CurrentAccountValuation {
   accountId: string;
   accountCurrency: string;
   baseCurrency: string;
+  fxRateToBase: number | null;
   cashBalance: number;
   investmentMarketValue: number;
   totalValue: number;
@@ -2299,8 +2304,10 @@ export interface HealthConfig {
 export interface SnapshotInfo {
   /** Snapshot ID */
   id: string;
-  /** Date of the snapshot (YYYY-MM-DD) */
+  /** Stored snapshot date (normally YYYY-MM-DD; raw when malformed) */
   snapshotDate: string;
+  /** Whether the stored snapshot date is a valid YYYY-MM-DD date */
+  isDateValid: boolean;
   /** Source of the snapshot (MANUAL_ENTRY, CSV_IMPORT, BROKER_IMPORTED) */
   source: string;
   /** Number of positions in this snapshot */
@@ -2333,6 +2340,8 @@ export interface HoldingsPositionInput {
   quoteCcy?: string;
   /** Instrument type resolved during asset review/search (e.g., EQUITY, CRYPTO). */
   instrumentType?: string;
+  /** Quote mode selected during asset review (MARKET or MANUAL). */
+  quoteMode?: string;
   /** Market data provider that resolved this position, if selected. */
   providerId?: string;
   /** Provider-native symbol/code selected by search/import. */
@@ -2387,6 +2396,10 @@ export interface CheckHoldingsImportResult {
   symbols: SymbolCheckResult[];
   /** Validation errors found in the import data */
   validationErrors: string[];
+  /** Snapshot dates whose complete groups passed validation */
+  validSnapshotDates: string[];
+  /** Snapshot dates whose complete groups failed validation */
+  invalidSnapshotDates: string[];
 }
 
 // ─── Planning DTOs (backend-computed overviews) ──────────────────

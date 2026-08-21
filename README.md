@@ -86,6 +86,12 @@ Visit the website at
 - **📱 Cross-Platform** - Desktop (Windows, macOS, Linux), iOS, and self-hosted
   Docker/web
 
+Wealthfolio 3.7 requires macOS 12 or newer and iOS/iPadOS 16 or newer. macOS 12
+installations should apply current macOS and Safari updates so the system
+WKWebView meets the Safari 16 browser floor. Windows uses the evergreen WebView2
+runtime; Linux and self-hosted installations should keep WebKitGTK or their
+browser updated.
+
 ### 🧩 Addon System
 
 Wealthfolio features a powerful addon system that allows developers to extend
@@ -100,6 +106,8 @@ functionality:
 - **🗄️ Full Data Access** - Access to accounts, holdings, activities, and market
   data
 - **🔐 Secrets Management** - Secure storage for API keys and sensitive data
+- **📦 Private Assets** - Package images, fonts, media, configuration, and Wasm
+  for the isolated addon sandbox
 
 **Get started building addons:** See the
 [Addon Documentation Hub](docs/addons/index.md)
@@ -135,6 +143,8 @@ See [ROADMAP.md](./ROADMAP.md).
   documentation with examples
 - **[Architecture](docs/addons/addon-architecture.md)** - Design patterns and
   architecture guide
+- **[v3.6 to v3.7 Migration](docs/addons/addon-migration-guide-v3.6-to-v3.7.md)** -
+  Packaged assets and compatibility notes
 
 ### Quick Links
 
@@ -672,6 +682,7 @@ Your addon will be automatically discovered and loaded with hot reload support!
 - **🔐 Secure Storage**: Store API keys and sensitive data securely
 - **⚡ Hot Reload**: Seamless development experience
 - **🔒 Permission System**: Transparent security with user consent
+- **📦 Private Assets**: Sandbox-safe packaged images, fonts, media, and Wasm
 
 ### Official Addons
 
@@ -691,6 +702,8 @@ for maintained addon examples including:
   documentation
 - **[Architecture Guide](docs/addons/addon-architecture.md)** - Design patterns
   and best practices
+- **[v3.6 to v3.7 Migration Guide](docs/addons/addon-migration-guide-v3.6-to-v3.7.md)** -
+  Asset packaging and compatibility
 
 ## Technologies Used
 

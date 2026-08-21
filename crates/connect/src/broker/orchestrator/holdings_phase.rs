@@ -120,6 +120,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                 &job.account_id,
                 &job.account_name,
                 &job.broker_account_id,
+                job.tracking_mode,
             )
             .await
         {
@@ -228,6 +229,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         account_id: &str,
         account_name: &str,
         broker_account_id: &str,
+        tracking_mode: super::BrokerTrackingMode,
     ) -> Result<(HoldingsDiff, usize, Vec<String>), String> {
         info!(
             "Syncing holdings for account '{}' ({})",
@@ -240,7 +242,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         );
 
         let holdings = api_client
-            .get_account_holdings(broker_account_id)
+            .get_account_holdings(broker_account_id, tracking_mode)
             .await
             .map_err(|e| e.to_string())?;
 

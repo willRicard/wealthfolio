@@ -17,7 +17,7 @@ use super::models::{
     SyncResult,
 };
 use super::progress::SyncProgressReporter;
-use super::traits::{BrokerApiClient, BrokerSyncServiceTrait};
+use super::traits::{BrokerApiClient, BrokerSyncServiceTrait, BrokerTrackingMode};
 use wealthfolio_core::accounts::{Account, TrackingMode};
 
 /// Configuration for sync operations.
@@ -43,21 +43,32 @@ pub(super) struct AccountSyncJob {
     account_id: String,
     account_name: String,
     broker_account_id: String,
-    tracking_mode: TrackingMode,
+    tracking_mode: BrokerTrackingMode,
 }
 
 impl AccountSyncJob {
     fn from_account(account: Account) -> Option<Self> {
+        let tracking_mode = match account.tracking_mode {
+            TrackingMode::Holdings => BrokerTrackingMode::Holdings,
+            TrackingMode::Transactions => BrokerTrackingMode::Transactions,
+            TrackingMode::NotSet => {
+                info!(
+                    "Skipping sync for account '{}' (trackingMode=NOT_SET)",
+                    account.name
+                );
+                return None;
+            }
+        };
         Some(Self {
             account_id: account.id,
             account_name: account.name,
             broker_account_id: account.provider_account_id?,
-            tracking_mode: account.tracking_mode,
+            tracking_mode,
         })
     }
 
     fn is_holdings_mode(&self) -> bool {
-        self.tracking_mode == TrackingMode::Holdings
+        self.tracking_mode == BrokerTrackingMode::Holdings
     }
 }
 
@@ -353,7 +364,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                 continue;
             };
 
-            if job.tracking_mode != TrackingMode::Transactions {
+            if job.tracking_mode != BrokerTrackingMode::Transactions {
                 continue;
             }
 
@@ -397,14 +408,6 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             if !sync_enabled_broker_ids.contains(&job.broker_account_id) {
                 info!(
                     "Skipping sync for account '{}' (sync disabled)",
-                    job.account_name
-                );
-                continue;
-            }
-
-            if job.tracking_mode == TrackingMode::NotSet {
-                info!(
-                    "Skipping sync for account '{}' (trackingMode=NOT_SET)",
                     job.account_name
                 );
                 continue;
@@ -499,7 +502,8 @@ mod tests {
     struct MockBrokerApiClient {
         broker_accounts: Vec<BrokerAccount>,
         activity_pages: Mutex<Vec<PaginatedUniversalActivity>>,
-        activity_calls: Mutex<usize>,
+        activity_calls: Mutex<Vec<BrokerTrackingMode>>,
+        holdings_calls: Mutex<Vec<BrokerTrackingMode>>,
     }
 
     #[async_trait]
@@ -522,12 +526,13 @@ mod tests {
         async fn get_account_activities(
             &self,
             _account_id: &str,
+            tracking_mode: BrokerTrackingMode,
             _start_date: Option<&str>,
             _end_date: Option<&str>,
             _offset: Option<i64>,
             _limit: Option<i64>,
         ) -> Result<PaginatedUniversalActivity> {
-            *self.activity_calls.lock().unwrap() += 1;
+            self.activity_calls.lock().unwrap().push(tracking_mode);
             let mut pages = self.activity_pages.lock().unwrap();
             if pages.is_empty() {
                 return Ok(PaginatedUniversalActivity::default());
@@ -535,7 +540,12 @@ mod tests {
             Ok(pages.remove(0))
         }
 
-        async fn get_account_holdings(&self, _account_id: &str) -> Result<BrokerHoldingsResponse> {
+        async fn get_account_holdings(
+            &self,
+            _account_id: &str,
+            tracking_mode: BrokerTrackingMode,
+        ) -> Result<BrokerHoldingsResponse> {
+            self.holdings_calls.lock().unwrap().push(tracking_mode);
             Ok(BrokerHoldingsResponse::default())
         }
     }
@@ -861,9 +871,10 @@ mod tests {
         let mut provider_holdings_statuses = HashMap::new();
         provider_holdings_statuses.insert("broker-1".to_string(), ready_status("2026-05-22", None));
 
+        let api_client = MockBrokerApiClient::default();
         let (activities, holdings) = orchestrator(service.clone())
             .sync_account_data(
-                &MockBrokerApiClient::default(),
+                &api_client,
                 &HashSet::from(["broker-1".to_string()]),
                 &provider_transaction_statuses,
                 &provider_holdings_statuses,
@@ -882,6 +893,47 @@ mod tests {
             .activity_needs_review
             .iter()
             .any(|(_, warning, _)| warning.contains("Holdings synced")));
+        assert_eq!(
+            *api_client.holdings_calls.lock().unwrap(),
+            vec![BrokerTrackingMode::Holdings]
+        );
+    }
+
+    #[tokio::test]
+    async fn holdings_account_uses_holdings_mode_for_reference_activities_and_holdings() {
+        let service = Arc::new(MockSyncService {
+            accounts: vec![synced_account(
+                "account-1",
+                "broker-1",
+                TrackingMode::Holdings,
+            )],
+            ..MockSyncService::default()
+        });
+        let api_client = MockBrokerApiClient {
+            activity_pages: Mutex::new(vec![PaginatedUniversalActivity::default()]),
+            ..MockBrokerApiClient::default()
+        };
+        let provider_statuses =
+            HashMap::from([("broker-1".to_string(), ready_status("2026-05-22", None))]);
+
+        orchestrator(service)
+            .sync_account_data(
+                &api_client,
+                &HashSet::from(["broker-1".to_string()]),
+                &provider_statuses,
+                &provider_statuses,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *api_client.activity_calls.lock().unwrap(),
+            vec![BrokerTrackingMode::Holdings]
+        );
+        assert_eq!(
+            *api_client.holdings_calls.lock().unwrap(),
+            vec![BrokerTrackingMode::Holdings]
+        );
     }
 
     #[tokio::test]
@@ -910,7 +962,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(activities.accounts_synced, 0);
-        assert_eq!(*api_client.activity_calls.lock().unwrap(), 0);
+        assert!(api_client.activity_calls.lock().unwrap().is_empty());
         let calls = service.calls.lock().unwrap();
         assert_eq!(calls.activity_successes.len(), 1);
         assert_eq!(calls.activity_successes[0].1, "2026-05-22T00:00:00+00:00");
@@ -952,7 +1004,10 @@ mod tests {
 
         assert_eq!(activities.accounts_synced, 1);
         assert_eq!(activities.activities_upserted, 1);
-        assert_eq!(*api_client.activity_calls.lock().unwrap(), 1);
+        assert_eq!(
+            *api_client.activity_calls.lock().unwrap(),
+            vec![BrokerTrackingMode::Transactions]
+        );
         assert_eq!(service.calls.lock().unwrap().save_holdings_calls, 0);
     }
 }

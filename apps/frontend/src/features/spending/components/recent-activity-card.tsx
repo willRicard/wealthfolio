@@ -1,12 +1,16 @@
+import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { DashboardCard } from "@/components/dashboard-card";
+import { QueryKeys } from "@/lib/query-keys";
+import type { Activity } from "@/lib/types";
 import { cn, formatDateISO } from "@/lib/utils";
-import { PrivacyAmount } from "@wealthfolio/ui";
+import { PrivacyAmount, useDateFormatting } from "@wealthfolio/ui";
 
 import type { CashActivity } from "../types/cash-activity";
+import { getActivityAssignments } from "../adapters/cash-activities";
 import {
   getActivitySpendingAmount,
   getEffectiveCashActivityType,
@@ -29,6 +33,7 @@ export function RecentActivityCard({
   currency: string;
   uncategorizedCount?: number;
 }) {
+  const formatting = useDateFormatting();
   const { t } = useTranslation();
   const recent = useMemo(() => {
     return activities
@@ -45,13 +50,22 @@ export function RecentActivityCard({
       .slice(0, 10);
   }, [activities, accountTypeById]);
 
+  const assignmentQueries = useQueries({
+    queries: recent.map((a) => ({
+      queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "assignments", a.id],
+      queryFn: () => getActivityAssignments(a.id),
+      staleTime: 30_000,
+    })),
+  });
+
   const badgeByActivityId = useMemo(() => {
     const out = new Map<
       string,
       { name: string; color: string | null; icon: string | null } | null
     >();
-    recent.forEach((a) => {
-      const spending = a.assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
+    recent.forEach((a, i) => {
+      const assignments = assignmentQueries[i]?.data ?? [];
+      const spending = assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
       if (!spending) {
         out.set(a.id, null);
         return;
@@ -70,7 +84,7 @@ export function RecentActivityCard({
       });
     });
     return out;
-  }, [recent, categoriesMeta]);
+  }, [recent, assignmentQueries, categoriesMeta]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, typeof recent>();
@@ -91,7 +105,7 @@ export function RecentActivityCard({
     const yestKey = formatDateISO(yest);
     if (key === todayKey) return t("spending:dashboard.today");
     if (key === yestKey) return t("spending:dashboard.yesterday");
-    return new Date(key + "T00:00:00").toLocaleDateString(undefined, {
+    return formatting.formatCalendarDate(key, {
       weekday: "short",
       month: "short",
       day: "numeric",

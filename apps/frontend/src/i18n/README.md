@@ -72,3 +72,6 @@ community-contributed translations are preserved.
 - **German**: value-joined from PR #845 by matching English source text onto the
   English keys (~65% auto-coverage); the remainder falls back to English and is
   filled by AI draft + community review. See `scripts/i18n-remap.mjs`.
+- **Korean**: AI-drafted, full-coverage translation of all namespaces against
+  the English source keys, using standard Korean financial/investment
+  terminology; intended for community review.

@@ -210,7 +210,6 @@ impl SyncOutboxModel for AccountStateSnapshotDB {
     fn should_sync_outbox(&self, _op: SyncOperation) -> bool {
         let source = match self.source.as_str() {
             "MANUAL_ENTRY" => SnapshotSource::ManualEntry,
-            "SYNTHETIC" => SnapshotSource::Synthetic,
             "CSV_IMPORT" => SnapshotSource::CsvImport,
             "BROKER_IMPORTED" => SnapshotSource::BrokerImported,
             _ => SnapshotSource::Calculated,

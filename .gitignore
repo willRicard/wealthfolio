@@ -16,6 +16,7 @@ node_modules
 # Build outputs
 dist
 dist-ssr
+apps/frontend/public/__generated__/
 *.local
 build
 out
