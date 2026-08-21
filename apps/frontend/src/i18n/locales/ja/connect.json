@@ -1,280 +1,282 @@
 {
   "page": {
-    "title": "同期と接続",
-    "subtitle": "デバイスがすべて 1 か所に。",
-    "subtitleWithBrokers": "仲介業者とデバイスがすべて 1 か所に。",
-    "brokerages": "仲介",
+    "title": "同期と連携",
+    "subtitle": "すべてのデバイスを一元管理。",
+    "subtitleWithBrokers": "証券会社とデバイスを一元管理。",
+    "brokerages": "証券会社",
     "devices": "デバイス",
-    "recentActivity": "最近のアクティビティ",
+    "recentActivity": "最近の更新",
     "manage": "管理",
     "timeAgo": "{{time}}前",
-    "noBrokeragesConnected": "仲介なし接続済み",
-    "noBrokeragesDescription": "証券会社にリンクしてアカウントの同期を開始してください。",
-    "noDevicesSyncing": "まだ同期しているデバイスがありません",
-    "noDevicesDescription": "デバイス間でデータを同期できるように設定でデバイス同期を設定してください。",
-    "noActivity": "まだアクティビティがありません",
-    "noActivityDescription": "データの同期が開始されると、ここに更新情報が表示されます。"
+    "noBrokeragesConnected": "連携中の証券会社はありません",
+    "noBrokeragesDescription": "証券会社を連携すると、口座の同期を開始できます。",
+    "noDevicesSyncing": "同期中のデバイスはありません",
+    "noDevicesDescription": "設定でデバイス同期を有効にすると、複数のデバイス間でデータを同期できます。",
+    "noActivity": "更新はまだありません",
+    "noActivityDescription": "データの同期が始まると、ここに更新内容が表示されます。"
   },
   "emptyState": {
-    "optional": "オプション",
-    "subtitle": "自動的にデータをプライベートに保ちながらブローカーを同期します。",
-    "getStarted": "Connect を始めましょう",
+    "optional": "任意",
+    "subtitle": "データのプライバシーを守りながら、証券会社を自動で同期します。",
+    "getStarted": "Connectを始める",
     "loginToAccount": "アカウントにログイン",
-    "learnMore": "Connect の詳細をご覧ください",
+    "learnMore": "Connectについて詳しく見る",
     "features": {
       "brokerageSync": {
-        "title": "仲介取引の同期",
-        "description": "アカウントと取引を毎日自動同期します。"
+        "title": "証券会社の同期",
+        "description": "口座と取引を毎日自動で同期します。"
       },
       "deviceSync": {
-        "title": "デバイスの同期",
-        "description": "E2E でデバイス間で同期暗号化。"
+        "title": "デバイス同期",
+        "description": "E2E暗号化で複数のデバイス間を同期します。"
       },
       "householdView": {
         "title": "世帯ビュー",
-        "description": "家族とアカウントを共有。"
+        "description": "家族と口座を共有できます。"
       }
     }
   },
   "flow": {
     "yourDevice": "お使いのデバイス",
     "localDatabase": "ローカルデータベース",
-    "dataStaysHere": "データはそのまま残ります。ここ",
+    "dataStaysHere": "データはここに保存されます",
     "aggregators": "アグリゲーター",
     "brokerages": "証券会社",
     "banks": "銀行",
-    "crypto": "仮想通貨"
+    "crypto": "暗号資産"
   },
   "account": {
     "userAvatar": "ユーザーアバター",
     "userFallback": "ユーザー",
-    "active": "アクティブ",
+    "active": "有効",
     "signOut": "サインアウト",
-    "signOutTitle": "Wealthfolioからサインアウト接続しますか?",
-    "signOutMessage": "同期されたブローカー アカウントにアクセスするには、再度サインインする必要があります。ローカル データは影響を受けません。",
+    "signOutTitle": "Wealthfolio Connectからサインアウトしますか?",
+    "signOutMessage": "同期済みの証券口座にアクセスするには、再度サインインが必要です。ローカルのデータには影響しません。",
     "signOutConfirm": "サインアウト",
-    "signingOut": "サインアウト中..."
+    "signingOut": "サインアウトしています..."
   },
   "accounts": {
-    "title": "アカウント",
-    "manage": "アカウントの管理",
-    "accountFallback": "アカウント",
+    "title": "口座",
+    "manage": "口座を管理",
+    "accountFallback": "口座",
     "platformFallback": "プラットフォーム",
-    "brokerFallback": "ブローカー",
-    "paper": "用紙",
+    "brokerFallback": "証券会社",
+    "paper": "デモ",
     "shared": "共有",
-    "sharedBy": "{{name}}によって共有",
-    "syncEnabled": "同期が有効",
-    "excludedFromSync": "同期から除外",
-    "noDataYet": "データはまだありません",
+    "sharedBy": "{{name}}さんが共有",
+    "syncEnabled": "同期有効",
+    "excludedFromSync": "同期対象外",
+    "noDataYet": "データがありません",
     "dataAsOf": "{{date}}時点のデータ",
-    "emptyTitle": "アカウントはまだ同期されていません",
-    "emptyDescription": "ブローカーに接続して同期を開始してください"
+    "emptyTitle": "同期済みの口座はまだありません",
+    "emptyDescription": "証券会社を連携すると、口座の同期を開始できます。"
   },
   "connections": {
-    "title": "ブローカー接続",
-    "manage": "接続の管理",
-    "empty": "まだブローカー接続がありません",
-    "connectBroker": "ブローカー接続",
-    "unknownBroker": "不明ブローカー",
+    "title": "証券会社の連携",
+    "manage": "連携を管理",
+    "empty": "証券会社の連携はまだありません",
+    "connectBroker": "証券会社を連携",
+    "unknownBroker": "不明な証券会社",
     "unknown": "不明",
-    "connected": "接続中",
-    "disconnected": "切断",
+    "connected": "接続済み",
+    "disconnected": "接続解除",
     "reconnect": "再接続",
-    "noAccountsFound": "アカウントが見つかりません",
-    "allAccountsExcluded": "すべてのアカウントが除外されました",
-    "accountsSyncing_one": "{{count}} 個のアカウントが同期中",
-    "accountsSyncing_other": "{{count}} 個のアカウント同期中",
-    "partialSyncing_one": "/ 個のアカウントを同期中 ·  個のアカウントを除外 {{syncing}} {{total}} {{excluded}}",
-    "partialSyncing_other": "{{syncing}}/{{total}} 個のアカウントを同期中 · {{excluded}} 個のアカウントを除外"
+    "noAccountsFound": "口座が見つかりません",
+    "allAccountsExcluded": "すべての口座が同期対象外です",
+    "accountsSyncing_one": "{{count}}件の口座を同期中",
+    "accountsSyncing_other": "{{count}}件の口座を同期中",
+    "partialSyncing_one": "{{total}}件中{{syncing}}件の口座を同期中 · {{excluded}}件を除外",
+    "partialSyncing_other": "{{total}}件中{{syncing}}件の口座を同期中 · {{excluded}}件を除外"
   },
   "sync": {
     "syncNow": "今すぐ同期",
     "sync": "同期",
-    "syncAll": "同期すべて",
+    "syncAll": "すべて同期",
     "syncingShort": "同期中...",
     "statusTitle": "同期ステータス",
-    "syncingBrokerData": "ブローカー データを同期中...",
-    "startFailed": "同期の開始に失敗しました: {{error}}",
-    "needAttention_one": "{{count}} アカウントに注意が必要です",
-    "needAttention_other": "{{count}} アカウントに注意が必要です"
+    "syncingBrokerData": "証券会社のデータを同期しています...",
+    "startFailed": "同期を開始できませんでした: {{error}}",
+    "needAttention_one": "{{count}}件の口座に対応が必要です",
+    "needAttention_other": "{{count}}件の口座に対応が必要です"
   },
   "status": {
-    "upToDate": "最大日付",
+    "upToDate": "最新",
     "syncing": "同期中",
     "syncingEllipsis": "同期中...",
-    "needsReview": "確認が必要",
+    "needsReview": "要確認",
     "failed": "失敗",
     "notConnected": "未接続",
     "lastSynced": "最終同期 {{time}}",
-    "neverSynced": "なし同期済み"
+    "neverSynced": "同期履歴なし"
   },
   "runStatus": {
     "running": "実行中",
-    "applied": "適用済み",
-    "needsReview": "レビューが必要",
+    "applied": "反映済み",
+    "needsReview": "要確認",
     "failed": "失敗",
-    "cancelled": "キャンセルされました"
+    "cancelled": "キャンセル"
   },
   "syncRuns": {
     "title": "最近の同期実行",
-    "empty": "同期はまだ実行されていません。",
-    "warningsCount_one": "{{count}} 警告",
-    "warningsCount_other": "{{count}}警告",
+    "empty": "同期の実行履歴はまだありません。",
+    "warningsCount_one": "{{count}}件の警告",
+    "warningsCount_other": "{{count}}件の警告",
     "fetched": "取得",
-    "inserted": "挿入",
+    "inserted": "追加",
     "updated": "更新",
     "skipped": "スキップ",
     "warningsLabel": "警告:",
-    "andMore": "... および {{count}} 詳細",
-    "reviewActivities": "アクティビティの確認",
-    "duration": "期間:",
-    "inProgress": "進行状況..."
+    "andMore": "...他{{count}}件",
+    "reviewActivities": "取引を確認",
+    "duration": "所要時間:",
+    "inProgress": "実行中...",
+    "andMore_other": "...他{{count}}件"
   },
   "syncHistory": {
     "title": "同期履歴",
     "success": "成功",
-    "review": "レビュー",
-    "emptyTitle": "同期はまだ実行されていません",
-    "emptyDescription": "最初の同期後にここに同期履歴が表示されます",
-    "runCount_one": "{{count}} run",
-    "runCount_other": "{{count}} 実行",
-    "loadMore": "読み込み詳細",
-    "lessThanOneSecond": "<1s",
+    "review": "要確認",
+    "emptyTitle": "同期の実行履歴はまだありません",
+    "emptyDescription": "初回の同期後、ここに同期履歴が表示されます",
+    "runCount_one": "{{count}}件の実行",
+    "runCount_other": "{{count}}件の実行",
+    "loadMore": "さらに読み込む",
+    "lessThanOneSecond": "1秒未満",
     "new": "新規",
     "updated": "更新",
     "skipped": "スキップ",
-    "warningsCount_one": "{{count}} 警告",
-    "warningsCount_other": "{{count}} 警告",
-    "andMore": "+{{count}} 詳細"
+    "warningsCount_one": "{{count}}件の警告",
+    "warningsCount_other": "{{count}}件の警告",
+    "andMore": "他{{count}}件",
+    "andMore_other": "他{{count}}件"
   },
   "activity": {
-    "syncingData": "データ...",
+    "syncingData": "データを同期しています...",
     "somethingWentWrong": "問題が発生しました",
     "upToDate": "すべて最新です",
-    "itemsNeedReview_one": "{{count}} 件のアイテムのレビューが必要です",
-    "itemsNeedReview_other": "{{count}} 件のアイテムのレビューが必要です",
+    "itemsNeedReview_one": "{{count}}件の項目に確認が必要です",
+    "itemsNeedReview_other": "{{count}}件の項目に確認が必要です",
     "newItems": {
-      "transaction_one": "{{count}} 件の新しいトランザクション",
-      "transaction_other": "{{count}} 件の新しいトランザクション",
-      "position_one": "{{count}} 件の新規ポジション",
-      "position_other": "{{count}} の新しいポジション"
+      "transaction_one": "新しい取引{{count}}件",
+      "transaction_other": "新しい取引{{count}}件",
+      "position_one": "新しいポジション{{count}}件",
+      "position_other": "新しいポジション{{count}}件"
     },
     "updatedItems": {
-      "transaction_one": "{{count}} 件のトランザクションが更新されました",
-      "transaction_other": "{{count}} 件のトランザクションが更新されました",
-      "position_one": "{{count}} 件のポジションが更新されました",
-      "position_other": "{{count}} 件のポジションが更新されました"
+      "transaction_one": "取引{{count}}件を更新",
+      "transaction_other": "取引{{count}}件を更新",
+      "position_one": "ポジション{{count}}件を更新",
+      "position_other": "ポジション{{count}}件を更新"
     },
     "removedItems": {
-      "transaction_one": "{{count}} 件のトランザクションが削除されました",
-      "transaction_other": "{{count}} 件のトランザクションが削除されました削除されました",
-      "position_one": "{{count}} 位が削除されました",
-      "position_other": "{{count}} 個のポジションを削除しました"
+      "transaction_one": "取引{{count}}件を削除",
+      "transaction_other": "取引{{count}}件を削除",
+      "position_one": "ポジション{{count}}件を削除",
+      "position_other": "ポジション{{count}}件を削除"
     }
   },
   "attention": {
-    "title": "ブローカーの同期に注意が必要です",
-    "description_one": "{{count}} 個のアカウントには再試行またはブローカーのレビューが必要です。",
-    "description_other": "{{count}} 個のアカウントには再試行またはブローカーのレビューが必要です。"
+    "title": "証券会社の同期に対応が必要です",
+    "description_one": "{{count}}件の口座で再試行または証券会社側の確認が必要です。",
+    "description_other": "{{count}}件の口座で再試行または証券会社側の確認が必要です。"
   },
   "setup": {
-    "newAccountsTitle": "新しいアカウントはセットアップが必要です",
-    "newAccountsDescription_one": "{{count}} 個のアカウントは開始する前に簡単なセットアップが必要です同期中です。",
-    "newAccountsDescription_other": "{{count}} 個のアカウントは、同期を開始する前に簡単なセットアップが必要です。",
-    "reviewAccounts": "アカウントを確認"
+    "newAccountsTitle": "新しい口座の設定が必要です",
+    "newAccountsDescription_one": "同期を開始する前に、{{count}}件の口座で簡単な設定が必要です。",
+    "newAccountsDescription_other": "同期を開始する前に、{{count}}件の口座で簡単な設定が必要です。",
+    "reviewAccounts": "口座を確認"
   },
   "devices": {
     "thisDevice": "このデバイス",
-    "activeNow": "現在アクティブ",
-    "lastSeen": "最後に表示されたのは {{time}}",
+    "activeNow": "現在利用中",
+    "lastSeen": "最終接続 {{time}}",
     "online": "オンライン",
     "never": "なし"
   },
   "deviceStatus": {
     "syncError": "同期エラー",
-    "syncPaused": "同期が一時停止しました",
-    "upToDate": "最新状態",
+    "syncPaused": "同期停止中",
+    "upToDate": "最新",
     "syncing": "同期中"
   },
   "serviceUnavailable": {
-    "title": "サービスが一時的に利用できません",
-    "description": "Wealthfolio Connect への接続に問題が発生しています。これは通常一時的なもので、すぐに解決するはずです。",
-    "retrying": "再試行中...",
+    "title": "サービスを一時的にご利用いただけません",
+    "description": "Wealthfolio Connectに接続できません。一時的な問題のため、しばらくすると解消される見込みです。",
+    "retrying": "再試行しています...",
     "tryAgain": "再試行"
   },
   "upgrade": {
-    "title": "ブローカーアカウントを同期するようにアップグレード",
-    "description": "自動ポートフォリオ同期のために証券口座を接続します。",
+    "title": "アップグレードして証券口座を同期",
+    "description": "証券口座を連携すると、ポートフォリオを自動で同期できます。",
     "button": "アップグレード"
   },
   "privacy": {
-    "footnote": "Wealthfolio Connect は、証券会社の資格情報や財務データを保存しません。すべてはアグリゲーターを介してローカル データベースに安全に同期されます。デバイスの同期ではエンドツーエンドの暗号化が使用されます。 <privacyLink>詳細</privacyLink>"
+    "footnote": "Wealthfolio Connectは証券会社のログイン情報や金融データを保存しません。すべてのデータはアグリゲーター経由で安全にローカルデータベースへ同期されます。デバイス同期にはエンドツーエンド暗号化を使用しています。<privacyLink>詳しく見る</privacyLink>"
   },
   "providers": {
-    "continueWithGoogle": "Google で続行",
-    "continueWithApple": "Apple で続行",
-    "continueWithEmail": "メールで続行",
-    "lastUsed": "最終使用"
+    "continueWithGoogle": "Googleで続ける",
+    "continueWithApple": "Appleで続ける",
+    "continueWithEmail": "メールアドレスで続ける",
+    "lastUsed": "前回使用"
   },
   "subscription": {
     "comingSoon": "近日公開",
     "getStarted": "始める",
     "perMonthShort": "月",
     "perYearShort": "年",
-    "savings": "保存% 対月次 {{percent}}",
+    "savings": "月額プランより{{percent}}%お得",
     "choosePlan": "プランを選択",
-    "choosePlanDescription": "購読してブローカーの同期とクラウド機能のロックを解除します。",
-    "monthly": "月次",
-    "yearly": "年",
-    "monthlyBilling": "月次請求",
-    "yearlyBilling": "年請求",
-    "alreadySubscribed": "すでに購読していますか?",
-    "connectionIssueTitle": "接続問題",
-    "connectionIssueDescription": "アカウントへの接続に問題が発生しています。これは、セッションの有効期限が切れた場合に発生する可能性があります。",
+    "choosePlanDescription": "登録すると、証券会社の同期とクラウド機能をご利用いただけます。",
+    "monthly": "月額",
+    "yearly": "年額",
+    "monthlyBilling": "月額請求",
+    "yearlyBilling": "年額請求",
+    "alreadySubscribed": "すでに登録済みですか?",
+    "connectionIssueTitle": "接続の問題",
+    "connectionIssueDescription": "アカウントに接続できません。セッションの有効期限が切れている可能性があります。",
     "unableToLoadTitle": "プランを読み込めません",
-    "unableToLoadDescription": "現在、サブスクリプション プランを取得できませんでした。これは通常、一時的な問題です。",
-    "contactSupport": "サポートへのお問い合わせ",
-    "emailCopied": "電子メールがクリップボードにコピーされました",
-    "reconnecting": "再接続中...",
+    "unableToLoadDescription": "現在、サブスクリプションプランを取得できませんでした。一時的な問題の可能性があります。",
+    "contactSupport": "サポートに問い合わせる",
+    "emailCopied": "メールアドレスをクリップボードにコピーしました",
+    "reconnecting": "再接続しています...",
     "reconnect": "再接続",
-    "refreshPage": "ページの更新"
+    "refreshPage": "ページを再読み込み"
   },
   "authCallback": {
-    "processing": "認証処理中...",
-    "completing": "サインインの完了..."
+    "processing": "認証を処理しています...",
+    "completing": "サインインを完了しています..."
   },
   "authErrors": {
-    "noSessionReturned": "サインイン完了後にセッションが返されませんでした。",
-    "completeSignInFailed": "サインインを完了できませんでした。 in",
+    "noSessionReturned": "サインインの完了後にセッションを取得できませんでした。",
+    "completeSignInFailed": "サインインを完了できませんでした",
     "signInFailed": "サインインに失敗しました",
-    "signUpFailed": "サインアップに失敗しました",
-    "confirmEmail": "メールを確認してアカウントを確認してください。",
-    "oauthFailed": "OAuthサインインに失敗しました",
+    "signUpFailed": "アカウント登録に失敗しました",
+    "confirmEmail": "メールをご確認のうえ、アカウントを認証してください。",
+    "oauthFailed": "OAuthでのサインインに失敗しました",
     "magicLinkFailed": "マジックリンクの送信に失敗しました",
-    "invalidVerificationCode": "無効な確認コード",
-    "signOutFailed": "サインアウトできませんでした",
-    "fetchUserInfoFailed": "ユーザーの取得に失敗しましたinfo"
+    "invalidVerificationCode": "確認コードが正しくありません",
+    "signOutFailed": "サインアウトに失敗しました",
+    "fetchUserInfoFailed": "ユーザー情報の取得に失敗しました"
   },
   "newAccounts": {
-    "title": "新しいアカウントが見つかりました",
-    "description": "各アカウントを追跡する方法を選択してください。これは後で変更できます。",
-    "trackingInfo": "<strong>トランザクション</strong> モードでは、完全なパフォーマンス分析のためにすべての取引を追跡します。 <strong>所蔵</strong> モードでは、制限されたメトリクスのスナップショットのみがインポートされます。 <docsLink>詳細</docsLink>",
-    "accountName": "アカウント名",
-    "group": "グループ (オプション)",
-    "groupPlaceholder": "例: 退職",
-    "trackingMode": "追跡モード",
-    "transactions": "トランザクション",
-    "transactionsDescription": "フルパフォーマンス分析",
-    "holdings": "保有",
+    "title": "新しい口座が見つかりました",
+    "description": "各口座のトラッキングモードを選択してください。後から変更できます。",
+    "trackingInfo": "<strong>取引ベース</strong>はすべての取引を記録し、詳細なパフォーマンス分析ができます。<strong>残高ベース</strong>はスナップショットのみを取り込むため、指標が限定されます。<docsLink>詳しく見る</docsLink>",
+    "accountName": "口座名",
+    "group": "グループ(任意)",
+    "groupPlaceholder": "例: 老後資金",
+    "trackingMode": "トラッキングモード",
+    "transactions": "取引ベース",
+    "transactionsDescription": "詳細なパフォーマンス分析",
+    "holdings": "残高ベース",
     "holdingsDescription": "スナップショットのみ",
-    "holdingsWarning": "トランザクション履歴なしではパフォーマンス指標が制限されます。",
-    "notNow": "現在はありません",
-    "saving": "保存中...",
+    "holdingsWarning": "取引履歴がないため、パフォーマンス指標は限定されます。",
+    "notNow": "後で",
+    "saving": "保存しています...",
     "saveAndSync": "保存して同期",
-    "configured": "アカウント設定",
-    "configuredDescription": "選択したアカウントとの同期を開始しています設定...",
-    "saveFailed": "アカウントの保存に失敗しました"
+    "configured": "口座を設定しました",
+    "configuredDescription": "選択した設定で同期を開始します...",
+    "saveFailed": "口座の保存に失敗しました"
   },
   "errors": {
     "unknown": "不明なエラー"
