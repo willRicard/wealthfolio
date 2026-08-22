@@ -309,7 +309,7 @@ pub fn detect_addon_permissions(addon_files: &[AddonFile]) -> Vec<AddonPermissio
         (
             "currency",
             "exchangeRates",
-            vec!["getAll", "update", "add"],
+            vec!["getAll", "update", "add", "getRatesForDates"],
             "Access to exchange rates and currency data",
         ),
         (

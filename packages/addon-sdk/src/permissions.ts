@@ -124,7 +124,7 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
     id: 'currency',
     name: 'Exchange Rates',
     description: 'Access to currency exchange rates and conversion data',
-    functions: ['getAll', 'update', 'add'],
+    functions: ['getAll', 'update', 'add', 'getRatesForDates'],
     riskLevel: 'low',
   },
   {

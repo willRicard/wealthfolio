@@ -118,6 +118,7 @@ const accounts = await ctx.api.accounts.getAll();
 | `assets`      | Medium     | getProfile, updateProfile, updateDataSource |
 | `quotes`      | Low        | update, getHistory                          |
 | `performance` | Medium     | calculateHistory, calculateSummary          |
+| `currency`    | Low        | getAll, update, add, getRatesForDates       |
 | `goals`       | Medium     | getAll, create, update, updateAllocations   |
 | `settings`    | Medium     | get, update, backupDatabase                 |
 | `files`       | Medium     | openCsvDialog, openSaveDialog               |

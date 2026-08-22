@@ -8,6 +8,8 @@ and this project adheres to
 
 ### Added
 
+- `ExchangeRatesAPI.getRatesForDates(pairs)` for batched date-specific FX-rate
+  lookups, with per-pair errors and Wealthfolio's standard FX resolution rules.
 - `registerTranslations()` and `useAddonTranslation()` for translating addon UI
   strings. Resources live on a dedicated i18next instance inside the addon
   sandbox, isolated from the host catalog; the language follows the host

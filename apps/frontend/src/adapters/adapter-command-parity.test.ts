@@ -187,6 +187,25 @@ describe("adapter command parity", () => {
       categoryId: "EQUITY",
     });
   });
+
+  it("routes historical exchange-rate batches with the request payload", async () => {
+    const response = new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+    const request = {
+      pairs: [{ fromCurrency: "USD", toCurrency: "EUR", date: "2026-05-18" }],
+    };
+
+    await invoke("get_exchange_rates_for_dates", { request });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/exchange-rates/historical");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(request);
+  });
 });
 
 // ─── Scope routing coverage ───────────────────────────────────────────────────

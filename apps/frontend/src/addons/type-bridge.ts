@@ -20,6 +20,8 @@ import type {
   ContributionLimit,
   DepositsCalculation,
   ExchangeRate,
+  ExchangeRateDateQuery,
+  ExchangeRateDateResult,
   Goal,
   GoalFundingRule,
   GoalFundingRuleInput,
@@ -64,6 +66,7 @@ export interface InternalHostAPI {
   getExchangeRates(): Promise<ExchangeRate[]>;
   updateExchangeRate(updatedRate: ExchangeRate): Promise<ExchangeRate>;
   addExchangeRate(newRate: Omit<ExchangeRate, "id">): Promise<ExchangeRate>;
+  getExchangeRatesForDates(pairs: ExchangeRateDateQuery[]): Promise<ExchangeRateDateResult[]>;
 
   // Contribution limits
   getContributionLimit(): Promise<ContributionLimit[]>;
@@ -481,6 +484,7 @@ export function createSDKHostAPIBridge(
       getAll: internalAPI.getExchangeRates,
       update: internalAPI.updateExchangeRate,
       add: internalAPI.addExchangeRate,
+      getRatesForDates: internalAPI.getExchangeRatesForDates,
     },
     "currency",
     guard,

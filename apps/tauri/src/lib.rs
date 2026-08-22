@@ -448,6 +448,7 @@ pub fn run() {
             commands::settings::is_auto_update_check_enabled,
             commands::settings::update_settings,
             commands::settings::get_latest_exchange_rates,
+            commands::settings::get_exchange_rates_for_dates,
             commands::settings::update_exchange_rate,
             commands::settings::add_exchange_rate,
             commands::settings::delete_exchange_rate,

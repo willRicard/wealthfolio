@@ -102,6 +102,7 @@ export const COMMANDS: CommandMap = {
   update_exchange_rate: { method: "PUT", path: "/exchange-rates" },
   add_exchange_rate: { method: "POST", path: "/exchange-rates" },
   delete_exchange_rate: { method: "DELETE", path: "/exchange-rates" },
+  get_exchange_rates_for_dates: { method: "POST", path: "/exchange-rates/historical" },
   // Activities
   search_activities: { method: "POST", path: "/activities/search" },
   create_activity: { method: "POST", path: "/activities" },
@@ -839,6 +840,11 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "delete_exchange_rate": {
       const { rateId } = payload as { rateId: string };
       url += `/${encodeURIComponent(rateId)}`;
+      break;
+    }
+    case "get_exchange_rates_for_dates": {
+      const { request } = payload as { request: Record<string, unknown> };
+      body = JSON.stringify(request);
       break;
     }
     case "get_exchanges":

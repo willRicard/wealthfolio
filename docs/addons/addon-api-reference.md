@@ -692,6 +692,32 @@ const newRate = await ctx.api.exchangeRates.add({
 });
 ```
 
+#### `getRatesForDates(pairs: ExchangeRateDateQuery[]): Promise<ExchangeRateDateResult[]>`
+
+Gets one resolved exchange rate for each requested currency pair and date. Dates
+must use `YYYY-MM-DD`. Resolution follows Wealthfolio's standard FX rules,
+including currency normalization, inverse and triangulated rates, nearest-date
+lookup, and latest-rate fallback. The returned rate is therefore not guaranteed
+to come from an exact quote on the requested date.
+
+Results preserve the input order. A pair that cannot be resolved returns
+`rate: null` and an `error` without failing the rest of the batch.
+
+```typescript
+const results = await ctx.api.exchangeRates.getRatesForDates([
+  { fromCurrency: "USD", toCurrency: "EUR", date: "2024-01-15" },
+  { fromCurrency: "CAD", toCurrency: "JPY", date: "2024-01-15" },
+]);
+
+for (const result of results) {
+  if (result.rate !== null) {
+    console.log(result.fromCurrency, result.toCurrency, result.rate);
+  } else {
+    console.error(result.error);
+  }
+}
+```
+
 ---
 
 ## Contribution Limits API

@@ -2,7 +2,7 @@
 
 import { vi, describe, it, expect } from "vitest";
 import { createPermissionGuard, createSDKHostAPIBridge, type InternalHostAPI } from "./type-bridge";
-import { isBaselineCategory } from "@wealthfolio/addon-sdk";
+import { getPermissionCategory, isBaselineCategory } from "@wealthfolio/addon-sdk";
 
 describe("Addon Type Bridge", () => {
   describe("createSDKHostAPIBridge", () => {
@@ -104,6 +104,38 @@ describe("Addon Type Bridge", () => {
       expect(() => sdkAPI.settings.update({})).toThrow(
         "Addon 'test-addon' is not allowed to call settings.update",
       );
+    });
+
+    it("should guard and forward historical exchange-rate lookups", async () => {
+      const getExchangeRatesForDates = vi.fn().mockResolvedValue([]);
+      const guard = createPermissionGuard("test-addon", [
+        {
+          category: "currency",
+          purpose: "Historical exchange rates",
+          functions: [{ name: "getRatesForDates", isDeclared: true, isDetected: false }],
+        },
+      ]);
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getExchangeRatesForDates,
+          logError: vi.fn(),
+          logInfo: vi.fn(),
+          logWarn: vi.fn(),
+          logTrace: vi.fn(),
+          logDebug: vi.fn(),
+        } as unknown as InternalHostAPI,
+        "test-addon",
+        guard,
+      );
+      const pairs = [{ fromCurrency: "USD", toCurrency: "EUR", date: "2026-05-18" }];
+
+      await sdkAPI.exchangeRates.getRatesForDates(pairs);
+
+      expect(getExchangeRatesForDates).toHaveBeenCalledWith(pairs);
+    });
+
+    it("registers historical exchange-rate lookups in currency permissions", () => {
+      expect(getPermissionCategory("currency")?.functions).toContain("getRatesForDates");
     });
 
     it("should not grant detected-only function permissions", () => {

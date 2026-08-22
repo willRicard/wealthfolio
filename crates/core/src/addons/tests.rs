@@ -408,6 +408,36 @@ fn test_detect_addon_permissions_assets_and_market_data_sdk_categories() {
 }
 
 #[test]
+fn test_detect_addon_permissions_historical_exchange_rates() {
+    let addon_files = vec![AddonFile {
+        name: "addon.js".to_string(),
+        content: r#"
+            export default function enable(ctx) {
+                ctx.api.exchangeRates.getRatesForDates([
+                    { fromCurrency: "USD", toCurrency: "EUR", date: "2026-05-18" }
+                ]);
+            }
+        "#
+        .to_string(),
+        is_main: true,
+    }];
+
+    let detected_permissions = detect_addon_permissions(&addon_files);
+    let currency_permission = detected_permissions
+        .iter()
+        .find(|permission| permission.category == "currency")
+        .expect("currency permissions should be detected");
+
+    assert!(
+        currency_permission
+            .functions
+            .iter()
+            .any(|function| function.name == "getRatesForDates"),
+        "getRatesForDates should be detected under currency"
+    );
+}
+
+#[test]
 fn test_addon_manifest_to_installed() {
     let manifest = AddonManifest {
         id: "test-addon".to_string(),

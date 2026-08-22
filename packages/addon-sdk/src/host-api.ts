@@ -21,6 +21,8 @@ import type {
   ContributionLimit,
   DepositsCalculation,
   ExchangeRate,
+  ExchangeRateDateQuery,
+  ExchangeRateDateResult,
   Goal,
   GoalAllocation,
   Holding,
@@ -379,6 +381,18 @@ export interface ExchangeRatesAPI {
    * @returns Promise resolving to created exchange rate
    */
   add(newRate: Omit<ExchangeRate, 'id'>): Promise<ExchangeRate>;
+
+  /**
+   * Look up historical exchange rates for a batch of (currency pair, date) requests.
+   * Dates must use YYYY-MM-DD. Resolution follows Wealthfolio's core FX rules,
+   * including currency normalization, inverse or triangulated paths, nearest
+   * available quotes, and the existing latest-rate fallback.
+   * Never rejects for an individual unresolvable pair — each result carries
+   * either a rate or an error, so one bad pair doesn't fail the whole batch.
+   * @param pairs Currency pairs and dates to resolve
+   * @returns Promise resolving to one result per requested pair, in the same order
+   */
+  getRatesForDates(pairs: ExchangeRateDateQuery[]): Promise<ExchangeRateDateResult[]>;
 }
 
 /**

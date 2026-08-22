@@ -22,6 +22,7 @@ import {
 import {
   addExchangeRate,
   getExchangeRates,
+  getExchangeRatesForDates,
   updateExchangeRate,
   calculateDepositsForLimit,
   createContributionLimit,
@@ -453,6 +454,7 @@ export function createAddonHostAPI(
       getExchangeRates,
       updateExchangeRate,
       addExchangeRate,
+      getExchangeRatesForDates,
 
       getContributionLimit,
       createContributionLimit,

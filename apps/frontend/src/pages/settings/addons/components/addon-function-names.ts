@@ -58,9 +58,11 @@ export const FUNCTION_DISPLAY_NAMES: Record<string, string> = {
   "currency.getAll": "View exchange rates",
   "currency.update": "Update currency rates",
   "currency.add": "Add new exchange rates",
+  "currency.getRatesForDates": "View historical exchange rates",
   "exchangeRates.getAll": "View exchange rates",
   "exchangeRates.update": "Update currency rates",
   "exchangeRates.add": "Add new exchange rates",
+  "exchangeRates.getRatesForDates": "View historical exchange rates",
 
   // ContributionLimitsAPI functions
   "contributionLimits.getAll": "View contribution limits",

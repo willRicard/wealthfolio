@@ -148,7 +148,7 @@ Based on the actual code, these are the permission categories:
 | `assets`              | getProfile, updateProfile, updateDataSource | Medium     |
 | `quotes`              | update, getHistory                          | Low        |
 | `performance`         | calculateHistory, calculateSummary          | Medium     |
-| `currency`            | getAll, update, add                         | Low        |
+| `currency`            | getAll, update, add, getRatesForDates       | Low        |
 | `goals`               | getAll, create, update, updateAllocations   | Medium     |
 | `contribution-limits` | getAll, create, update, calculateDeposits   | Medium     |
 | `settings`            | get, update, backupDatabase                 | Medium     |
