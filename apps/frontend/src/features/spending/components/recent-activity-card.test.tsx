@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RecentActivityCard } from "./recent-activity-card";
 import type { CashActivity } from "../types/cash-activity";
 import type { CategoryMetaMap } from "./category-chips";
+import type { Activity } from "@/lib/types";
 
 vi.mock("@tanstack/react-query", () => ({
   useQueries: vi.fn(() => []),
@@ -135,5 +136,24 @@ describe("RecentActivityCard", () => {
     );
 
     expect(screen.getByText("Food")).toBeInTheDocument();
+  });
+
+  it("labels each activity with its own currency, not the base currency", () => {
+    const activity: Activity = {
+      id: "1",
+      accountId: "acc-1",
+      activityDate: new Date().toISOString().slice(0, 10),
+      activityType: "WITHDRAWAL",
+      amount: "100",
+      currency: "EUR",
+      notes: "Coffee",
+    } as unknown as Activity;
+
+    renderRecentActivityCard([activity]);
+
+    const row = screen.getByText("Coffee").closest("a");
+    expect(row).toBeInTheDocument();
+    expect(row?.textContent).toContain("€");
+    expect(row?.textContent).not.toContain("$");
   });
 });
