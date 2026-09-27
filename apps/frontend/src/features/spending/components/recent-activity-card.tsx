@@ -1,16 +1,12 @@
-import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { DashboardCard } from "@/components/dashboard-card";
-import { QueryKeys } from "@/lib/query-keys";
-import type { Activity } from "@/lib/types";
 import { cn, formatDateISO } from "@/lib/utils";
 import { PrivacyAmount, useDateFormatting } from "@wealthfolio/ui";
 
 import type { CashActivity } from "../types/cash-activity";
-import { getActivityAssignments } from "../adapters/cash-activities";
 import {
   getActivitySpendingAmount,
   getEffectiveCashActivityType,
@@ -48,22 +44,13 @@ export function RecentActivityCard({
       .slice(0, 10);
   }, [activities, accountTypeById]);
 
-  const assignmentQueries = useQueries({
-    queries: recent.map((a) => ({
-      queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "assignments", a.id],
-      queryFn: () => getActivityAssignments(a.id),
-      staleTime: 30_000,
-    })),
-  });
-
   const badgeByActivityId = useMemo(() => {
     const out = new Map<
       string,
       { name: string; color: string | null; icon: string | null } | null
     >();
-    recent.forEach((a, i) => {
-      const assignments = assignmentQueries[i]?.data ?? [];
-      const spending = assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
+    recent.forEach((a) => {
+      const spending = a.assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
       if (!spending) {
         out.set(a.id, null);
         return;
@@ -82,7 +69,7 @@ export function RecentActivityCard({
       });
     });
     return out;
-  }, [recent, assignmentQueries, categoriesMeta]);
+  }, [recent, categoriesMeta]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, typeof recent>();
@@ -155,7 +142,7 @@ export function RecentActivityCard({
               const parsedBaseAmount = parseFloat(a.baseAmount ?? "");
               const hasBaseAmount = Number.isFinite(parsedBaseAmount);
               const amount = hasBaseAmount ? Math.abs(parsedBaseAmount) : nativeAmount;
-              const displayCurrency = hasBaseAmount ? (a.baseCurrency ?? currency) : a.currency;
+              const displayCurrency = hasBaseAmount ? (a.baseCurrency ?? a.currency) : a.currency;
               const badge = badgeByActivityId.get(a.id);
               const needsReview = a.needsReview || (isOutflow && !badge);
 
@@ -198,7 +185,7 @@ export function RecentActivityCard({
                     )}
                   >
                     {isOutflow ? "−" : "+"}
-                    <PrivacyAmount value={amount} currency={a.currency} />
+                    <PrivacyAmount value={amount} currency={displayCurrency} />
                   </div>
                 </Link>
               );

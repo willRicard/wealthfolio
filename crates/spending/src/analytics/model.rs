@@ -67,8 +67,6 @@ pub struct DayCategoryBucket {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonthlyReport {
-    /// Currency shared by every monetary amount in this report.
-    pub currency: String,
     /// Currency of every monetary amount, including empty reports.
     pub base_currency: String,
     pub current: PeriodSummary,

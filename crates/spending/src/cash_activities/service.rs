@@ -1524,6 +1524,9 @@ mod tests {
             splits: Vec::new(),
             event_id: None,
             transfer_link_status: None,
+            net_amount: 0.0,
+            net_amount_base: None,
+            visible_spending_amount: 0.0,
         }];
 
         populate_base_amounts(

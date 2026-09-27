@@ -128,7 +128,6 @@ impl AnalyticsService {
         let s = self.settings.get().await?;
         if !s.enabled || s.account_ids.is_empty() {
             return Ok(MonthlyReport {
-                currency: base_currency.to_string(),
                 base_currency: base_currency.to_string(),
                 current: PeriodSummary::default(),
                 prior: PeriodSummary::default(),
@@ -148,7 +147,6 @@ impl AnalyticsService {
         };
         if requested_accounts.is_empty() {
             return Ok(MonthlyReport {
-                currency: base_currency.to_string(),
                 base_currency: base_currency.to_string(),
                 current: PeriodSummary::default(),
                 prior: PeriodSummary::default(),
@@ -163,7 +161,6 @@ impl AnalyticsService {
             self.resolve_spending_account_types(&s.account_ids)?;
         if all_spending_accounts.is_empty() {
             return Ok(MonthlyReport {
-                currency: base_currency.to_string(),
                 base_currency: base_currency.to_string(),
                 current: PeriodSummary::default(),
                 prior: PeriodSummary::default(),
@@ -182,7 +179,6 @@ impl AnalyticsService {
             .collect();
         if target_account_ids.is_empty() {
             return Ok(MonthlyReport {
-                currency: base_currency.to_string(),
                 base_currency: base_currency.to_string(),
                 current: PeriodSummary::default(),
                 prior: PeriodSummary::default(),
@@ -488,7 +484,6 @@ impl AnalyticsService {
         by_day_by_category.sort_by(|a, b| a.date.cmp(&b.date));
 
         Ok(MonthlyReport {
-            currency: base_currency.to_string(),
             base_currency: base_currency.to_string(),
             current,
             prior,

@@ -1,14 +1,9 @@
 import { render, screen } from "@/test/render";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RecentActivityCard } from "./recent-activity-card";
 import type { CashActivity } from "../types/cash-activity";
 import type { CategoryMetaMap } from "./category-chips";
-import type { Activity } from "@/lib/types";
-
-vi.mock("@tanstack/react-query", () => ({
-  useQueries: vi.fn(() => []),
-}));
 
 function renderRecentActivityCard(
   activities: CashActivity[] = [],
@@ -16,16 +11,12 @@ function renderRecentActivityCard(
 ) {
   return render(
     <MemoryRouter>
-      <RecentActivityCard activities={activities} categoriesMeta={categoriesMeta} currency="USD" />
+      <RecentActivityCard activities={activities} categoriesMeta={categoriesMeta} />
     </MemoryRouter>,
   );
 }
 
 describe("RecentActivityCard", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it("shows the standard empty state without a setup link", () => {
     renderRecentActivityCard();
 
@@ -48,6 +39,7 @@ describe("RecentActivityCard", () => {
         baseAmount: "0.67",
         baseCurrency: "USD",
         cashFlowBucket: "spending",
+        netAmount: -100,
         assignments: [],
         splits: [],
         notes: "Lunch",
@@ -72,6 +64,7 @@ describe("RecentActivityCard", () => {
         amount: "100",
         currency: "JPY",
         cashFlowBucket: "spending",
+        netAmount: -100,
         assignments: [],
         splits: [],
         notes: "Lunch",
@@ -83,7 +76,7 @@ describe("RecentActivityCard", () => {
       },
     ]);
 
-    expect(screen.getByText("¥100.00")).toBeInTheDocument();
+    expect(screen.getByText("¥100")).toBeInTheDocument();
   });
 
   it("uses the assignments included in the cash activity for its category badge", () => {
@@ -111,6 +104,7 @@ describe("RecentActivityCard", () => {
           baseAmount: "0.67",
           baseCurrency: "USD",
           cashFlowBucket: "spending",
+          netAmount: -100,
           assignments: [
             {
               id: "assignment-1",
@@ -139,7 +133,7 @@ describe("RecentActivityCard", () => {
   });
 
   it("labels each activity with its own currency, not the base currency", () => {
-    const activity: Activity = {
+    const activity: CashActivity = {
       id: "1",
       accountId: "acc-1",
       activityDate: new Date().toISOString().slice(0, 10),
@@ -147,7 +141,16 @@ describe("RecentActivityCard", () => {
       amount: "100",
       currency: "EUR",
       notes: "Coffee",
-    } as unknown as Activity;
+      cashFlowBucket: "spending",
+      assignments: [],
+      splits: [],
+      netAmount: -100,
+      status: "POSTED",
+      isUserModified: false,
+      needsReview: false,
+      createdAt: "2026-08-07T00:00:00.000Z",
+      updatedAt: "2026-08-07T00:00:00.000Z",
+    };
 
     renderRecentActivityCard([activity]);
 

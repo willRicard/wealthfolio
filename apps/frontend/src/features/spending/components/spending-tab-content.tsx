@@ -541,7 +541,7 @@ export default function SpendingTabContent() {
   // activity's currency (the pre-FX behavior) would mislabel multi-currency
   // accounts. Single-currency users see the same number either way.
   const currency = baseCurrency;
-  const whereItWentCurrency = report?.currency ?? currency;
+  const whereItWentCurrency = report?.baseCurrency ?? currency;
   const dashboardInsightHref = useMemo(() => {
     const preferDashboardPeriod =
       selection.kind === "range" ||
