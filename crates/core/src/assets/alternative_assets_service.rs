@@ -8,7 +8,7 @@
 //! - No activities (avoids activity clutter)
 //! - Just asset record + valuation quotes
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
@@ -30,6 +30,7 @@ use crate::errors::{Error, Result, ValidationError};
 use crate::events::{DomainEvent, DomainEventSink, NoOpDomainEventSink};
 use crate::quotes::constants::DATA_SOURCE_MANUAL;
 use crate::quotes::{Quote, QuoteServiceTrait};
+use crate::utils::time_utils::{parse_user_timezone_or_default, user_today};
 
 /// Service for managing alternative assets.
 ///
@@ -41,6 +42,7 @@ pub struct AlternativeAssetService {
     alternative_asset_repository: Arc<dyn AlternativeAssetRepositoryTrait>,
     asset_repository: Arc<dyn AssetRepositoryTrait>,
     quote_service: Arc<dyn QuoteServiceTrait>,
+    timezone: Arc<RwLock<String>>,
     event_sink: Arc<dyn DomainEventSink>,
 }
 
@@ -56,7 +58,19 @@ impl AlternativeAssetService {
             asset_repository,
             quote_service,
             event_sink: Arc::new(NoOpDomainEventSink),
+            timezone: Arc::new(RwLock::new(String::new())),
         }
+    }
+
+    pub fn with_timezone(mut self, timezone: Arc<RwLock<String>>) -> Self {
+        self.timezone = timezone;
+        self
+    }
+
+    fn today(&self) -> chrono::NaiveDate {
+        user_today(parse_user_timezone_or_default(
+            &self.timezone.read().unwrap(),
+        ))
     }
 
     /// Sets the domain event sink for this service.
@@ -394,7 +408,7 @@ impl AlternativeAssetServiceTrait for AlternativeAssetService {
         }
 
         // Update liability metadata with linked_asset_id
-        let new_metadata = Self::set_linked_asset_id(None, &request.target_asset_id);
+        let new_metadata = Self::set_linked_asset_id(liability.metadata, &request.target_asset_id);
         self.alternative_asset_repository
             .update_asset_metadata(&request.liability_id, Some(new_metadata))
             .await?;
@@ -587,7 +601,7 @@ impl AlternativeAssetServiceTrait for AlternativeAssetService {
         // Fetch latest quotes for all alternative assets, restricted to rows
         // with day <= today so future-dated payoff rows (e.g. a mortgage's
         // planned 2041 zero) do not zero out the balance today.
-        let as_of = chrono::Local::now().date_naive();
+        let as_of = self.today();
         let quotes = self
             .quote_service
             .get_latest_quotes_as_of(&asset_ids, as_of)?;
@@ -694,6 +708,7 @@ mod tests {
     // assert_eq!(…, Decimal::new(180_000, 0)) will fail.
     // ---------------------------------------------------------------------------
     struct MockQuoteService {
+        cutoff: Arc<std::sync::Mutex<Option<NaiveDate>>>,
         /// Quotes returned by get_latest_quotes_as_of (correct, today-bounded path).
         as_of_quotes: HashMap<String, Quote>,
         /// Quotes returned by get_latest_quotes (old, unbounded path — should NOT be called).
@@ -717,8 +732,9 @@ mod tests {
         fn get_latest_quotes_as_of(
             &self,
             symbols: &[String],
-            _as_of: NaiveDate,
+            as_of: NaiveDate,
         ) -> Result<HashMap<String, Quote>> {
+            *self.cutoff.lock().unwrap() = Some(as_of);
             Ok(symbols
                 .iter()
                 .filter_map(|s| self.as_of_quotes.get(s).cloned().map(|q| (s.clone(), q)))
@@ -1038,22 +1054,29 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Minimal mock: AlternativeAssetRepository — not called by get_alternative_holdings
+    // Minimal mock: AlternativeAssetRepository — records metadata writes
     // ---------------------------------------------------------------------------
-    struct NoOpAltAssetRepository;
+    #[derive(Default)]
+    struct MockAltAssetRepository {
+        metadata_writes: std::sync::Mutex<Vec<(String, Option<Value>)>>,
+    }
 
     #[async_trait]
-    impl AlternativeAssetRepositoryTrait for NoOpAltAssetRepository {
+    impl AlternativeAssetRepositoryTrait for MockAltAssetRepository {
         async fn delete_alternative_asset(&self, _asset_id: &str) -> Result<()> {
             unimplemented!("not used in this test")
         }
 
         async fn update_asset_metadata(
             &self,
-            _asset_id: &str,
-            _metadata: Option<serde_json::Value>,
+            asset_id: &str,
+            metadata: Option<serde_json::Value>,
         ) -> Result<()> {
-            unimplemented!("not used in this test")
+            self.metadata_writes
+                .lock()
+                .unwrap()
+                .push((asset_id.to_string(), metadata));
+            Ok(())
         }
 
         fn find_liabilities_linked_to(&self, _linked_asset_id: &str) -> Result<Vec<String>> {
@@ -1147,6 +1170,63 @@ mod tests {
         assert!(meta.get("purchase_date").is_some());
     }
 
+    #[tokio::test]
+    async fn link_liability_preserves_existing_metadata() {
+        let original = json!({
+            "sub_type": "mortgage",
+            "original_amount": "500000",
+            "origination_date": "2020-01-01",
+            "purchase_price": "500000",
+            "purchase_date": "2020-01-01",
+            "custom": { "label": "keep me" },
+        });
+        let mut previously_linked = original.clone();
+        previously_linked["linked_asset_id"] = json!("old-property");
+
+        for metadata in [None, Some(original), Some(previously_linked)] {
+            let alt_repo = Arc::new(MockAltAssetRepository::default());
+            let asset_repo = MockAssetRepository {
+                assets: vec![
+                    super::super::Asset {
+                        id: "mortgage".into(),
+                        kind: AssetKind::Liability,
+                        metadata: metadata.clone(),
+                        ..Default::default()
+                    },
+                    super::super::Asset {
+                        id: "property".into(),
+                        kind: AssetKind::Property,
+                        ..Default::default()
+                    },
+                ],
+            };
+            let service = AlternativeAssetService::new(
+                alt_repo.clone(),
+                Arc::new(asset_repo),
+                Arc::new(MockQuoteService {
+                    cutoff: Arc::default(),
+                    as_of_quotes: HashMap::new(),
+                    latest_quotes: HashMap::new(),
+                }),
+            );
+            let response = service
+                .link_liability(LinkLiabilityRequest {
+                    liability_id: "mortgage".into(),
+                    target_asset_id: "property".into(),
+                })
+                .await
+                .unwrap();
+
+            let mut expected = metadata.unwrap_or_else(|| json!({}));
+            expected["linked_asset_id"] = json!("property");
+            assert_eq!(response.linked_asset_id.as_deref(), Some("property"));
+            assert_eq!(
+                *alt_repo.metadata_writes.lock().unwrap(),
+                vec![("mortgage".into(), Some(expected))],
+            );
+        }
+    }
+
     #[test]
     fn test_set_and_remove_linked_asset_id() {
         let metadata = AlternativeAssetService::set_linked_asset_id(None, "some-uuid-for-property");
@@ -1179,7 +1259,9 @@ mod tests {
         let past_quote = make_quote(ASSET_ID, Decimal::new(180_000, 0), past_day);
         let future_zero_quote = make_quote(ASSET_ID, Decimal::ZERO, future_day);
 
+        let cutoff = Arc::new(std::sync::Mutex::new(None));
         let quote_svc = MockQuoteService {
+            cutoff: cutoff.clone(),
             as_of_quotes: [(ASSET_ID.to_string(), past_quote)].into_iter().collect(),
             latest_quotes: [(ASSET_ID.to_string(), future_zero_quote)]
                 .into_iter()
@@ -1204,17 +1286,28 @@ mod tests {
         let asset_repo = MockAssetRepository {
             assets: vec![liability],
         };
-        let alt_repo = NoOpAltAssetRepository;
+        let alt_repo = MockAltAssetRepository::default();
 
+        let timezone = Arc::new(RwLock::new("Pacific/Kiritimati".to_string()));
         let service = AlternativeAssetService::new(
             Arc::new(alt_repo),
             Arc::new(asset_repo),
             Arc::new(quote_svc),
-        );
+        )
+        .with_timezone(timezone.clone());
 
         let holdings = service
             .get_alternative_holdings()
             .expect("get_alternative_holdings should succeed");
+
+        for zone in ["Pacific/Kiritimati", "Etc/GMT+12"] {
+            *timezone.write().unwrap() = zone.to_string();
+            service.get_alternative_holdings().unwrap();
+            assert_eq!(
+                *cutoff.lock().unwrap(),
+                Some(user_today(parse_user_timezone_or_default(zone)))
+            );
+        }
 
         assert_eq!(holdings.len(), 1, "expected exactly one holding");
         assert_eq!(

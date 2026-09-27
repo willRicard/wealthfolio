@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, RawQuery, State},
+    extract::{Path, Query, RawQuery},
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -25,7 +25,7 @@ use wealthfolio_spending::cash_activities::{
     CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
+    CategorizationRule, NewCategorizationRule, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -34,14 +34,14 @@ use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 const MAX_BULK_CATEGORY_ASSIGNMENTS: usize = 1_000;
 
 async fn get_spending_settings(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
 ) -> ApiResult<Json<SpendingSettings>> {
     let s = state.spending_settings_service.get().await?;
     Ok(Json(s))
 }
 
 async fn update_spending_settings(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<SpendingSettingsUpdate>,
 ) -> ApiResult<Json<SpendingSettings>> {
     let (before, after) = state
@@ -66,17 +66,18 @@ async fn update_spending_settings(
     } else {
         Vec::new()
     };
-    spawn_auto_categorize(state.categorization_rules_service.clone(), to_categorize);
+    spawn_auto_categorize(&state, to_categorize);
     Ok(Json(after))
 }
 
 /// Fire-and-forget auto-categorize for direct (user-initiated) triggers.
 /// See the Tauri counterpart in `apps/tauri/src/commands/spending.rs` for the
 /// design rationale.
-fn spawn_auto_categorize(rules_service: Arc<CategorizationRulesService>, account_ids: Vec<String>) {
+fn spawn_auto_categorize(state: &AppState, account_ids: Vec<String>) {
     if account_ids.is_empty() {
         return;
     }
+    let rules_service = state.categorization_rules_service.clone();
     tokio::spawn(async move {
         match rules_service
             .rerun_all(&account_ids, /* only_uncategorized */ true)
@@ -105,10 +106,7 @@ async fn spawn_auto_categorize_for_opted_in_accounts(state: &Arc<AppState>) {
     if !settings.enabled {
         return;
     }
-    spawn_auto_categorize(
-        state.categorization_rules_service.clone(),
-        settings.account_ids,
-    );
+    spawn_auto_categorize(state, settings.account_ids);
 }
 
 async fn spending_enabled(state: &Arc<AppState>) -> ApiResult<bool> {
@@ -116,7 +114,7 @@ async fn spending_enabled(state: &Arc<AppState>) -> ApiResult<bool> {
 }
 
 async fn list_cash_activities(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     RawQuery(raw_query): RawQuery,
 ) -> ApiResult<Json<Vec<CashActivity>>> {
     if !spending_enabled(&state).await? {
@@ -170,7 +168,7 @@ fn parse_cash_activity_filter(raw_query: Option<String>) -> ApiResult<CashActivi
 }
 
 async fn search_cash_activities(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(request): Json<CashActivitySearchRequest>,
 ) -> ApiResult<Json<CashActivitySearchResponse>> {
     if !spending_enabled(&state).await? {
@@ -181,8 +179,8 @@ async fn search_cash_activities(
             base_currency: None,
         }));
     }
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     let response = state
         .cash_activity_service
         .search(request, Some(base.as_str()), &timezone)
@@ -197,7 +195,7 @@ struct SetEventBody {
 }
 
 async fn set_activity_event(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(activity_id): Path<String>,
     Json(body): Json<SetEventBody>,
 ) -> ApiResult<Json<Activity>> {
@@ -209,7 +207,7 @@ async fn set_activity_event(
 }
 
 async fn get_activity_assignments(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(activity_id): Path<String>,
 ) -> ApiResult<Json<Vec<ActivityTaxonomyAssignment>>> {
     let rows = state
@@ -227,7 +225,7 @@ struct AssignBody {
 }
 
 async fn assign_activity_category(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(activity_id): Path<String>,
     Json(body): Json<AssignBody>,
 ) -> ApiResult<Json<ActivityTaxonomyAssignment>> {
@@ -239,7 +237,7 @@ async fn assign_activity_category(
 }
 
 async fn unassign_activity_category(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path((activity_id, taxonomy_id)): Path<(String, String)>,
 ) -> ApiResult<()> {
     state
@@ -250,7 +248,7 @@ async fn unassign_activity_category(
 }
 
 async fn get_activity_splits(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(activity_id): Path<String>,
 ) -> ApiResult<Json<Vec<ActivitySplit>>> {
     let rows = state
@@ -261,7 +259,7 @@ async fn get_activity_splits(
 }
 
 async fn replace_activity_splits(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(activity_id): Path<String>,
     Json(body): Json<Vec<NewActivitySplit>>,
 ) -> ApiResult<Json<Vec<ActivitySplit>>> {
@@ -273,7 +271,7 @@ async fn replace_activity_splits(
 }
 
 async fn clear_activity_splits(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(activity_id): Path<String>,
 ) -> ApiResult<()> {
     state
@@ -284,7 +282,7 @@ async fn clear_activity_splits(
 }
 
 async fn bulk_assign_categories(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(items): Json<Vec<wealthfolio_spending::activity_assignments::BulkCategoryAssignment>>,
 ) -> ApiResult<Json<Vec<ActivityTaxonomyAssignment>>> {
     if items.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
@@ -300,13 +298,13 @@ async fn bulk_assign_categories(
 }
 
 async fn list_categorization_rules(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<CategorizationRule>>> {
     Ok(Json(state.categorization_rules_service.list().await?))
 }
 
 async fn create_categorization_rule(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<NewCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
     let created = state.categorization_rules_service.create(payload).await?;
@@ -315,7 +313,7 @@ async fn create_categorization_rule(
 }
 
 async fn update_categorization_rule(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
@@ -328,7 +326,7 @@ async fn update_categorization_rule(
 }
 
 async fn upsert_categorization_rule(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<NewCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
     let saved = state.categorization_rules_service.upsert(payload).await?;
@@ -337,7 +335,7 @@ async fn upsert_categorization_rule(
 }
 
 async fn delete_categorization_rule(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult<()> {
     state.categorization_rules_service.delete(&id).await?;
@@ -352,7 +350,7 @@ struct RerunRulesBody {
 }
 
 async fn rerun_categorization_rules(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(body): Json<RerunRulesBody>,
 ) -> ApiResult<Json<usize>> {
     let s = state.spending_settings_service.get().await?;
@@ -368,7 +366,7 @@ async fn rerun_categorization_rules(
 }
 
 async fn list_rule_presets(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<wealthfolio_spending::categorization_rules::RulePresetSummary>>> {
     if !spending_enabled(&state).await? {
         return Ok(Json(Vec::new()));
@@ -379,7 +377,7 @@ async fn list_rule_presets(
 }
 
 async fn remove_rule_preset(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(preset_id): Path<String>,
 ) -> ApiResult<Json<wealthfolio_spending::categorization_rules::RemovePresetResult>> {
     Ok(Json(
@@ -391,7 +389,7 @@ async fn remove_rule_preset(
 }
 
 async fn import_rule_preset(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(preset_id): Path<String>,
 ) -> ApiResult<Json<wealthfolio_spending::categorization_rules::ImportPresetResult>> {
     let taxonomies = state.taxonomy_service.get_taxonomies_with_categories()?;
@@ -410,7 +408,9 @@ async fn import_rule_preset(
     Ok(Json(result))
 }
 
-async fn list_event_types(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<EventType>>> {
+async fn list_event_types(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+) -> ApiResult<Json<Vec<EventType>>> {
     if !spending_enabled(&state).await? {
         return Ok(Json(Vec::new()));
     }
@@ -418,7 +418,7 @@ async fn list_event_types(State(state): State<Arc<AppState>>) -> ApiResult<Json<
 }
 
 async fn create_event_type(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<NewEventType>,
 ) -> ApiResult<Json<EventType>> {
     Ok(Json(state.events_service.create_type(payload).await?))
@@ -443,7 +443,7 @@ where
 }
 
 async fn update_event_type(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<UpdateEventTypeBody>,
 ) -> ApiResult<Json<EventType>> {
@@ -456,14 +456,16 @@ async fn update_event_type(
 }
 
 async fn delete_event_type(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult<()> {
     state.events_service.delete_type(&id).await?;
     Ok(())
 }
 
-async fn list_events(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<Event>>> {
+async fn list_events(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+) -> ApiResult<Json<Vec<Event>>> {
     if !spending_enabled(&state).await? {
         return Ok(Json(Vec::new()));
     }
@@ -471,21 +473,24 @@ async fn list_events(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<E
 }
 
 async fn create_event(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<NewEvent>,
 ) -> ApiResult<Json<Event>> {
     Ok(Json(state.events_service.create_event(payload).await?))
 }
 
 async fn update_event(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateEvent>,
 ) -> ApiResult<Json<Event>> {
     Ok(Json(state.events_service.update_event(&id, payload).await?))
 }
 
-async fn delete_event(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult<()> {
+async fn delete_event(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<()> {
     state.events_service.delete_event(&id).await?;
     Ok(())
 }
@@ -497,11 +502,11 @@ struct BudgetQuery {
 }
 
 async fn get_budget(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -511,12 +516,12 @@ async fn get_budget(
 }
 
 async fn upsert_budget_target(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Json(payload): Json<NewBudgetTarget>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -526,12 +531,12 @@ async fn upsert_budget_target(
 }
 
 async fn delete_budget_target(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -541,12 +546,12 @@ async fn delete_budget_target(
 }
 
 async fn upsert_budget_rollover_setting(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Json(payload): Json<NewBudgetRolloverSetting>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -556,12 +561,12 @@ async fn upsert_budget_rollover_setting(
 }
 
 async fn delete_budget_rollover_setting(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -571,12 +576,12 @@ async fn delete_budget_rollover_setting(
 }
 
 async fn create_budget_group(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Json(payload): Json<NewBudgetGroup>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -586,13 +591,13 @@ async fn create_budget_group(
 }
 
 async fn update_budget_group(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateBudgetGroup>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -608,13 +613,13 @@ struct DeleteBudgetGroupBody {
 }
 
 async fn delete_budget_group(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Path(id): Path<String>,
     Json(payload): Json<DeleteBudgetGroupBody>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -637,12 +642,12 @@ struct AssignCategoryToGroupBody {
 }
 
 async fn assign_category_to_group(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
     Json(payload): Json<AssignCategoryToGroupBody>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -658,11 +663,11 @@ async fn assign_category_to_group(
 }
 
 async fn reset_budget_groups(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Query(query): Query<BudgetQuery>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -672,11 +677,11 @@ async fn reset_budget_groups(
 }
 
 async fn get_spending_report(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<ReportRequest>,
 ) -> ApiResult<Json<MonthlyReport>> {
-    let timezone = state.timezone.read().unwrap().clone();
-    let base_currency = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone()?;
+    let base_currency = state.base_currency()?;
     Ok(Json(
         state
             .spending_analytics_service
@@ -686,11 +691,11 @@ async fn get_spending_report(
 }
 
 async fn get_spending_insight(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<SpendingInsightRequest>,
 ) -> ApiResult<Json<SpendingInsight>> {
-    let currency = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let currency = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .spending_insight_service
@@ -709,11 +714,11 @@ struct CopyBudgetTargetsBody {
 }
 
 async fn copy_budget_targets(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(payload): Json<CopyBudgetTargetsBody>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
+    let base = state.base_currency()?;
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .budget_service
@@ -729,7 +734,7 @@ async fn copy_budget_targets(
 }
 
 async fn get_event_spending_summaries(
-    State(state): State<Arc<AppState>>,
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(request): Json<Option<EventSummariesRequest>>,
 ) -> ApiResult<Json<Vec<EventSpendingSummary>>> {
     let mut req = request.unwrap_or(EventSummariesRequest {
@@ -738,9 +743,9 @@ async fn get_event_spending_summaries(
         currency: None,
     });
     if req.currency.is_none() {
-        req.currency = Some(state.base_currency.read().unwrap().clone());
+        req.currency = Some(state.base_currency()?);
     }
-    let timezone = state.timezone.read().unwrap().clone();
+    let timezone = state.timezone()?;
     Ok(Json(
         state
             .spending_analytics_service
@@ -749,7 +754,7 @@ async fn get_event_spending_summaries(
     ))
 }
 
-pub fn router() -> Router<Arc<AppState>> {
+pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
     Router::new()
         .route("/spending/settings", get(get_spending_settings))
         .route("/spending/settings", put(update_spending_settings))

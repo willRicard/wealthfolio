@@ -69,6 +69,8 @@ pub struct DayCategoryBucket {
 pub struct MonthlyReport {
     /// Currency shared by every monetary amount in this report.
     pub currency: String,
+    /// Currency of every monetary amount, including empty reports.
+    pub base_currency: String,
     pub current: PeriodSummary,
     pub prior: PeriodSummary,
     pub spending_breakdown: Vec<CategoryBreakdownRow>,

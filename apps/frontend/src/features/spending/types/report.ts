@@ -32,6 +32,8 @@ export interface DayCategoryBucket {
 export interface MonthlyReport {
   /** Currency shared by every monetary amount in the report. */
   currency: string;
+  /** Currency of all monetary amounts; rates are taken at each period's end. */
+  baseCurrency: string;
   current: PeriodSummary;
   prior: PeriodSummary;
   spendingBreakdown: CategoryBreakdownRow[];
