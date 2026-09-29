@@ -1,6 +1,7 @@
 import { render, screen } from "@/test/render";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { FormattingProvider } from "@wealthfolio/ui";
 import { RecentActivityCard } from "./recent-activity-card";
 import type { CashActivity } from "../types/cash-activity";
 import type { CategoryMetaMap } from "./category-chips";
@@ -8,10 +9,13 @@ import type { CategoryMetaMap } from "./category-chips";
 function renderRecentActivityCard(
   activities: CashActivity[] = [],
   categoriesMeta: CategoryMetaMap = new Map(),
+  timezone?: string,
 ) {
   return render(
     <MemoryRouter>
-      <RecentActivityCard activities={activities} categoriesMeta={categoriesMeta} />
+      <FormattingProvider locale="en-US" timezone={timezone}>
+        <RecentActivityCard activities={activities} categoriesMeta={categoriesMeta} />
+      </FormattingProvider>
     </MemoryRouter>,
   );
 }
@@ -77,6 +81,36 @@ describe("RecentActivityCard", () => {
     ]);
 
     expect(screen.getByText("¥100")).toBeInTheDocument();
+  });
+
+  it("groups activity dates in the configured timezone", () => {
+    renderRecentActivityCard(
+      [
+        {
+          id: "activity-1",
+          accountId: "account-1",
+          activityType: "WITHDRAWAL",
+          activityDate: "2020-08-07T02:00:00.000Z",
+          amount: "10",
+          currency: "USD",
+          cashFlowBucket: "spending",
+          netAmount: -10,
+          assignments: [],
+          splits: [],
+          notes: "Late dinner",
+          status: "POSTED",
+          isUserModified: false,
+          needsReview: false,
+          createdAt: "2020-08-07T02:00:00.000Z",
+          updatedAt: "2020-08-07T02:00:00.000Z",
+        },
+      ],
+      new Map(),
+      "America/Toronto",
+    );
+
+    expect(screen.getByText("Thu, Aug 6")).toBeInTheDocument();
+    expect(screen.queryByText("Fri, Aug 7")).not.toBeInTheDocument();
   });
 
   it("uses the assignments included in the cash activity for its category badge", () => {

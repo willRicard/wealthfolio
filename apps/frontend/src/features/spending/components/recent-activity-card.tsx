@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import { DashboardCard } from "@/components/dashboard-card";
+import { formatZonedDateKey } from "@/features/spending/lib/timezone";
 import { cn, formatDateISO } from "@/lib/utils";
-import { PrivacyAmount, useDateFormatting } from "@wealthfolio/ui";
+import { PrivacyAmount, useDateFormatting, useLocalizationSettings } from "@wealthfolio/ui";
 
 import type { CashActivity } from "../types/cash-activity";
 import {
@@ -28,6 +29,7 @@ export function RecentActivityCard({
   uncategorizedCount?: number;
 }) {
   const formatting = useDateFormatting();
+  const { timezone } = useLocalizationSettings();
   const { t } = useTranslation();
   const recent = useMemo(() => {
     return activities
@@ -74,19 +76,19 @@ export function RecentActivityCard({
   const grouped = useMemo(() => {
     const m = new Map<string, typeof recent>();
     for (const a of recent) {
-      const dateKey = a.activityDate.slice(0, 10);
+      const dateKey = formatZonedDateKey(new Date(a.activityDate), timezone);
       const arr = m.get(dateKey) ?? [];
       arr.push(a);
       m.set(dateKey, arr);
     }
     return Array.from(m.entries());
-  }, [recent]);
+  }, [recent, timezone]);
 
   const dayLabel = (key: string): string => {
     const today = new Date();
-    const todayKey = formatDateISO(today);
-    const yest = new Date(today);
-    yest.setDate(today.getDate() - 1);
+    const todayKey = formatZonedDateKey(today, timezone);
+    const yest = new Date(`${todayKey}T12:00:00`);
+    yest.setDate(yest.getDate() - 1);
     const yestKey = formatDateISO(yest);
     if (key === todayKey) return t("spending:dashboard.today");
     if (key === yestKey) return t("spending:dashboard.yesterday");
