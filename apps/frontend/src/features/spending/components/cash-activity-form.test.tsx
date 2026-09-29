@@ -2,11 +2,22 @@ import { fireEvent, render, screen, waitFor } from "@/test/render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { updateActivity } from "@/adapters";
+import { createActivity, updateActivity } from "@/adapters";
 import type { Activity } from "@/lib/types";
 import { CashActivityForm } from "./cash-activity-form";
+
+beforeAll(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
 
 vi.mock("@/adapters", () => ({
   createActivity: vi.fn(),
@@ -35,7 +46,10 @@ vi.mock("@/hooks/use-settings", () => {
   const data = { baseCurrency: "CAD" };
   return { useSettings: () => ({ data }) };
 });
-vi.mock("@/hooks/use-platform", () => ({ useIsMobileViewport: () => false }));
+const platformMock = vi.hoisted(() => ({ isMobileViewport: false }));
+vi.mock("@/hooks/use-platform", () => ({
+  useIsMobileViewport: () => platformMock.isMobileViewport,
+}));
 vi.mock("@/hooks/use-taxonomies", () => {
   const result = { data: null };
   return { useTaxonomy: () => result };
@@ -70,7 +84,10 @@ const foreignCharge = {
 } as unknown as Activity;
 
 describe("CashActivityForm currency", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    platformMock.isMobileViewport = false;
+  });
 
   /**
    * The currency used to be recomputed from the account on every save. Saving
@@ -194,5 +211,22 @@ describe("CashActivityForm currency", () => {
       currency: "CAD",
       fxRate: null,
     });
+  });
+});
+
+describe("CashActivityForm mobile steps", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    platformMock.isMobileViewport = true;
+  });
+
+  it("moves to the details step without submitting the form", async () => {
+    render(<CashActivityForm open onOpenChange={vi.fn()} />, { wrapper });
+
+    const nextButton = await screen.findByRole("button", { name: /next/i });
+    expect(fireEvent.click(nextButton)).toBe(false);
+
+    expect(await screen.findByRole("button", { name: /create transaction/i })).toBeInTheDocument();
+    expect(createActivity).not.toHaveBeenCalled();
   });
 });

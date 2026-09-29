@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -430,7 +430,11 @@ export function CashActivityForm({
   const showChoiceFields = !isMobileCreate || currentStep === 1;
   const showDetailsFields = !isMobileCreate || currentStep === 2;
 
-  const handleMobileNext = async () => {
+  const handleMobileNext = async (event: MouseEvent<HTMLButtonElement>) => {
+    // This button is reused as the submit button when the step changes. Some
+    // mobile browsers evaluate the click's default action after that update and
+    // submit the form despite the button having started as type="button".
+    event.preventDefault();
     const isValid = await form.trigger(["accountId", "activityType"]);
     if (isValid) setCurrentStep(2);
   };
