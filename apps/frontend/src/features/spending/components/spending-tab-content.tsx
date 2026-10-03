@@ -74,6 +74,7 @@ import {
   getZonedDateParts,
   localDateBoundaryToISOString,
   localDateParts,
+  matchingPreviousMonthDates,
   zonedCalendarDateBoundaryToDate,
 } from "../lib/timezone";
 import { BudgetLineChartCard } from "./budget-line-chart-card";
@@ -293,6 +294,16 @@ function priorRange(
   if (!range?.from || !range?.to) return undefined;
   if (selection && usesCalendarMonthComparison(selection)) {
     return previousFullMonthRange(range);
+  }
+  if (selection?.kind === "period" && selection.code === "MTD") {
+    const matching = matchingPreviousMonthDates(
+      localDateParts(range.from),
+      localDateParts(range.to),
+    );
+    return {
+      from: localDateFromParts(matching.start),
+      to: localDateFromParts(matching.end),
+    };
   }
   const start = localDateParts(range.from);
   const end = localDateParts(range.to);

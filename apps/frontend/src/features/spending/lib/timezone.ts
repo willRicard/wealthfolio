@@ -161,6 +161,21 @@ export function daysInCalendarMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+export function matchingPreviousMonthDates(start: ZonedCalendarDate, end: ZonedCalendarDate) {
+  const previousStart = addCalendarMonths(start, -1);
+  const previousEnd = addCalendarMonths(end, -1);
+  return {
+    start: previousStart,
+    end: {
+      ...previousEnd,
+      day:
+        end.day === daysInCalendarMonth(end.year, end.month)
+          ? daysInCalendarMonth(previousEnd.year, previousEnd.month)
+          : previousEnd.day,
+    },
+  };
+}
+
 export function calendarDaysBetweenInclusive(
   start: ZonedCalendarDate,
   end: ZonedCalendarDate,

@@ -66,8 +66,8 @@ import {
   calendarDaysBetweenInclusive,
   calendarMonthsBetweenInclusive,
   createZonedDayHourFormatter,
-  daysInCalendarMonth,
   getZonedDateParts,
+  matchingPreviousMonthDates,
   zonedCalendarDateBoundaryToDate,
 } from "../lib/timezone";
 
@@ -103,20 +103,7 @@ function monthToDateRange(timezone?: string | null): ReportsRange {
 function previousMonthMatchingRange(range: ReportsRange, timezone?: string | null): ReportsRange {
   const currentStart = getZonedDateParts(range.start, timezone);
   const currentEnd = getZonedDateParts(range.end, timezone);
-  const priorStartBase = addCalendarMonths(currentStart, -1);
-  const priorEndBase = addCalendarMonths(currentEnd, -1);
-  const priorStart = {
-    ...priorStartBase,
-    day: Math.min(currentStart.day, daysInCalendarMonth(priorStartBase.year, priorStartBase.month)),
-  };
-  const priorEnd = {
-    ...priorEndBase,
-    // Completed months compare in full; in-progress months keep matching dates.
-    day:
-      currentEnd.day === daysInCalendarMonth(currentEnd.year, currentEnd.month)
-        ? daysInCalendarMonth(priorEndBase.year, priorEndBase.month)
-        : Math.min(currentEnd.day, daysInCalendarMonth(priorEndBase.year, priorEndBase.month)),
-  };
+  const { start: priorStart, end: priorEnd } = matchingPreviousMonthDates(currentStart, currentEnd);
 
   return {
     start: zonedCalendarDateBoundaryToDate(priorStart, "start", timezone),

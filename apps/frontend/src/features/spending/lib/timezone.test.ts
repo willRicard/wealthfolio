@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { addCalendarMonths, getZonedDateParts, zonedCalendarDateBoundaryToDate } from "./timezone";
+import {
+  addCalendarMonths,
+  getZonedDateParts,
+  matchingPreviousMonthDates,
+  zonedCalendarDateBoundaryToDate,
+} from "./timezone";
 
 describe("spending timezone helpers", () => {
   it("converts configured timezone day boundaries to UTC instants", () => {
@@ -35,5 +40,30 @@ describe("spending timezone helpers", () => {
       month: 2,
       day: 28,
     });
+  });
+
+  it.each([
+    [
+      { year: 2026, month: 10, day: 3 },
+      { year: 2026, month: 9, day: 3 },
+    ],
+    [
+      { year: 2026, month: 10, day: 31 },
+      { year: 2026, month: 9, day: 30 },
+    ],
+    [
+      { year: 2026, month: 3, day: 31 },
+      { year: 2026, month: 2, day: 28 },
+    ],
+    [
+      { year: 2026, month: 1, day: 3 },
+      { year: 2025, month: 12, day: 3 },
+    ],
+  ])("matches the previous calendar month through %o", (end, expectedEnd) => {
+    const start = { ...end, day: 1 };
+    const result = matchingPreviousMonthDates(start, end);
+
+    expect(result.start).toEqual({ ...expectedEnd, day: 1 });
+    expect(result.end).toEqual(expectedEnd);
   });
 });
