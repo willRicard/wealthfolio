@@ -46,29 +46,58 @@ export function RecentActivityCard({
       .slice(0, 10);
   }, [activities, accountTypeById]);
 
-  const badgeByActivityId = useMemo(() => {
+  const badgesByActivityId = useMemo(() => {
     const out = new Map<
       string,
-      { name: string; color: string | null; icon: string | null } | null
+      { id: string; name: string; color: string | null; icon: string | null }[]
     >();
     recent.forEach((a) => {
+      const splitCategoryIds = [
+        ...new Set(
+          a.splits
+            .filter((split) => split.taxonomyId === SPENDING_TAXONOMY)
+            .map((split) => split.categoryId),
+        ),
+      ];
+      if (splitCategoryIds.length > 0) {
+        out.set(
+          a.id,
+          splitCategoryIds.flatMap((id) => {
+            const meta = categoriesMeta.get(id);
+            if (!meta) return [];
+            const parent = meta.parentId ? categoriesMeta.get(meta.parentId) : undefined;
+            return [
+              {
+                id,
+                name: meta.name,
+                color: meta.color ?? parent?.color ?? null,
+                icon: meta.icon ?? parent?.icon ?? null,
+              },
+            ];
+          }),
+        );
+        return;
+      }
       const spending = a.assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
       if (!spending) {
-        out.set(a.id, null);
+        out.set(a.id, []);
         return;
       }
       const meta = categoriesMeta.get(spending.categoryId);
       const topId = meta?.parentId ?? spending.categoryId;
       const top = categoriesMeta.get(topId) ?? meta;
       if (!top) {
-        out.set(a.id, null);
+        out.set(a.id, []);
         return;
       }
-      out.set(a.id, {
-        name: top.name,
-        color: top.color,
-        icon: meta?.icon ?? top.icon,
-      });
+      out.set(a.id, [
+        {
+          id: topId,
+          name: top.name,
+          color: top.color,
+          icon: meta?.icon ?? top.icon,
+        },
+      ]);
     });
     return out;
   }, [recent, categoriesMeta]);
@@ -145,8 +174,8 @@ export function RecentActivityCard({
               const hasBaseAmount = Number.isFinite(parsedBaseAmount);
               const amount = hasBaseAmount ? Math.abs(parsedBaseAmount) : nativeAmount;
               const displayCurrency = hasBaseAmount ? (a.baseCurrency ?? a.currency) : a.currency;
-              const badge = badgeByActivityId.get(a.id);
-              const needsReview = a.needsReview || (isOutflow && !badge);
+              const badges = badgesByActivityId.get(a.id) ?? [];
+              const needsReview = a.needsReview || (isOutflow && badges.length === 0);
 
               return (
                 // Single transaction row → activities page filtered to this
@@ -175,8 +204,17 @@ export function RecentActivityCard({
                       )}
                     </div>
                   </div>
-                  {badge ? (
-                    <CategoryBadge name={badge.name} color={badge.color} icon={badge.icon} />
+                  {badges.length > 0 ? (
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {badges.map((badge) => (
+                        <CategoryBadge
+                          key={badge.id}
+                          name={badge.name}
+                          color={badge.color}
+                          icon={badge.icon}
+                        />
+                      ))}
+                    </div>
                   ) : needsReview ? (
                     <ReviewPill label={t("spending:dashboard.uncategorized")} />
                   ) : null}

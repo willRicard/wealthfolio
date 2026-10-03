@@ -166,6 +166,63 @@ describe("RecentActivityCard", () => {
     expect(screen.getByText("Food")).toBeInTheDocument();
   });
 
+  it("shows each split category instead of Uncategorized", () => {
+    const categoriesMeta: CategoryMetaMap = new Map([
+      ["food", { name: "Food", color: "#22C55E", icon: null, parentId: null }],
+      ["groceries", { name: "Groceries", color: null, icon: null, parentId: "food" }],
+      ["dining", { name: "Dining", color: null, icon: null, parentId: "food" }],
+    ]);
+    const date = "2026-08-07T00:00:00.000Z";
+    renderRecentActivityCard(
+      [
+        {
+          id: "activity-1",
+          accountId: "account-1",
+          activityType: "WITHDRAWAL",
+          activityDate: date,
+          amount: "100",
+          currency: "USD",
+          cashFlowBucket: "spending",
+          netAmount: -100,
+          assignments: [],
+          splits: [
+            {
+              id: "split-1",
+              activityId: "activity-1",
+              taxonomyId: "spending_categories",
+              categoryId: "groceries",
+              amount: "60",
+              sortOrder: 0,
+              createdAt: date,
+              updatedAt: date,
+            },
+            {
+              id: "split-2",
+              activityId: "activity-1",
+              taxonomyId: "spending_categories",
+              categoryId: "dining",
+              amount: "40",
+              sortOrder: 1,
+              createdAt: date,
+              updatedAt: date,
+            },
+          ],
+          notes: "Lunch and groceries",
+          status: "POSTED",
+          isUserModified: false,
+          needsReview: false,
+          createdAt: date,
+          updatedAt: date,
+        },
+      ],
+      categoriesMeta,
+    );
+
+    expect(screen.getByText("Groceries")).toBeInTheDocument();
+    expect(screen.getByText("Dining")).toBeInTheDocument();
+    expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
+  });
+
   it("labels each activity with its own currency, not the base currency", () => {
     const activity: CashActivity = {
       id: "1",
