@@ -1701,41 +1701,7 @@ where
         );
 
         for attempt_symbol in symbol_resolution_candidates(clean_symbol) {
-            // For bonds, populate metadata with TreasuryDirect details so
-            // US_TREASURY_CALC can price them during resolve.
-            let bond_metadata = if instrument_type == Some(&InstrumentType::Bond) {
-                let upper = attempt_symbol.to_uppercase();
-                // Convert CUSIP to ISIN if needed
-                let isin = if crate::utils::cusip::looks_like_cusip(&upper) {
-                    crate::utils::cusip::cusip_to_isin(&upper, "US")
-                } else {
-                    upper
-                };
-                if isin.starts_with("US912") {
-                    let http = wealthfolio_http::client();
-                    wealthfolio_market_data::provider::us_treasury_calc::UsTreasuryCalcProvider::fetch_bond_details(&http, &isin).await
-                        .map(|details| {
-                            let spec = crate::assets::BondSpec {
-                                isin: Some(isin.clone()),
-                                coupon_rate: Some(details.coupon_rate),
-                                maturity_date: Some(details.maturity_date),
-                                face_value: Some(details.face_value),
-                                coupon_frequency: Some(details.coupon_frequency),
-                            };
-                            (isin, serde_json::json!({ "bond": spec }))
-                        })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            let (resolved_symbol, metadata) = match &bond_metadata {
-                Some((isin, meta)) => (isin.clone(), Some(meta.clone())),
-                None => (attempt_symbol.clone(), None),
-            };
-
+            let resolved_symbol = attempt_symbol.clone();
             let pair_quote_ccy = if matches!(instrument_type, Some(InstrumentType::Crypto)) {
                 parse_crypto_pair_symbol(&resolved_symbol).map(|(_, quote)| quote)
             } else {
@@ -1778,7 +1744,7 @@ where
                     .or_else(|| Some(attempt_symbol.clone())),
                 instrument_exchange_mic: canonical_identity.instrument_exchange_mic,
                 provider_config: provider_config.clone(),
-                metadata,
+                metadata: None,
                 ..Default::default()
             };
 
@@ -4641,6 +4607,7 @@ mod tests {
                     face_value: None,
                     coupon_frequency: None,
                     isin: None,
+                    treasury_type: None,
                 }
             })),
             ..Default::default()
