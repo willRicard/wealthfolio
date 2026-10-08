@@ -23,6 +23,7 @@ export const CREDIT_CARD_ACTIVITY_TYPES: CashActivityType[] = [
   "FEE",
   "INTEREST",
   "TRANSFER_IN",
+  "TRANSFER_OUT",
   "CREDIT",
 ];
 
@@ -31,6 +32,7 @@ const CREDIT_CARD_ACTIVITY_TYPE_LABEL_KEYS: Partial<Record<CashActivityType, str
   WITHDRAWAL: "spending:activityTypes.charge",
   INTEREST: "spending:activityTypes.interestCharge",
   TRANSFER_IN: "spending:cashForm.payment",
+  TRANSFER_OUT: "spending:activityTypes.balanceTransferCashAdvance",
   CREDIT: "spending:activityTypes.refundCredit",
 };
 
@@ -93,7 +95,14 @@ export function isCashActivityIncome(
 
 export function isCashActivityOutflow(activityType: string, accountType?: string): boolean {
   if (isCreditCardAccountType(accountType)) {
-    return activityType === "WITHDRAWAL" || activityType === "FEE" || activityType === "INTEREST";
+    // A card TRANSFER_OUT raises what is owed, like a charge, but is not
+    // spending (see getActivitySpendingAmount).
+    return (
+      activityType === "WITHDRAWAL" ||
+      activityType === "FEE" ||
+      activityType === "INTEREST" ||
+      activityType === "TRANSFER_OUT"
+    );
   }
   return OUTFLOW_TYPES.includes(activityType as CashActivityType);
 }
