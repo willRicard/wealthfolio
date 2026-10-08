@@ -130,7 +130,10 @@ export function buildHeadline(input: BuildHeadlineInput): HeadlineModel {
     return { metaLabel, fragments: lead, summary };
   }
 
-  const top = significantMovers[0];
+  const top = significantMovers.find((m) => Math.sign(m.delta) === Math.sign(netDelta));
+  if (!top) {
+    return { metaLabel, fragments: lead, summary };
+  }
   // Concentration gate: if no row owns enough of the movement, don't claim a driver.
   if ((top.shareOfMovement ?? 0) < MIN_DRIVER_CONCENTRATION) {
     return {
@@ -164,13 +167,11 @@ export function buildHeadline(input: BuildHeadlineInput): HeadlineModel {
   ];
 
   // Optional second mover, only when it moves opposite the net direction and is material.
-  const second = significantMovers
-    .slice(1)
-    .find(
-      (m) =>
-        Math.sign(m.delta) !== Math.sign(netDelta) &&
-        (m.shareOfMovement ?? 0) >= MIN_DRIVER_CONCENTRATION,
-    );
+  const second = significantMovers.find(
+    (m) =>
+      Math.sign(m.delta) !== Math.sign(netDelta) &&
+      (m.shareOfMovement ?? 0) >= MIN_DRIVER_CONCENTRATION,
+  );
   if (second) {
     const secondTone: HeadlineFragmentTone = second.delta >= 0 ? "up" : "down";
     driverFragments.push(

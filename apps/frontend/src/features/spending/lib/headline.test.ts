@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { describeCategories } from "./change-descriptor";
 import { buildHeadline } from "./headline";
 
 describe("buildHeadline", () => {
@@ -46,4 +47,53 @@ describe("buildHeadline", () => {
 
     expect(headline.fragments).toContainEqual({ type: "text", text: " more than juil." });
   });
+
+  it.each([
+    {
+      current: [150, 0, 0],
+      prior: [0, 130, 100],
+      expectedDriver: "B",
+      expectedOpposite: "A",
+      prefix: "spending:whatChanged.headlineDropDriverPrefix",
+    },
+    {
+      current: [0, 130, 100],
+      prior: [150, 0, 0],
+      expectedDriver: "B",
+      expectedOpposite: "A",
+      prefix: "spending:whatChanged.headlineRiseDriverPrefix",
+    },
+  ])(
+    "selects a driver aligned with the total when the largest movement is opposite: $prefix",
+    ({ current, prior, expectedDriver, expectedOpposite, prefix }) => {
+      const currentTotal = current.reduce((sum, value) => sum + value, 0);
+      const priorTotal = prior.reduce((sum, value) => sum + value, 0);
+      const movers = describeCategories(
+        current.map((value, index) => ({
+          id: String.fromCharCode(65 + index),
+          current: value,
+          prior: prior[index],
+        })),
+        currentTotal,
+        priorTotal,
+      ).map((descriptor) => ({ ...descriptor, name: descriptor.id }));
+
+      const headline = buildHeadline({
+        periodState: { kind: "valid_comparison" },
+        movers,
+        currentTotal,
+        priorTotal,
+        priorLabel: "last month",
+        metaLabel: "",
+        t: (key) => key,
+      });
+
+      expect(headline.fragments).toContainEqual({ type: "text", text: prefix });
+      expect(
+        headline.fragments
+          .filter((fragment) => fragment.type === "mover")
+          .map((fragment) => fragment.descriptor.name),
+      ).toEqual([expectedDriver, expectedOpposite]);
+    },
+  );
 });
