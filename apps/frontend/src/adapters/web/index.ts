@@ -276,6 +276,12 @@ export {
   createAlternativeAsset,
   deleteAlternativeAsset,
   getAlternativeHoldings,
+  applyLoanAction,
+  calculateLoan,
+  getLoanPayments,
+  linkLoanPayment,
+  previewLoanTerms,
+  recalculateLoan,
   getNetWorth,
   getNetWorthHistory,
   linkLiability,
@@ -535,3 +541,13 @@ export {
   syncHashPairingCode,
   syncHmacSha256,
 } from "./crypto";
+
+export {
+  cloudBackupAction,
+  captureCloudBackup,
+  type CloudBackupStatus,
+  type CloudBackupCaptureStatus,
+  type CloudBackupPoint,
+  type CloudBackupOperation,
+} from "../shared/cloud-backups";
+export { downloadCloudBackup, previewCloudBackupRestore } from "./cloud-backups";

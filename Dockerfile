@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Global build args
 ARG RUST_IMAGE=rust:1.98.1-alpine
 
@@ -53,6 +54,7 @@ RUN rustup target add $(xx-cargo --print-target-triple)
 
 # Leverage Docker layer caching for dependencies
 COPY Cargo.toml Cargo.lock ./
+COPY config ./config
 COPY crates ./crates
 COPY apps/server ./apps/server
 # Stub out apps/tauri so the workspace resolves (not built in Docker)
@@ -68,7 +70,14 @@ COPY apps/server ./apps/server
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 ENV OPENSSL_STATIC=1
 # Build using xx-cargo which handles target flags
-RUN xx-cargo build --locked --release --manifest-path apps/server/Cargo.toml && \
+RUN --mount=type=secret,id=connect-storage-hosts \
+    if [ -f /run/secrets/connect-storage-hosts ]; then \
+      export CONNECT_STORAGE_ALLOWED_HOSTS="$(cat /run/secrets/connect-storage-hosts)"; \
+      if [ -z "$(printf '%s' "$CONNECT_STORAGE_ALLOWED_HOSTS" | tr -d '[:space:],')" ]; then \
+        echo "The connect-storage-hosts override must contain approved hosts" >&2; exit 1; \
+      fi; \
+    fi && \
+    xx-cargo build --locked --release --manifest-path apps/server/Cargo.toml && \
     # Move the binary to a predictable location because the target dir changes with --target
     cp target/$(xx-cargo --print-target-triple)/release/wealthfolio-server /wealthfolio-server
 
