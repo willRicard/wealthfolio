@@ -141,6 +141,10 @@ pub struct AppState {
     pub token_lifecycle: Arc<TokenLifecycleState>,
     pub custom_provider_service: Arc<wealthfolio_core::custom_provider::CustomProviderService>,
     pub portfolio_service: Arc<dyn PortfolioServiceTrait + Send + Sync>,
+    pub transaction_attachment_files:
+        Arc<wealthfolio_spending::transaction_attachment_files::TransactionAttachmentFiles>,
+    pub transaction_attachments_service:
+        Arc<wealthfolio_spending::transaction_attachments::TransactionAttachmentsService>,
     pub spending_settings_service: Arc<wealthfolio_spending::settings::SpendingSettingsService>,
     pub cash_activity_service: Arc<wealthfolio_spending::cash_activities::CashActivityService>,
     pub categorization_rules_service:
@@ -799,6 +803,18 @@ async fn initialize_profile_state(
         .with_timezone(timezone.clone())
         .with_event_sink(domain_event_sink.clone()),
     );
+    let transaction_attachments_service = Arc::new(
+        wealthfolio_spending::transaction_attachments::TransactionAttachmentsService::new(
+            Arc::new(wealthfolio_storage_sqlite::spending::transaction_attachments::SqliteTransactionAttachmentsRepository::new(pool.clone(), writer.clone())),
+            activity_service.clone(),
+            spending_settings_service.clone(),
+        ),
+    );
+    let transaction_attachment_files = Arc::new(
+        wealthfolio_spending::transaction_attachment_files::TransactionAttachmentFiles::new(
+            data_root_path.join("transaction-attachments"), transaction_attachments_service.clone(),
+        )?,
+    );
     let final_cash_migration = run_final_cash_migration(
         settings_service.as_ref(),
         activity_repository.as_ref(),
@@ -1166,6 +1182,8 @@ async fn initialize_profile_state(
         custom_provider_service,
         portfolio_service,
         spending_settings_service,
+        transaction_attachments_service,
+        transaction_attachment_files,
         cash_activity_service,
         categorization_rules_service,
         events_service,

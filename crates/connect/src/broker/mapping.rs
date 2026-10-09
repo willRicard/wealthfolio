@@ -636,6 +636,7 @@ pub fn map_broker_activity(
             .clone()
             .filter(|d| !d.trim().is_empty())
             .or(activity.external_reference_id.clone()),
+        detailed_notes: None,
         fx_rate,
         metadata,
         needs_review: Some(needs_review_flag),

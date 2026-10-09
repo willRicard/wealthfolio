@@ -995,5 +995,22 @@
     "addSource_other": "Quelle hinzufügen ({{count}} verfügbar)",
     "overridesTitle_one": "Anpassung · {{count}}",
     "overridesTitle_other": "Anpassungen · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "Ausführliche Notizen",
+    "notesPlaceholder": "Belegdetails oder weitere Notizen hinzufügen…"
+  },
+  "transactionAttachments": {
+    "attachments": "Anhänge",
+    "limits": "JPEG, PNG, WebP oder PDF · 20 MiB pro Datei · 10 Dateien pro Transaktion",
+    "remove": "Entfernen",
+    "viewOriginal": "Original öffnen: {{filename}}",
+    "thumbnailError": "Vorschau nicht verfügbar",
+    "pendingHint": "Ausgewählte Dateien werden beim Speichern hochgeladen.",
+    "loading": "Transaktionsdetails werden geladen…",
+    "loadError": "Transaktionsdetails konnten nicht geladen werden. Bitte vor dem Speichern erneut versuchen.",
+    "fileCountError": "Maximal 10 Dateien pro Transaktion.",
+    "fileSizeError": "Jede Datei muss zwischen 1 Byte und 20 MiB groß sein.",
+    "fileTypeError": "Nur JPEG, PNG, WebP und PDF werden unterstützt."
   }
 }

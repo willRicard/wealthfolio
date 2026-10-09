@@ -1052,5 +1052,22 @@
     "overridesTitle_one": "Excepción · {{count}}",
     "overridesTitle_other": "Excepciones · {{count}}",
     "overridesTitle_many": "Excepciones · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "Notas detalladas",
+    "notesPlaceholder": "Añade detalles del recibo u otras notas…"
+  },
+  "transactionAttachments": {
+    "attachments": "Archivos adjuntos",
+    "limits": "JPEG, PNG, WebP o PDF · 20 MiB por archivo · 10 archivos por transacción",
+    "remove": "Eliminar",
+    "viewOriginal": "Abrir original: {{filename}}",
+    "thumbnailError": "Vista previa no disponible",
+    "pendingHint": "Los archivos seleccionados se subirán al guardar.",
+    "loading": "Cargando detalles de la transacción…",
+    "loadError": "No se pudieron cargar los detalles. Inténtalo de nuevo antes de guardar.",
+    "fileCountError": "Máximo 10 archivos por transacción.",
+    "fileSizeError": "Cada archivo debe tener entre 1 byte y 20 MiB.",
+    "fileTypeError": "Solo se admiten archivos JPEG, PNG, WebP y PDF."
   }
 }

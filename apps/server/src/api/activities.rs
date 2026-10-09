@@ -146,6 +146,16 @@ async fn save_activities(
         .activity_service
         .bulk_mutate_activities(request)
         .await?;
+    for deleted in &result.deleted {
+        if state
+            .transaction_attachment_files
+            .remove_transaction(&deleted.id)
+            .await
+            .is_err()
+        {
+            tracing::warn!("Transaction attachment cleanup failed");
+        }
+    }
     state.health_service.clear_cache().await;
     // Domain events handle asset enrichment and portfolio recalculation
     Ok(Json(result))
@@ -156,6 +166,14 @@ async fn delete_activity(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
 ) -> ApiResult<Json<Activity>> {
     let deleted = state.activity_service.delete_activity(id).await?;
+    if state
+        .transaction_attachment_files
+        .remove_transaction(&deleted.id)
+        .await
+        .is_err()
+    {
+        tracing::warn!("Transaction attachment cleanup failed");
+    }
     state.health_service.clear_cache().await;
     // Domain events handle portfolio recalculation
     Ok(Json(deleted))

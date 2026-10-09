@@ -88,6 +88,10 @@ pub struct ServiceContext {
     pub health_service: Arc<health::HealthService>,
     pub custom_provider_service: Arc<wealthfolio_core::custom_provider::CustomProviderService>,
     pub portfolio_service: Arc<dyn portfolios::PortfolioServiceTrait>,
+    pub transaction_attachments_service:
+        Arc<wealthfolio_spending::transaction_attachments::TransactionAttachmentsService>,
+    pub transaction_attachment_files:
+        Arc<wealthfolio_spending::transaction_attachment_files::TransactionAttachmentFiles>,
     pub spending_settings_service: Arc<SpendingSettingsService>,
     pub cash_activity_service: Arc<CashActivityService>,
     pub categorization_rules_service: Arc<CategorizationRulesService>,

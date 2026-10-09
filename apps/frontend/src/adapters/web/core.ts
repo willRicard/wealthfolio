@@ -19,6 +19,7 @@ export const AI_CHAT_STREAM_ENDPOINT = `${API_PREFIX}/ai/chat/stream`;
 type CommandMap = Record<string, { method: string; path: string }>;
 
 export const COMMANDS: CommandMap = {
+  get_transaction_attachments: { method: "GET", path: "/spending/transactions" },
   cloud_backup_action: { method: "POST", path: "/cloud-backups/action" },
   cloud_backup_capture: { method: "POST", path: "/cloud-backups/capture" },
   get_accounts: { method: "GET", path: "/accounts" },
@@ -1842,6 +1843,11 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "save_broker_sync_profile_rules": {
       const { request } = payload as { request: Record<string, unknown> };
       body = JSON.stringify(request);
+      break;
+    }
+    case "get_transaction_attachments": {
+      const { activityId } = payload as { activityId: string };
+      url += `/${encodeURIComponent(activityId)}/attachments`;
       break;
     }
     // Net Worth commands

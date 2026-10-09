@@ -19,7 +19,7 @@ wealthfolio-connect = { workspace = true }
 wealthfolio-storage-sqlite = { workspace = true }
 wealthfolio-device-sync = { workspace = true }
 wealthfolio-ai = { workspace = true }
-wealthfolio-spending = { workspace = true }
+wealthfolio-spending = { workspace = true, features = ["attachments"] }
 wealthfolio-agent-tools = { workspace = true }
 
 # Tauri

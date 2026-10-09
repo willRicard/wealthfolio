@@ -1052,5 +1052,22 @@
     "overridesTitle_one": "Eccezione · {{count}}",
     "overridesTitle_many": "Eccezioni · {{count}}",
     "overridesTitle_other": "Eccezioni · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "Note dettagliate",
+    "notesPlaceholder": "Aggiungi dettagli della ricevuta o altre note…"
+  },
+  "transactionAttachments": {
+    "attachments": "Allegati",
+    "limits": "JPEG, PNG, WebP o PDF · 20 MiB per file · 10 file per transazione",
+    "remove": "Rimuovi",
+    "viewOriginal": "Apri originale: {{filename}}",
+    "thumbnailError": "Anteprima non disponibile",
+    "pendingHint": "I file selezionati verranno caricati al salvataggio.",
+    "loading": "Caricamento dei dettagli della transazione…",
+    "loadError": "Impossibile caricare i dettagli. Riprova prima di salvare.",
+    "fileCountError": "Massimo 10 file per transazione.",
+    "fileSizeError": "Ogni file deve avere una dimensione compresa tra 1 byte e 20 MiB.",
+    "fileTypeError": "Sono supportati solo file JPEG, PNG, WebP e PDF."
   }
 }

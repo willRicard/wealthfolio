@@ -1,6 +1,6 @@
 use crate::profiles::ProfileAccess;
 
-use log::{debug, error};
+use log::{debug, error, warn};
 
 use wealthfolio_core::accounts::{Account, AccountUpdate, NewAccount};
 
@@ -64,6 +64,11 @@ pub async fn update_account(
 pub async fn delete_account(account_id: String, state: ProfileAccess) -> Result<(), String> {
     let context = state.context()?;
     debug!("Deleting account {}...", account_id);
+    let activity_ids = context
+        .transaction_attachments_service
+        .activities_with_attachments(&account_id)
+        .await
+        .map_err(|e| e.to_string())?;
     // Domain events handle recalculation automatically
     context
         .account_service()
@@ -72,5 +77,16 @@ pub async fn delete_account(account_id: String, state: ProfileAccess) -> Result<
         .map_err(|e| {
             error!("Failed to delete account {}: {}", account_id, e);
             e.to_string()
-        })
+        })?;
+    for activity_id in activity_ids {
+        if context
+            .transaction_attachment_files
+            .remove_transaction(&activity_id)
+            .await
+            .is_err()
+        {
+            warn!("Account attachment cleanup failed");
+        }
+    }
+    Ok(())
 }

@@ -113,6 +113,8 @@ pub struct ActivityDB {
     // Metadata
     #[diesel(treat_none_as_null = true)]
     pub notes: Option<String>,
+    #[diesel(treat_none_as_null = true)]
+    pub detailed_notes: Option<String>,
     pub metadata: Option<String>,
 
     // Source identity
@@ -166,6 +168,8 @@ pub struct ActivityDetailsDB {
     pub amount: Option<String>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     pub notes: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub detailed_notes: Option<String>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     pub fx_rate: Option<String>,
     #[diesel(sql_type = diesel::sql_types::Integer)]
@@ -329,6 +333,7 @@ impl From<ActivityDetailsDB> for wealthfolio_core::activities::ActivityDetails {
             amount: db.amount,
             needs_review: db.needs_review != 0,
             comment: db.notes,
+            detailed_notes: db.detailed_notes,
             fx_rate: db.fx_rate,
             created_at: db.created_at,
             updated_at: db.updated_at,
@@ -476,6 +481,7 @@ impl From<ActivityDB> for Activity {
 
             // Metadata
             notes: db.notes,
+            detailed_notes: db.detailed_notes,
             metadata,
 
             // Source identity
@@ -572,6 +578,7 @@ impl From<NewActivity> for ActivityDB {
 
             // Metadata
             notes: domain.notes,
+            detailed_notes: domain.detailed_notes,
             metadata: domain.metadata,
 
             // Source identity
@@ -662,6 +669,7 @@ impl From<ActivityUpdate> for ActivityDB {
 
             // Metadata
             notes: domain.notes,
+            detailed_notes: domain.detailed_notes,
             metadata: domain.metadata,
 
             // Source identity - these will be preserved from existing record in repository
@@ -749,6 +757,7 @@ impl From<ActivityUpsert> for ActivityDB {
 
             // Metadata
             notes: domain.notes,
+            detailed_notes: None,
             metadata: domain.metadata,
 
             // Source identity

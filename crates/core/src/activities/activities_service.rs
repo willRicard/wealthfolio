@@ -1876,6 +1876,7 @@ impl ActivityService {
                 amount: Some(values.source_amount),
                 status: None,
                 notes: request.notes.clone(),
+                detailed_notes: None,
                 fx_rate: None,
                 metadata: metadata.clone(),
                 needs_review: None,
@@ -1900,6 +1901,7 @@ impl ActivityService {
                 amount: Some(values.destination_amount),
                 status: None,
                 notes: request.notes.clone(),
+                detailed_notes: None,
                 fx_rate: None,
                 metadata,
                 needs_review: None,
@@ -1945,6 +1947,7 @@ impl ActivityService {
                 status: None,
                 needs_review: None,
                 notes: request.notes.clone(),
+                detailed_notes: None,
                 fx_rate: valuation_rate_patch(
                     &pair.transfer_out,
                     &request.from_account_id,
@@ -1968,6 +1971,7 @@ impl ActivityService {
                 status: None,
                 needs_review: None,
                 notes: request.notes.clone(),
+                detailed_notes: None,
                 fx_rate: valuation_rate_patch(
                     &pair.transfer_in,
                     &request.to_account_id,
@@ -2043,6 +2047,7 @@ impl ActivityService {
             status: counterpart_status,
             needs_review: review_transition,
             notes: update.notes.clone(),
+            detailed_notes: None,
             fx_rate: None,
             metadata: None,
         };

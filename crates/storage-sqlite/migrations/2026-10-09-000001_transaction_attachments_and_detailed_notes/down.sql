@@ -1,0 +1,3 @@
+DROP TRIGGER spending_transaction_attachments_limit;
+DROP TABLE spending_transaction_attachments;
+ALTER TABLE activities DROP COLUMN detailed_notes;

@@ -7,6 +7,7 @@ export const QueryKeys = {
   ACCOUNTS_SUMMARY: "accounts_summary",
 
   // Spending module keys
+  TRANSACTION_ATTACHMENTS: "transaction-attachments",
   SPENDING_SETTINGS: "spending_settings",
   SPENDING_TRANSACTIONS: "spending_transactions",
   SPENDING_RULES: "spending_rules",

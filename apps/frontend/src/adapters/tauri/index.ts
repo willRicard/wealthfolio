@@ -296,3 +296,6 @@ export {
   type CloudBackupOperation,
 } from "../shared/cloud-backups";
 export { downloadCloudBackup, previewCloudBackupRestore } from "./cloud-backups";
+
+export * from "../shared/transaction-attachments";
+export * from "./transaction-attachments";

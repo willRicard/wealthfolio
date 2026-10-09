@@ -1,6 +1,17 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    spending_transaction_attachments (id) {
+        id -> Text,
+        activity_id -> Text,
+        filename -> Text,
+        content_type -> Text,
+        size_bytes -> BigInt,
+        created_at -> Text,
+    }
+}
+
+diesel::table! {
     accounts (id) {
         id -> Text,
         name -> Text,
@@ -41,6 +52,7 @@ diesel::table! {
         currency -> Text,
         fx_rate -> Nullable<Text>,
         notes -> Nullable<Text>,
+        detailed_notes -> Nullable<Text>,
         metadata -> Nullable<Text>,
         source_system -> Nullable<Text>,
         source_record_id -> Nullable<Text>,

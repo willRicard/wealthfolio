@@ -811,3 +811,67 @@ pub async fn get_event_spending_summaries(
         .await
         .map_err(|e| format!("Failed to compute event spending summaries: {}", e))
 }
+
+#[tauri::command]
+pub async fn get_transaction_attachments(
+    state: ProfileAccess,
+    activity_id: String,
+) -> Result<Vec<wealthfolio_spending::transaction_attachments::TransactionAttachment>, String> {
+    state
+        .context()?
+        .transaction_attachments_service
+        .list(&activity_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn upload_transaction_attachment(
+    state: ProfileAccess,
+    activity_id: String,
+    filename: String,
+    content_type: String,
+    bytes: Vec<u8>,
+) -> Result<wealthfolio_spending::transaction_attachments::TransactionAttachment, String> {
+    let context = state.context()?;
+    let slot = context
+        .transaction_attachment_files
+        .upload_slot()
+        .await
+        .map_err(|e| e.to_string())?;
+    context
+        .transaction_attachment_files
+        .upload(&activity_id, &filename, &content_type, bytes, slot)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn read_transaction_attachment(
+    state: ProfileAccess,
+    activity_id: String,
+    attachment_id: String,
+    preview: bool,
+) -> Result<Vec<u8>, String> {
+    state
+        .context()?
+        .transaction_attachment_files
+        .read(&activity_id, &attachment_id, preview)
+        .await
+        .map(|(_, bytes)| bytes)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_transaction_attachment(
+    state: ProfileAccess,
+    activity_id: String,
+    attachment_id: String,
+) -> Result<(), String> {
+    state
+        .context()?
+        .transaction_attachment_files
+        .delete(&activity_id, &attachment_id)
+        .await
+        .map_err(|e| e.to_string())
+}

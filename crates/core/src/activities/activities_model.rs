@@ -189,6 +189,7 @@ pub struct Activity {
 
     // Metadata
     pub notes: Option<String>,
+    pub detailed_notes: Option<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>, // JSON blob
@@ -395,6 +396,7 @@ pub struct NewActivity {
     pub status: Option<ActivityStatus>,
     #[serde(alias = "comment")]
     pub notes: Option<String>,
+    pub detailed_notes: Option<String>,
     #[serde(
         default,
         deserialize_with = "decimal_input_format::deserialize_option_decimal"
@@ -559,6 +561,15 @@ impl NewActivity {
                 "Activity type cannot be empty".to_string(),
             ));
         }
+        if self
+            .detailed_notes
+            .as_ref()
+            .is_some_and(|notes| notes.chars().count() > 20_000)
+        {
+            return Err(ActivityError::InvalidData(
+                "Detailed notes must be at most 20000 characters".to_string(),
+            ));
+        }
 
         validate_activity_date(&self.activity_date)?;
 
@@ -714,6 +725,7 @@ pub struct ActivityUpdate {
     pub needs_review: Option<bool>,
     #[serde(alias = "comment")]
     pub notes: Option<String>,
+    pub detailed_notes: Option<String>,
     #[serde(
         default,
         deserialize_with = "decimal_input_format::deserialize_patch_decimal"
@@ -740,6 +752,16 @@ impl ActivityUpdate {
         if self.activity_type.trim().is_empty() {
             return Err(crate::activities::ActivityError::InvalidData(
                 "Activity type cannot be empty".to_string(),
+            )
+            .into());
+        }
+        if self
+            .detailed_notes
+            .as_ref()
+            .is_some_and(|notes| notes.chars().count() > 20_000)
+        {
+            return Err(crate::activities::ActivityError::InvalidData(
+                "Detailed notes must be at most 20000 characters".to_string(),
             )
             .into());
         }
@@ -1007,6 +1029,7 @@ pub struct ActivityDetails {
     pub amount: Option<String>,
     pub needs_review: bool,
     pub comment: Option<String>,
+    pub detailed_notes: Option<String>,
     pub fx_rate: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -2096,6 +2119,7 @@ impl From<ActivityImport> for NewActivity {
             amount: import.amount,
             status,
             notes: import.comment,
+            detailed_notes: None,
             fx_rate: import.fx_rate,
             metadata,
             needs_review: None,

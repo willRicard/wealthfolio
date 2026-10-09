@@ -117,3 +117,48 @@ saves a pre-restore snapshot. A portable backup password is independent of the
 server master key. There are no web restore/upload or maintenance/retry endpoints.
 See [the operator backup guide](../../docs/self-host/backups.md) for safe password
 input, container commands, cross-platform transfers and failed-startup recovery.
+
+Spending transaction documents
+- Detailed notes are stored in `spending_transaction_notes`, separately from the
+  regular memo/payee and activity metadata. The limit is 20,000 characters.
+- Web transactions accept JPEG, PNG, WebP and PDF attachments, up to 20 MiB per
+  file and 10 files per transaction. The server validates content and generates
+  a PNG thumbnail bounded to 480 × 480 pixels. Images also have decoding limits
+  (12,000 pixels per dimension and 128 MiB allocation). Two uploads per unlocked
+  profile may buffer/render concurrently.
+- Originals and thumbnails live in the profile data directory under
+  `transaction-attachments/`, outside the static web root. Every read/write uses
+  the existing browser authentication and unlocked-profile admission, then checks
+  the transaction belongs to an opted-in Spending account. Files use generated
+  identifiers; uploaded filenames are display metadata only. Multipart uploads
+  reuse profile commands’ browser-origin checks to reject cross-site form posts.
+  Unix directories
+  and files are created with modes 0700 and 0600 respectively.
+- The panel loads thumbnails only. Opening an attachment explicitly loads the
+  original in a separate browser tab. Removing an attachment or deleting its
+  transaction/account through the web API also removes its files.
+- The Docker image includes the checksum-verified PDFium Chromium 7881 musl
+  library for amd64/arm64. For a native server, install the matching library from
+  [PDFium binaries](https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium/7881)
+  beside the server executable or in the system library search path
+  (`libpdfium.so`, `libpdfium.dylib`, or `pdfium.dll`). PDF uploads fail explicitly if the library is unavailable;
+  image uploads and detailed notes remain usable. Updating the PDFium ABI
+  requires updating the crate feature, Docker artifact version, and checksums.
+- This feature does not transmit notes or files to external providers and does
+  not add document entities to device sync. Attachment bytes are outside SQLite;
+  database/portable backups alone do not contain them. Back up the profile's
+  `transaction-attachments/` directory together with its database. Files are not
+  encrypted by SQLCipher. Files left by an interrupted upload/delete or by an
+  activity deletion outside the web API can require manual cleanup.
+
+Architecture impact
+- Reuses activity lookup, profile admission, the Spending account settings, and
+  the SQLite write actor. Detailed notes are part of the regular activity
+  create/update pipeline. Attachment rendering runs in a bounded blocking task
+  during upload, and introduces no worker, provider requests, retries, or sync
+  traffic.
+- Web routes: `GET/POST /api/v1/spending/transactions/{id}/attachments`,
+  `GET/DELETE /api/v1/spending/transactions/{activity_id}/attachments/{id}`,
+  and `GET /api/v1/spending/transactions/{activity_id}/attachments/{id}/thumbnail`.
+  Tauri exposes equivalent list, upload, read, and delete commands over the same
+  attachment service and profile-local file store.

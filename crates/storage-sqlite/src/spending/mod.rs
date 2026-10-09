@@ -11,3 +11,4 @@ pub mod categorization_rules;
 pub(crate) mod deterministic_ids;
 pub mod events;
 pub mod settings;
+pub mod transaction_attachments;

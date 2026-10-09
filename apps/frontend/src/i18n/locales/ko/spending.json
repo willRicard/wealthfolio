@@ -984,5 +984,22 @@
     "migrationNeeded": "현재 로컬 데이터베이스는 업데이트된 지출 마이그레이션 이전에 생성되었습니다.",
     "addSource_other": "수입원 추가 (사용 가능 {{count}}개)",
     "overridesTitle_other": "재정의 · {{count}}개"
+  },
+  "transactionDetails": {
+    "detailedNotes": "상세 메모",
+    "notesPlaceholder": "영수증 세부 정보 또는 다른 메모를 추가하세요…"
+  },
+  "transactionAttachments": {
+    "attachments": "첨부 파일",
+    "limits": "JPEG, PNG, WebP 또는 PDF · 파일당 20 MiB · 거래당 10개",
+    "remove": "삭제",
+    "viewOriginal": "원본 열기: {{filename}}",
+    "thumbnailError": "미리 보기를 사용할 수 없습니다",
+    "pendingHint": "선택한 파일은 저장 시 업로드됩니다.",
+    "loading": "거래 세부 정보 로딩 중…",
+    "loadError": "거래 세부 정보를 불러오지 못했습니다. 저장하기 전에 다시 시도하세요.",
+    "fileCountError": "거래당 최대 10개 파일입니다.",
+    "fileSizeError": "각 파일은 1바이트 이상 20 MiB 이하여야 합니다.",
+    "fileTypeError": "JPEG, PNG, WebP 및 PDF 파일만 지원됩니다."
   }
 }

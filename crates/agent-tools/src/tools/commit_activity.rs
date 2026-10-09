@@ -157,6 +157,7 @@ fn draft_to_new_activity(draft: &ActivityDraft) -> Result<NewActivity, AgentTool
         amount: to_decimal(draft.amount, "amount")?,
         status: None,
         notes: draft.notes.clone(),
+        detailed_notes: None,
         fx_rate: None,
         metadata: None,
         // Committed drafts are previously reviewed (see module docs), so a

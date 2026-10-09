@@ -808,6 +808,7 @@ impl FactLookup<'_> {
             currency,
             fx_rate: spec.fx_rate.map(|d| d.0),
             notes: None,
+            detailed_notes: None,
             metadata: spec.metadata.clone(),
             source_system: spec.source_system.clone(),
             source_record_id: None,

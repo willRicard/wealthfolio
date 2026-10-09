@@ -147,6 +147,7 @@ export interface Activity {
 
   // Metadata
   notes?: string;
+  detailedNotes?: string;
   metadata?: Record<string, unknown>;
 
   /**
@@ -236,6 +237,7 @@ export interface ActivityDetails {
   currency: string;
   needsReview: boolean;
   comment?: string;
+  detailedNotes?: string;
   fxRate?: string | null;
   createdAt: Date;
   assetId: string;
@@ -316,6 +318,7 @@ export interface ActivityCreate {
   status?: ActivityStatus;
   needsReview?: boolean;
   comment?: string | null;
+  detailedNotes?: string | null;
   fxRate?: string | number | null;
   metadata?: string | Record<string, unknown>; // Metadata (serialized to JSON string before sending)
 }
@@ -344,6 +347,7 @@ export interface ActivityUpdate {
   status?: ActivityStatus;
   needsReview?: boolean;
   comment?: string | null;
+  detailedNotes?: string | null;
   fxRate?: string | number | null;
   metadata?: string | Record<string, unknown>; // Metadata (serialized to JSON string before sending)
 }

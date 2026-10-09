@@ -995,5 +995,22 @@
     "overridesTitle_other": "自訂設定 · {{count}}",
     "addSource_one": "新增來源（{{count}} 個可用）",
     "overridesTitle_one": "覆寫 · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "詳細備註",
+    "notesPlaceholder": "新增收據詳情或其他備註…"
+  },
+  "transactionAttachments": {
+    "attachments": "附件",
+    "limits": "JPEG、PNG、WebP 或 PDF · 每個檔案 20 MiB · 每筆交易 10 個檔案",
+    "remove": "移除",
+    "viewOriginal": "開啟原始檔案：{{filename}}",
+    "thumbnailError": "無法顯示預覽",
+    "pendingHint": "所選檔案將在儲存時上傳。",
+    "loading": "正在載入交易詳情…",
+    "loadError": "無法載入交易詳情。請在儲存前重試。",
+    "fileCountError": "每筆交易最多 10 個檔案。",
+    "fileSizeError": "每個檔案須介於 1 位元組和 20 MiB 之間。",
+    "fileTypeError": "僅支援 JPEG、PNG、WebP 和 PDF 檔案。"
   }
 }

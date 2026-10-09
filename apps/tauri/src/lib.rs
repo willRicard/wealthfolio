@@ -338,6 +338,10 @@ pub fn run() {
             commands::settings::add_exchange_rate,
             commands::settings::delete_exchange_rate,
             // Spending commands
+            commands::spending::get_transaction_attachments,
+            commands::spending::upload_transaction_attachment,
+            commands::spending::read_transaction_attachment,
+            commands::spending::delete_transaction_attachment,
             commands::spending::get_spending_settings,
             commands::spending::update_spending_settings,
             commands::spending::list_cash_activities,

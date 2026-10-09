@@ -25,6 +25,7 @@ pub(super) fn withdrawal(metadata: Option<Value>) -> Activity {
         currency: "CAD".into(),
         fx_rate: None,
         notes: None,
+        detailed_notes: None,
         metadata,
         source_system: None,
         source_record_id: None,

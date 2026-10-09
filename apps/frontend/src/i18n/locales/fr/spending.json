@@ -1052,5 +1052,22 @@
     "overridesTitle_one": "Ajustement · {{count}}",
     "overridesTitle_other": "Ajustements · {{count}}",
     "overridesTitle_many": "Ajustements · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "Notes détaillées",
+    "notesPlaceholder": "Ajoutez les détails du reçu ou d’autres notes…"
+  },
+  "transactionAttachments": {
+    "attachments": "Pièces jointes",
+    "limits": "JPEG, PNG, WebP ou PDF · 20 MiB par fichier · 10 fichiers par transaction",
+    "remove": "Supprimer",
+    "viewOriginal": "Ouvrir l’original : {{filename}}",
+    "thumbnailError": "Aperçu indisponible",
+    "pendingHint": "Les fichiers sélectionnés seront envoyés lors de l’enregistrement.",
+    "loading": "Chargement des détails de la transaction…",
+    "loadError": "Impossible de charger les détails. Réessayez avant d’enregistrer.",
+    "fileCountError": "10 fichiers maximum par transaction.",
+    "fileSizeError": "Chaque fichier doit faire entre 1 octet et 20 MiB.",
+    "fileTypeError": "Seuls les fichiers JPEG, PNG, WebP et PDF sont acceptés."
   }
 }

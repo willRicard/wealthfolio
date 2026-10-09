@@ -451,6 +451,19 @@ async fn build_context(
         .with_timezone(timezone.clone())
         .with_event_sink(domain_event_sink.clone()),
     );
+    let transaction_attachments_service = Arc::new(
+        wealthfolio_spending::transaction_attachments::TransactionAttachmentsService::new(
+            Arc::new(wealthfolio_storage_sqlite::spending::transaction_attachments::SqliteTransactionAttachmentsRepository::new(pool.clone(), writer.clone())),
+            activity_service.clone(),
+            spending_settings_service.clone(),
+        ),
+    );
+    let transaction_attachment_files = Arc::new(
+        wealthfolio_spending::transaction_attachment_files::TransactionAttachmentFiles::new(
+            std::path::PathBuf::from(app_data_dir).join("transaction-attachments"),
+            transaction_attachments_service.clone(),
+        )?,
+    );
     let final_cash_migration = run_final_cash_migration(
         settings_service.as_ref(),
         activity_repository.as_ref(),
@@ -799,6 +812,8 @@ async fn build_context(
             custom_provider_service,
             portfolio_service,
             spending_settings_service,
+            transaction_attachments_service,
+            transaction_attachment_files,
             cash_activity_service,
             categorization_rules_service,
             events_service,

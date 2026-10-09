@@ -65,6 +65,7 @@ mod spending;
 #[cfg(feature = "device-sync")]
 mod sync_crypto;
 mod taxonomies;
+mod transaction_attachments;
 
 #[utoipa::path(get, path = "/api/v1/healthz", responses((status = 200, description = "Health")))]
 pub async fn healthz() -> &'static str {
@@ -126,7 +127,10 @@ pub async fn security_headers(request: Request<Body>, next: Next) -> Response {
     } else {
         application_csp(auth_url.as_deref())
     };
-    headers.insert(HeaderName::from_static("content-security-policy"), csp);
+    // Private attachment responses supply a stricter sandbox policy.
+    headers
+        .entry(HeaderName::from_static("content-security-policy"))
+        .or_insert(csp);
     if !path.starts_with("/api/") && !path.starts_with("/mcp") {
         headers.insert(
             HeaderName::from_static("access-control-allow-origin"),
@@ -217,6 +221,7 @@ fn app_router_with_profiles(
         .merge(health::router())
         .merge(custom_providers::router())
         .merge(spending::router())
+        .merge(transaction_attachments::router())
         .merge(allocation_targets::router())
         .merge(agent_access::router());
 

@@ -984,5 +984,22 @@
     "migrationNeeded": "当前的本地数据库是在更新后的支出迁移之前创建的。",
     "addSource_other": "添加来源（{{count}} 个可用）",
     "overridesTitle_other": "覆盖设置 · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "详细备注",
+    "notesPlaceholder": "添加收据详情或其他备注…"
+  },
+  "transactionAttachments": {
+    "attachments": "附件",
+    "limits": "JPEG、PNG、WebP 或 PDF · 每个文件 20 MiB · 每笔交易 10 个文件",
+    "remove": "移除",
+    "viewOriginal": "打开原始文件：{{filename}}",
+    "thumbnailError": "预览不可用",
+    "pendingHint": "所选文件将在保存时上传。",
+    "loading": "正在加载交易详情…",
+    "loadError": "无法加载交易详情。请在保存前重试。",
+    "fileCountError": "每笔交易最多 10 个文件。",
+    "fileSizeError": "每个文件须介于 1 字节和 20 MiB 之间。",
+    "fileTypeError": "仅支持 JPEG、PNG、WebP 和 PDF 文件。"
   }
 }

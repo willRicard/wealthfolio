@@ -558,6 +558,7 @@ impl ActivityRepository {
                     activities::tax,
                     activities::amount,
                     activities::notes,
+                    activities::detailed_notes,
                     activities::fx_rate,
                     activities::needs_review,
                     activities::is_user_modified,
@@ -868,6 +869,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
                     source_type,
                     subtype,
                     settlement_date,
+                    detailed_notes,
                     metadata,
                     quantity,
                     unit_price,
@@ -933,6 +935,9 @@ impl ActivityRepositoryTrait for ActivityRepository {
                 }
                 if activity_to_update.metadata.is_none() {
                     activity_to_update.metadata = metadata;
+                }
+                if activity_update_owned.detailed_notes.is_none() {
+                    activity_to_update.detailed_notes = detailed_notes;
                 }
                 clear_invalid_source_group_for_external_transfer(
                     tx.conn(),
@@ -3456,6 +3461,7 @@ mod tests {
             currency: currency.to_string(),
             fx_rate: None,
             notes: None,
+            detailed_notes: None,
             metadata: metadata.map(str::to_string),
             source_system: Some("MANUAL".to_string()),
             source_record_id: None,
@@ -3539,6 +3545,7 @@ mod tests {
             needs_review: Some(false),
             notes: Some("User note".to_string()),
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         })
         .await
@@ -3956,6 +3963,7 @@ mod tests {
             needs_review: None,
             notes: Some("New note".to_string()),
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         })
         .await
@@ -3992,6 +4000,7 @@ mod tests {
             needs_review: None,
             notes: Some("New note".to_string()),
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         })
         .await
@@ -4045,6 +4054,7 @@ mod tests {
             needs_review: None,
             notes: Some("Broker note".to_string()),
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         })
         .await
@@ -4088,6 +4098,7 @@ mod tests {
             currency: "USD".to_string(),
             fx_rate: None,
             notes: None,
+            detailed_notes: None,
             metadata: None,
             source_system: Some("MANUAL".to_string()),
             source_record_id: None,
@@ -4342,6 +4353,7 @@ mod tests {
             needs_review: None,
             notes: None,
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         };
         let updated = repo
@@ -4417,6 +4429,7 @@ mod tests {
             needs_review: Some(false),
             notes: None,
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         };
 
@@ -4455,6 +4468,7 @@ mod tests {
                 needs_review: Some(false),
                 notes: None,
                 fx_rate: None,
+                detailed_notes: None,
                 metadata: None,
             })
             .await
@@ -4655,6 +4669,7 @@ mod tests {
             needs_review: None,
             notes: None,
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         };
         repo.update_activity(amount_update.clone())
@@ -4987,6 +5002,7 @@ mod tests {
             needs_review: None,
             notes: Some("Edited".to_string()),
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
         };
 
@@ -5394,6 +5410,7 @@ mod tests {
                 needs_review: None,
                 notes: None,
                 fx_rate: None,
+                detailed_notes: None,
                 metadata: Some(r#"{"flow":{"is_external":true}}"#.to_string()),
             })
             .await
@@ -6400,6 +6417,7 @@ mod tests {
             status: None,
             notes: None,
             fx_rate: None,
+            detailed_notes: None,
             metadata: None,
             needs_review: None,
             source_system: None,

@@ -984,5 +984,22 @@
     "migrationNeeded": "現在のローカルデータベースは、支出機能の更新マイグレーション適用前に作成されています。",
     "addSource_other": "収入源を追加({{count}}件利用可能)",
     "overridesTitle_other": "個別設定 · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "詳細メモ",
+    "notesPlaceholder": "領収書の詳細やその他のメモを入力…"
+  },
+  "transactionAttachments": {
+    "attachments": "添付ファイル",
+    "limits": "JPEG・PNG・WebP・PDF · 1ファイル20 MiBまで · 1取引10ファイルまで",
+    "remove": "削除",
+    "viewOriginal": "元のファイルを開く：{{filename}}",
+    "thumbnailError": "プレビューを表示できません",
+    "pendingHint": "選択したファイルは保存時にアップロードされます。",
+    "loading": "取引の詳細を読み込み中…",
+    "loadError": "取引の詳細を読み込めませんでした。保存前に再試行してください。",
+    "fileCountError": "1取引につき10ファイルまでです。",
+    "fileSizeError": "各ファイルは1バイト以上20 MiB以下にしてください。",
+    "fileTypeError": "JPEG・PNG・WebP・PDFのみ対応しています。"
   }
 }

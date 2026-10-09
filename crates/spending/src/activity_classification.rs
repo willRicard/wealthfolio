@@ -279,6 +279,7 @@ mod tests {
             currency: "USD".to_string(),
             fx_rate: None,
             notes: None,
+            detailed_notes: None,
             metadata: None::<Value>,
             source_system: None,
             source_record_id: None,

@@ -81,9 +81,24 @@ RUN --mount=type=secret,id=connect-storage-hosts \
     # Move the binary to a predictable location because the target dir changes with --target
     cp target/$(xx-cargo --print-target-triple)/release/wealthfolio-server /wealthfolio-server
 
+# PDFium is loaded at runtime. Pin the ABI and verify each target artifact.
+FROM --platform=$BUILDPLATFORM alpine:3.19 AS pdfium
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) pdfium_arch=x64; pdfium_sha=8a8cdfc6c79865269f74bf0e9ca476cdd8a9908ea7e0b0abcfc1525d59fb7257 ;; \
+      arm64) pdfium_arch=arm64; pdfium_sha=4c6e678e820c390c3ffc1f720a25386e3b637aa42ecf99446672146d793dac46 ;; \
+      *) echo "Unsupported PDFium architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+ && wget -q -O /tmp/pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7881/pdfium-linux-musl-${pdfium_arch}.tgz" \
+ && echo "$pdfium_sha  /tmp/pdfium.tgz" | sha256sum -c - \
+ && mkdir /pdfium \
+ && tar -xzf /tmp/pdfium.tgz -C /pdfium lib/libpdfium.so LICENSE
+
 # Final stage
 FROM alpine:3.19
 WORKDIR /app
+COPY --from=pdfium /pdfium/lib/libpdfium.so /usr/local/lib/libpdfium.so
+COPY --from=pdfium /pdfium/LICENSE /usr/share/licenses/pdfium/LICENSE
 # Copy from backend (which is now build platform, but binary is target platform)
 COPY --from=backend /wealthfolio-server /usr/local/bin/wealthfolio-server
 COPY --from=frontend /web-dist ./dist

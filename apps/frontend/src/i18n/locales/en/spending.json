@@ -995,5 +995,22 @@
     "addSource_other": "Add source ({{count}} available)",
     "overridesTitle_one": "Override · {{count}}",
     "overridesTitle_other": "Overrides · {{count}}"
+  },
+  "transactionDetails": {
+    "detailedNotes": "Detailed notes",
+    "notesPlaceholder": "Add receipt details or other notes…"
+  },
+  "transactionAttachments": {
+    "attachments": "Attachments",
+    "limits": "JPEG, PNG, WebP or PDF · 20 MiB per file · 10 files per transaction",
+    "remove": "Remove",
+    "viewOriginal": "Open original: {{filename}}",
+    "thumbnailError": "Preview unavailable",
+    "pendingHint": "Selected files will upload when you save.",
+    "loading": "Loading transaction details…",
+    "loadError": "Could not load transaction details. Please retry before saving.",
+    "fileCountError": "Maximum 10 files per transaction.",
+    "fileSizeError": "Each file must be between 1 byte and 20 MiB.",
+    "fileTypeError": "Only JPEG, PNG, WebP and PDF files are supported."
   }
 }

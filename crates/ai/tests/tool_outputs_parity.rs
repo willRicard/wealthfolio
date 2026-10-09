@@ -584,6 +584,7 @@ fn fixture_cash_activity(
             currency: "USD".to_string(),
             fx_rate: None,
             notes: Some(notes.to_string()),
+            detailed_notes: None,
             metadata: None,
             source_system: None,
             source_record_id: None,

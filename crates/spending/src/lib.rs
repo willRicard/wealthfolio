@@ -40,5 +40,9 @@ pub mod events;
 mod fx;
 pub mod insight;
 pub mod settings;
+pub mod transaction_attachments;
 
 pub use error::SpendingError;
+
+#[cfg(feature = "attachments")]
+pub mod transaction_attachment_files;

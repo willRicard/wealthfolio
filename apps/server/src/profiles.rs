@@ -85,6 +85,10 @@ pub struct WebProfiles {
     visited: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 impl WebProfiles {
+    pub(crate) fn allows_browser_origin(&self, headers: &axum::http::HeaderMap) -> bool {
+        allowed_profile_origin(headers, &self.config.cors_allow)
+    }
+
     pub async fn open(config: &Config) -> anyhow::Result<Arc<Self>> {
         let db = std::path::PathBuf::from(&config.db_path);
         let directory = db

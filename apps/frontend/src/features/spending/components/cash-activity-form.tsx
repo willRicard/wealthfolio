@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { createActivity, updateActivity } from "@/adapters";
+import {
+  createActivity,
+  updateActivity,
+  getTransactionAttachments,
+  uploadTransactionAttachment,
+} from "@/adapters";
+import { TransactionAttachments } from "./transaction-attachments";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
@@ -88,6 +94,7 @@ function buildFormSchema(t: TFunction) {
     activityDate: z.date({ required_error: t("spending:cashForm.pickDate") }),
     amount: z.coerce.number().min(0, { message: t("spending:cashForm.amountNonNegative") }),
     notes: z.string().optional(),
+    detailedNotes: z.string().max(20000).optional(),
     // Advanced options. Currency defaults to the account's, so the common case
     // never sees these; a foreign charge on a domestic card needs both.
     currency: z.string().optional(),
@@ -117,6 +124,7 @@ interface FormValues {
   currency?: string;
   fxRate?: number;
   notes?: string;
+  detailedNotes?: string;
   category?: string;
 }
 
@@ -185,6 +193,15 @@ export function CashActivityForm({
   const isMobile = useIsMobileViewport();
   const [currentStep, setCurrentStep] = useState<1 | 2>(isEditing ? 2 : 1);
   const qc = useQueryClient();
+  const savedDraft = useRef<Activity | undefined>(undefined);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [draftId, setDraftId] = useState<string>();
+  const attachmentActivityId = activity?.id ?? draftId;
+  const attachments = useQuery({
+    queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachmentActivityId],
+    queryFn: () => getTransactionAttachments(attachmentActivityId!),
+    enabled: open && !!attachmentActivityId,
+  });
   const { accounts } = useAccounts({ filterActive: false });
   const { settings } = useSpendingSettings();
   const { data: appSettings } = useSettings();
@@ -243,6 +260,7 @@ export function CashActivityForm({
       currency: activity?.currency ?? "",
       fxRate: activity?.fxRate != null ? Number(activity.fxRate) : undefined,
       notes: activity?.notes ?? "",
+      detailedNotes: activity?.detailedNotes ?? "",
       category:
         activity?.categoryTaxonomyId && activity?.categoryId
           ? `${activity.categoryTaxonomyId}:${activity.categoryId}`
@@ -262,11 +280,15 @@ export function CashActivityForm({
         currency: activity?.currency ?? "",
         fxRate: activity?.fxRate != null ? Number(activity.fxRate) : undefined,
         notes: activity?.notes ?? "",
+        detailedNotes: activity?.detailedNotes ?? "",
         category:
           activity?.categoryTaxonomyId && activity?.categoryId
             ? `${activity.categoryTaxonomyId}:${activity.categoryId}`
             : "",
       });
+      savedDraft.current = undefined;
+      setDraftId(undefined);
+      setPendingFiles([]);
       setEventId(activity?.eventId ?? null);
       setCurrentStep(activity?.id ? 2 : 1);
     }
@@ -359,9 +381,10 @@ export function CashActivityForm({
       });
 
       let saved: Activity;
-      if (isEditing && activity?.id) {
+      const existingId = activity?.id ?? savedDraft.current?.id;
+      if (existingId) {
         const update: ActivityUpdate = {
-          id: activity.id,
+          id: existingId,
           accountId: values.accountId,
           activityType: values.activityType,
           subtype,
@@ -370,6 +393,7 @@ export function CashActivityForm({
           currency,
           fxRate,
           comment: values.notes ?? null,
+          detailedNotes: values.detailedNotes ?? "",
           metadata: cashActivityFlowMetadata(values.activityType, subtype, activity?.metadata),
         };
         saved = await updateActivity(update);
@@ -383,9 +407,13 @@ export function CashActivityForm({
           currency,
           fxRate,
           comment: values.notes ?? null,
+          detailedNotes: values.detailedNotes ?? "",
           metadata: cashActivityFlowMetadata(values.activityType, subtype),
         };
         saved = await createActivity(create);
+        // A failed file upload can be retried without creating another transaction.
+        savedDraft.current = saved;
+        setDraftId(saved.id);
       }
 
       // Sync category assignment
@@ -411,6 +439,11 @@ export function CashActivityForm({
         await setActivityEvent(saved.id, eventId);
       }
 
+      for (const file of pendingFiles) {
+        await uploadTransactionAttachment(saved.id, file);
+        setPendingFiles((remaining) => remaining.filter((item) => item !== file));
+      }
+      await qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, saved.id] });
       return saved;
     },
     onSuccess: () => {
@@ -423,6 +456,8 @@ export function CashActivityForm({
       onOpenChange(false);
     },
     onError: (e: unknown) => {
+      invalidateSpendingCaches(qc);
+      qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachmentActivityId] });
       toast.error(t("spending:cashForm.saveFailed", { message: (e as Error).message ?? e }));
     },
   });
@@ -839,6 +874,51 @@ export function CashActivityForm({
                           <FormMessage />
                         </FormItem>
                       )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="detailedNotes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t("spending:transactionDetails.detailedNotes")}</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              {...field}
+                              rows={4}
+                              maxLength={20000}
+                              placeholder={t("spending:transactionDetails.notesPlaceholder")}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {attachmentActivityId && attachments.isPending && (
+                      <p role="status" className="text-muted-foreground text-sm">
+                        {t("spending:transactionAttachments.loading")}
+                      </p>
+                    )}
+                    {attachments.isError && (
+                      <div role="alert" className="text-destructive text-sm">
+                        <p>{t("spending:transactionAttachments.loadError")}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => attachments.refetch()}
+                        >
+                          {t("common:retry")}
+                        </Button>
+                      </div>
+                    )}
+                    <TransactionAttachments
+                      activityId={attachmentActivityId}
+                      attachments={attachments.data ?? []}
+                      pendingFiles={pendingFiles}
+                      onFilesChange={setPendingFiles}
+                      disabled={
+                        saveMutation.isPending || (!!attachmentActivityId && !attachments.isSuccess)
+                      }
                     />
 
                     {/* Collapsed by default, so the everyday case — a charge in

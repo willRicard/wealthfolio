@@ -4,7 +4,12 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createActivity, updateActivity } from "@/adapters";
+import {
+  createActivity,
+  updateActivity,
+  getTransactionAttachments,
+  uploadTransactionAttachment,
+} from "@/adapters";
 import type { Activity } from "@/lib/types";
 import { CashActivityForm } from "./cash-activity-form";
 
@@ -21,6 +26,11 @@ beforeAll(() => {
 
 vi.mock("@/adapters", () => ({
   createActivity: vi.fn(),
+  getTransactionAttachments: vi.fn(() => Promise.resolve([])),
+  uploadTransactionAttachment: vi.fn(() => Promise.resolve({ id: "uploaded" })),
+  deleteTransactionAttachment: vi.fn(() => Promise.resolve()),
+  transactionAttachmentThumbnailUrl: vi.fn(() => Promise.resolve("/test-thumbnail")),
+  openTransactionAttachment: vi.fn(() => Promise.resolve()),
   updateActivity: vi.fn((payload: unknown) => Promise.resolve(payload)),
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
@@ -81,6 +91,7 @@ const foreignCharge = {
   currency: "USD",
   fxRate: "1.37",
   notes: "Sq *Morning Owl",
+  detailedNotes: "Stored detailed notes",
 } as unknown as Activity;
 
 describe("CashActivityForm currency", () => {
@@ -229,4 +240,49 @@ describe("CashActivityForm mobile steps", () => {
     expect(await screen.findByRole("button", { name: /create transaction/i })).toBeInTheDocument();
     expect(createActivity).not.toHaveBeenCalled();
   });
+});
+
+describe("CashActivityForm detailed notes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    platformMock.isMobileViewport = false;
+  });
+  it("loads and saves detailed notes with the transaction payload", async () => {
+    const user = userEvent.setup();
+    render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
+    const notes = await screen.findByLabelText("Detailed notes");
+    await waitFor(() => expect(notes).toHaveValue("Stored detailed notes"));
+    await user.clear(notes);
+    await user.type(notes, "Receipt line items");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled());
+    expect(getTransactionAttachments).toHaveBeenCalledWith("act-1");
+    expect(vi.mocked(updateActivity).mock.calls[0][0].detailedNotes).toBe("Receipt line items");
+    expect(vi.mocked(updateActivity).mock.calls[0][0].comment).toBe("Sq *Morning Owl");
+    expect(vi.mocked(updateActivity).mock.calls[0][0].metadata).toBeUndefined();
+  });
+});
+
+it("retries a failed upload against the saved draft without creating another transaction", async () => {
+  vi.clearAllMocks();
+  platformMock.isMobileViewport = false;
+  vi.mocked(createActivity).mockResolvedValue({ ...foreignCharge, id: "saved-draft" });
+  vi.mocked(uploadTransactionAttachment).mockRejectedValueOnce(new Error("Upload failed"));
+  const user = userEvent.setup();
+  const onOpenChange = vi.fn();
+  render(<CashActivityForm open onOpenChange={onOpenChange} />, { wrapper });
+  await user.upload(
+    screen.getByLabelText("Attachments", { exact: true }),
+    new File(["receipt"], "receipt.png", { type: "image/png" }),
+  );
+  const submit = screen.getByRole("button", { name: /^create$/i });
+  await user.click(submit);
+  await waitFor(() => expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1));
+  expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  await waitFor(() => expect(submit).toBeEnabled());
+  await user.click(submit);
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  expect(createActivity).toHaveBeenCalledTimes(1);
+  expect(updateActivity).toHaveBeenCalledWith(expect.objectContaining({ id: "saved-draft" }));
+  expect(uploadTransactionAttachment).toHaveBeenCalledTimes(2);
 });

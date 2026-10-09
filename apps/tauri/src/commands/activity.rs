@@ -1,7 +1,7 @@
 use crate::profiles::ProfileAccess;
 use std::collections::HashMap;
 
-use log::debug;
+use log::{debug, warn};
 use wealthfolio_core::activities::{
     Activity, ActivityBulkMutationRequest, ActivityBulkMutationResult, ActivityImport,
     ActivitySearchResponse, ActivityUpdate, ImportActivitiesResult, ImportAssetCandidate,
@@ -110,6 +110,14 @@ pub async fn delete_activity(
         .delete_activity(activity_id)
         .await
         .map_err(|e| e.to_string())?;
+    if context
+        .transaction_attachment_files
+        .remove_transaction(&deleted.id)
+        .await
+        .is_err()
+    {
+        warn!("Transaction attachment cleanup failed");
+    }
     context.health_service().clear_cache().await;
     Ok(deleted)
 }
@@ -212,6 +220,16 @@ pub async fn save_activities(
         .bulk_mutate_activities(request)
         .await
         .map_err(|e| e.to_string())?;
+    for deleted in &result.deleted {
+        if context
+            .transaction_attachment_files
+            .remove_transaction(&deleted.id)
+            .await
+            .is_err()
+        {
+            warn!("Transaction attachment cleanup failed");
+        }
+    }
     context.health_service().clear_cache().await;
     Ok(result)
 }
