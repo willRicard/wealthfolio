@@ -5,8 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input } from "@wealthfolio/ui";
 import {
   deleteTransactionAttachment,
+  fetchTransactionAttachmentThumbnail,
   openTransactionAttachment,
-  transactionAttachmentThumbnailUrl,
   type TransactionAttachment,
 } from "@/adapters";
 
@@ -23,17 +23,19 @@ interface TransactionAttachmentsProps {
 function AttachmentThumbnail({ attachment }: { attachment: TransactionAttachment }) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
-  const thumbnail = useQuery({
+  const blobQuery = useQuery({
     queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachment.id, "thumbnail"],
-    queryFn: () => transactionAttachmentThumbnailUrl(attachment.activityId, attachment.id),
+    queryFn: () => fetchTransactionAttachmentThumbnail(attachment.activityId, attachment.id),
     staleTime: Infinity,
   });
+  const [blobUrl, setBlobUrl] = useState<string | undefined>();
   useEffect(() => {
-    const url = thumbnail.data;
-    return () => {
-      if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-    };
-  }, [thumbnail.data]);
+    const blob = blobQuery.data;
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [blobQuery.data]);
   return (
     <button
       type="button"
@@ -43,13 +45,13 @@ function AttachmentThumbnail({ attachment }: { attachment: TransactionAttachment
         filename: attachment.filename,
       })}
     >
-      {failed || thumbnail.isError ? (
+      {failed || blobQuery.isError ? (
         <p className="text-muted-foreground flex h-24 items-center justify-center text-xs">
           {t("spending:transactionAttachments.thumbnailError")}
         </p>
       ) : (
         <img
-          src={thumbnail.data}
+          src={blobUrl}
           alt=""
           className="bg-muted h-24 w-full rounded object-contain"
           loading="lazy"

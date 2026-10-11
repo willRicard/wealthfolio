@@ -37,7 +37,6 @@ async fn upload(
         .transaction_attachments_service
         .check_access(&id)
         .await?;
-    let slot = state.transaction_attachment_files.upload_slot().await?;
     let mut field = multipart
         .next_field()
         .await
@@ -68,6 +67,7 @@ async fn upload(
     {
         return Err(ApiError::BadRequest("Upload one file at a time".into()));
     }
+    let slot = state.transaction_attachment_files.upload_slot().await?;
     Ok(Json(
         state
             .transaction_attachment_files

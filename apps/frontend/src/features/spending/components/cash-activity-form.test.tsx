@@ -29,7 +29,9 @@ vi.mock("@/adapters", () => ({
   getTransactionAttachments: vi.fn(() => Promise.resolve([])),
   uploadTransactionAttachment: vi.fn(() => Promise.resolve({ id: "uploaded" })),
   deleteTransactionAttachment: vi.fn(() => Promise.resolve()),
-  transactionAttachmentThumbnailUrl: vi.fn(() => Promise.resolve("/test-thumbnail")),
+  fetchTransactionAttachmentThumbnail: vi.fn(() =>
+    Promise.resolve(new Blob([new Uint8Array([0])], { type: "image/webp" })),
+  ),
   openTransactionAttachment: vi.fn(() => Promise.resolve()),
   updateActivity: vi.fn((payload: unknown) => Promise.resolve(payload)),
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },

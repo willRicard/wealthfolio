@@ -27,6 +27,11 @@ pub struct TransactionAttachment {
 pub trait TransactionAttachmentsRepository: Send + Sync {
     async fn activities_with_attachments(&self, account_id: &str) -> Result<Vec<String>>;
     async fn list(&self, activity_id: &str) -> Result<Vec<TransactionAttachment>>;
+    async fn find_attachment(
+        &self,
+        activity_id: &str,
+        id: &str,
+    ) -> Result<Option<TransactionAttachment>>;
     async fn insert_attachment(&self, attachment: TransactionAttachment) -> Result<()>;
     async fn delete_attachment(&self, activity_id: &str, id: &str) -> Result<()>;
 }
@@ -97,10 +102,10 @@ impl TransactionAttachmentsService {
     }
 
     pub async fn attachment(&self, activity_id: &str, id: &str) -> Result<TransactionAttachment> {
-        self.list(activity_id)
+        self.check_access(activity_id).await?;
+        self.repo
+            .find_attachment(activity_id, id)
             .await?
-            .into_iter()
-            .find(|a| a.id == id)
             .ok_or_else(|| {
                 SpendingError::NotFound {
                     entity: "Attachment",

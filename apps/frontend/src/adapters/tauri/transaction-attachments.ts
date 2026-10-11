@@ -1,17 +1,20 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./core";
 import type { TransactionAttachment } from "../shared/transaction-attachments";
 
 function bytes(value: ArrayBuffer | number[]): Uint8Array<ArrayBuffer> {
   return value instanceof ArrayBuffer ? new Uint8Array(value) : Uint8Array.from(value);
 }
 
-export async function transactionAttachmentThumbnailUrl(activityId: string, id: string) {
+export async function fetchTransactionAttachmentThumbnail(
+  activityId: string,
+  id: string,
+): Promise<Blob> {
   const value = await invoke<ArrayBuffer | number[]>("read_transaction_attachment", {
     activityId,
     attachmentId: id,
     preview: true,
   });
-  return URL.createObjectURL(new Blob([bytes(value)], { type: "image/webp" }));
+  return new Blob([bytes(value)], { type: "image/webp" });
 }
 
 export async function openTransactionAttachment(

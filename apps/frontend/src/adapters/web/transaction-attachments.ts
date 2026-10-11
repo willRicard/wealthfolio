@@ -6,8 +6,14 @@ const path = (activityId: string) =>
 function transactionAttachmentUrl(activityId: string, id: string, thumbnail = false) {
   return `${path(activityId)}/${encodeURIComponent(id)}${thumbnail ? "/thumbnail" : ""}?profileScope=${encodeURIComponent(profileScope())}`;
 }
-export async function transactionAttachmentThumbnailUrl(activityId: string, id: string) {
-  return transactionAttachmentUrl(activityId, id, true);
+export async function fetchTransactionAttachmentThumbnail(
+  activityId: string,
+  id: string,
+): Promise<Blob> {
+  const response = await checked(
+    await profileFetch(transactionAttachmentUrl(activityId, id, true)),
+  );
+  return response.blob();
 }
 export async function openTransactionAttachment(
   activityId: string,

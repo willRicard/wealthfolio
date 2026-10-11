@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@/test/render";
+import { render, screen, waitFor } from "@/test/render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TransactionAttachments } from "./transaction-attachments";
 import { transactionFileError, MAX_TRANSACTION_FILE_BYTES } from "../lib/transaction-files";
 
 vi.mock("@/adapters", () => ({
   deleteTransactionAttachment: vi.fn(),
-  transactionAttachmentThumbnailUrl: (activityId: string, id: string) =>
-    Promise.resolve(`/files/${activityId}/${id}/thumbnail`),
+  fetchTransactionAttachmentThumbnail: () =>
+    Promise.resolve(new Blob([new Uint8Array([0])], { type: "image/webp" })),
   openTransactionAttachment: vi.fn(),
 }));
 
@@ -47,7 +47,9 @@ describe("transaction attachments", () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByRole("button", { name: "Open original: receipt.pdf" })).toBeVisible();
-    expect(container.querySelector("img")).toHaveAttribute("src", "/files/act-1/file-1/thumbnail");
+    await waitFor(() =>
+      expect(container.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/),
+    );
     expect(container.querySelector("iframe, object, embed")).toBeNull();
   });
 });

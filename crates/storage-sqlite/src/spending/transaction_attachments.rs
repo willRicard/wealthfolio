@@ -66,6 +66,20 @@ impl TransactionAttachmentsRepository for SqliteTransactionAttachmentsRepository
             .map(Into::into)
             .collect())
     }
+    async fn find_attachment(
+        &self,
+        activity_id: &str,
+        id: &str,
+    ) -> Result<Option<TransactionAttachment>> {
+        let mut conn = get_connection(&self.pool)?;
+        Ok(attachments::table
+            .filter(attachments::activity_id.eq(activity_id))
+            .filter(attachments::id.eq(id))
+            .select(AttachmentRow::as_select())
+            .first::<AttachmentRow>(&mut conn)
+            .optional()?
+            .map(Into::into))
+    }
     async fn insert_attachment(&self, value: TransactionAttachment) -> Result<()> {
         self.writer
             .exec_tx(move |tx| {
