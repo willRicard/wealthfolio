@@ -128,7 +128,11 @@ async fn list_cash_activities(
         .map(|date| date.date_naive())
         .unwrap_or_else(|| chrono::Utc::now().date_naive());
     let mut activities = state.cash_activity_service.list(filter).await?;
-    let base_currency = state.base_currency.read().unwrap().clone();
+    let base_currency = state
+        .base_currency
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
     populate_base_amounts(
         &mut activities,
         state.fx_service.as_ref(),

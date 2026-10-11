@@ -854,6 +854,8 @@ mod tests {
             Vec::new()
         };
         CashActivity {
+            base_amount: None,
+            base_currency: None,
             activity: Activity {
                 id: id.to_string(),
                 account_id: account_id.to_string(),
