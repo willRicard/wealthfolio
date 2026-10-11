@@ -153,10 +153,10 @@ pub async fn list_cash_activities(
         .list(filter)
         .await
         .map_err(|e| format!("Failed to list cash activities: {}", e))?;
-    let base_currency = state.get_base_currency();
+    let base_currency = context.get_base_currency();
     populate_base_amounts(
         &mut activities,
-        state.fx_service().as_ref(),
+        context.fx_service().as_ref(),
         &base_currency,
         fx_as_of,
     );
