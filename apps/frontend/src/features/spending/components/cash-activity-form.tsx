@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -8,12 +8,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import {
+  claimTransactionAttachmentDrafts,
   createActivity,
+  discardTransactionAttachmentDrafts,
+  listTransactionAttachments,
+  newAttachmentDraftToken,
   updateActivity,
-  getTransactionAttachments,
-  uploadTransactionAttachment,
+  type AttachmentTarget,
 } from "@/adapters";
 import { TransactionAttachments } from "./transaction-attachments";
+import { useAttachmentUploads } from "../hooks/use-attachment-uploads";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
@@ -194,14 +198,35 @@ export function CashActivityForm({
   const [currentStep, setCurrentStep] = useState<1 | 2>(isEditing ? 2 : 1);
   const qc = useQueryClient();
   const savedDraft = useRef<Activity | undefined>(undefined);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [draftId, setDraftId] = useState<string>();
-  const attachmentActivityId = activity?.id ?? draftId;
+  const [draftToken, setDraftToken] = useState(newAttachmentDraftToken);
+  const claimed = useRef(false);
+  const target = useMemo<AttachmentTarget>(
+    () =>
+      activity?.id
+        ? { kind: "activity", id: activity.id }
+        : { kind: "draft", token: draftToken },
+    [activity?.id, draftToken],
+  );
+  const targetKey = target.kind === "draft" ? target.token : target.id;
   const attachments = useQuery({
-    queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachmentActivityId],
-    queryFn: () => getTransactionAttachments(attachmentActivityId!),
-    enabled: open && !!attachmentActivityId,
+    queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey],
+    queryFn: () => listTransactionAttachments(target),
+    enabled: open,
   });
+  const uploads = useAttachmentUploads({
+    target,
+    onUploaded: () =>
+      void qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey] }),
+  });
+  const closeForm = useCallback(
+    (next: boolean) => {
+      if (!next && !claimed.current && target.kind === "draft")
+        void discardTransactionAttachmentDrafts(target.token).catch(() => undefined);
+      onOpenChange(next);
+    },
+    [onOpenChange, target],
+  );
+
   const { accounts } = useAccounts({ filterActive: false });
   const { settings } = useSpendingSettings();
   const { data: appSettings } = useSettings();
@@ -287,8 +312,9 @@ export function CashActivityForm({
             : "",
       });
       savedDraft.current = undefined;
-      setDraftId(undefined);
-      setPendingFiles([]);
+      claimed.current = false;
+      setDraftToken(newAttachmentDraftToken());
+      uploads.reset();
       setEventId(activity?.eventId ?? null);
       setCurrentStep(activity?.id ? 2 : 1);
     }
@@ -411,9 +437,7 @@ export function CashActivityForm({
           metadata: cashActivityFlowMetadata(values.activityType, subtype),
         };
         saved = await createActivity(create);
-        // A failed file upload can be retried without creating another transaction.
         savedDraft.current = saved;
-        setDraftId(saved.id);
       }
 
       // Sync category assignment
@@ -439,9 +463,10 @@ export function CashActivityForm({
         await setActivityEvent(saved.id, eventId);
       }
 
-      for (const file of pendingFiles) {
-        await uploadTransactionAttachment(saved.id, file);
-        setPendingFiles((remaining) => remaining.filter((item) => item !== file));
+      await uploads.flush();
+      if (target.kind === "draft") {
+        await claimTransactionAttachmentDrafts(target.token, saved.id);
+        claimed.current = true;
       }
       await qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, saved.id] });
       return saved;
@@ -453,11 +478,11 @@ export function CashActivityForm({
       toast.success(
         isEditing ? t("spending:cashForm.activityUpdated") : t("spending:cashForm.activityCreated"),
       );
-      onOpenChange(false);
+      closeForm(false);
     },
     onError: (e: unknown) => {
       invalidateSpendingCaches(qc);
-      qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachmentActivityId] });
+      qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey] });
       toast.error(t("spending:cashForm.saveFailed", { message: (e as Error).message ?? e }));
     },
   });
@@ -467,9 +492,6 @@ export function CashActivityForm({
   const showDetailsFields = !isMobileCreate || currentStep === 2;
 
   const handleMobileNext = async (event: MouseEvent<HTMLButtonElement>) => {
-    // This button is reused as the submit button when the step changes. Some
-    // mobile browsers evaluate the click's default action after that update and
-    // submit the form despite the button having started as type="button".
     event.preventDefault();
     const isValid = await form.trigger(["accountId", "activityType"]);
     if (isValid) setCurrentStep(2);
@@ -479,12 +501,12 @@ export function CashActivityForm({
     if (!onTransferClick) return;
     const isValid = await form.trigger("accountId");
     if (!isValid || !watchAccountId) return;
-    onOpenChange(false);
+    closeForm(false);
     onTransferClick(watchAccountId);
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={closeForm}>
       <SheetContent
         side={isMobile ? "bottom" : "right"}
         className={cn(
@@ -894,7 +916,7 @@ export function CashActivityForm({
                         </FormItem>
                       )}
                     />
-                    {attachmentActivityId && attachments.isPending && (
+                    {attachments.isPending && (
                       <p role="status" className="text-muted-foreground text-sm">
                         {t("spending:transactionAttachments.loading")}
                       </p>
@@ -912,13 +934,10 @@ export function CashActivityForm({
                       </div>
                     )}
                     <TransactionAttachments
-                      activityId={attachmentActivityId}
+                      target={target}
                       attachments={attachments.data ?? []}
-                      pendingFiles={pendingFiles}
-                      onFilesChange={setPendingFiles}
-                      disabled={
-                        saveMutation.isPending || (!!attachmentActivityId && !attachments.isSuccess)
-                      }
+                      uploads={uploads}
+                      disabled={saveMutation.isPending || !attachments.isSuccess}
                     />
 
                     {/* Collapsed by default, so the everyday case — a charge in
@@ -990,7 +1009,7 @@ export function CashActivityForm({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => onOpenChange(false)}
+                  onClick={() => closeForm(false)}
                   disabled={saveMutation.isPending}
                 >
                   {t("common:cancel")}

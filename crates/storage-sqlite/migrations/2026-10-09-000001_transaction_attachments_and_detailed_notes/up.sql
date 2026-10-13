@@ -6,9 +6,29 @@ CREATE TABLE spending_transaction_attachments (
     filename TEXT NOT NULL,
     content_type TEXT NOT NULL CHECK(content_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
     size_bytes BIGINT NOT NULL CHECK(size_bytes > 0 AND size_bytes <= 20971520),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    preview_key TEXT NOT NULL
 );
 CREATE INDEX spending_transaction_attachments_activity ON spending_transaction_attachments(activity_id);
 CREATE TRIGGER spending_transaction_attachments_limit BEFORE INSERT ON spending_transaction_attachments
 WHEN (SELECT COUNT(*) FROM spending_transaction_attachments WHERE activity_id = NEW.activity_id) >= 10
+BEGIN SELECT RAISE(ABORT, 'Maximum 10 attachments per transaction'); END;
+
+CREATE TABLE spending_attachment_drafts (
+    id TEXT PRIMARY KEY NOT NULL,
+    token TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    content_type TEXT NOT NULL CHECK(content_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+    size_bytes BIGINT NOT NULL CHECK(size_bytes > 0 AND size_bytes <= 20971520),
+    created_at TEXT NOT NULL,
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    preview_key TEXT NOT NULL
+);
+CREATE INDEX spending_attachment_drafts_token ON spending_attachment_drafts(token);
+CREATE INDEX spending_attachment_drafts_created ON spending_attachment_drafts(created_at);
+CREATE TRIGGER spending_attachment_drafts_limit BEFORE INSERT ON spending_attachment_drafts
+WHEN (SELECT COUNT(*) FROM spending_attachment_drafts WHERE token = NEW.token) >= 10
 BEGIN SELECT RAISE(ABORT, 'Maximum 10 attachments per transaction'); END;

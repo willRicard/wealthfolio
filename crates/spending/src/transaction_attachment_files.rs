@@ -1,25 +1,24 @@
 //! Private, bounded server files. Originals never have a public/static URL.
+
 use crate::{
     transaction_attachments::{
-        TransactionAttachment, TransactionAttachmentsService, MAX_ATTACHMENT_BYTES,
+        AttachmentDraft, AttachmentStorage, StoredAttachment, StoredDraft, TransactionAttachment,
+        TransactionAttachmentsService, MAX_ATTACHMENT_BYTES,
     },
     SpendingError,
 };
-use anyhow::{Context, Result};
-use image::{ImageFormat, ImageReader};
-use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
-use std::{
-    io::{Cursor, Write},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use anyhow::Result;
+use std::{path::PathBuf, sync::Arc};
+use tokio::sync::OwnedSemaphorePermit;
 use uuid::Uuid;
+use wealthfolio_files::{
+    validate_filename, BlobKey, FileStoreError, LocalBlobStore, StoreRequest, StoredFile,
+    StoredFileRef, StoredFileService,
+};
 
 pub struct TransactionAttachmentFiles {
-    root: PathBuf,
+    files: Arc<StoredFileService>,
     attachments: Arc<TransactionAttachmentsService>,
-    render_slots: Arc<Semaphore>,
 }
 
 fn invalid(message: &str) -> anyhow::Error {
@@ -29,145 +28,72 @@ fn invalid(message: &str) -> anyhow::Error {
     .into()
 }
 
-fn validate_filename(filename: &str) -> Result<()> {
-    if filename.is_empty()
-        || filename.len() > 180
-        || filename
-            .chars()
-            .any(|c| c.is_control() || c == '/' || c == '\\')
-        || filename == "."
-        || filename == ".."
-    {
-        return Err(invalid("Invalid attachment filename (maximum 180 bytes)"));
+fn domain(error: FileStoreError) -> anyhow::Error {
+    match error {
+        FileStoreError::InvalidInput(message) | FileStoreError::AlreadyExists(message) => {
+            SpendingError::InvalidInput { message }.into()
+        }
+        FileStoreError::NotFound(id) => SpendingError::NotFound {
+            entity: "Attachment",
+            id,
+        }
+        .into(),
+        FileStoreError::Backend(error) => error,
     }
-    Ok(())
 }
 
-fn thumbnail(bytes: &[u8], content_type: &str) -> Result<Vec<u8>> {
-    let image = if content_type == "application/pdf" {
-        if !bytes.starts_with(b"%PDF-") {
-            return Err(invalid("File content is not a PDF"));
-        }
-        let executable = std::env::current_exe().context("Cannot locate the server executable")?;
-        let directory = executable
-            .parent()
-            .context("Cannot locate the server directory")?;
-        let bindings =
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(directory))
-                .or_else(|_| Pdfium::bind_to_system_library())
-                .context("PDF thumbnails require the server PDFium library")?;
-        let pdfium = Pdfium::new(bindings);
-        let document = pdfium
-            .load_pdf_from_byte_slice(bytes, None)
-            .map_err(|_| invalid("Invalid or password-protected PDF"))?;
-        let page = document
-            .pages()
-            .get(0)
-            .map_err(|_| invalid("PDF has no readable pages"))?;
-        let bitmap = page
-            .render_with_config(
-                &PdfRenderConfig::new()
-                    .set_target_width(480)
-                    .set_maximum_height(480),
-            )
-            .map_err(|_| invalid("Could not render PDF thumbnail"))?;
-        bitmap
-            .as_image()
-            .map_err(|_| invalid("Could not encode PDF thumbnail"))?
-    } else {
-        let expected = match content_type {
-            "image/jpeg" => ImageFormat::Jpeg,
-            "image/png" => ImageFormat::Png,
-            "image/webp" => ImageFormat::WebP,
-            _ => {
-                return Err(invalid(
-                    "Only JPEG, PNG, WebP and PDF attachments are supported",
-                ))
-            }
-        };
-        if image::guess_format(bytes).ok() != Some(expected) {
-            return Err(invalid("File content does not match its type"));
-        }
-        let mut reader = ImageReader::with_format(Cursor::new(bytes), expected);
-        let mut limits = image::Limits::default();
-        limits.max_image_width = Some(12000);
-        limits.max_image_height = Some(12000);
-        limits.max_alloc = Some(128 * 1024 * 1024);
-        reader.limits(limits);
-        reader
-            .decode()
-            .map_err(|_| invalid("Invalid image or image exceeds decoding limits"))?
-    };
-    let mut output = Cursor::new(Vec::new());
-    image
-        .thumbnail(480, 480)
-        .write_to(&mut output, ImageFormat::WebP)?;
-    Ok(output.into_inner())
+struct DomainError(anyhow::Error);
+
+impl From<FileStoreError> for DomainError {
+    fn from(error: FileStoreError) -> Self {
+        Self(domain(error))
+    }
 }
 
-fn private_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+fn storage_of(stored: StoredFile) -> AttachmentStorage {
+    AttachmentStorage {
+        backend: stored.backend,
+        key: stored.key.as_str().to_owned(),
+        preview_key: stored
+            .preview_key
+            .as_ref()
+            .map(|key| key.as_str().to_owned())
+            .unwrap_or_default(),
     }
-    let mut file = options.open(path)?;
-    file.write_all(bytes)?;
-    Ok(())
+}
+
+fn prepare(filename: &str, bytes: &[u8]) -> Result<(Uuid, BlobKey, BlobKey)> {
+    validate_filename(filename).map_err(domain)?;
+    if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err(invalid("Attachment must be between 1 byte and 20 MiB"));
+    }
+    let id = Uuid::new_v4();
+    Ok((
+        id,
+        BlobKey::mint(id, "original").map_err(domain)?,
+        BlobKey::mint(id, "webp").map_err(domain)?,
+    ))
+}
+
+fn file_ref(storage: &AttachmentStorage) -> Result<StoredFileRef> {
+    Ok(StoredFileRef {
+        backend: storage.backend.clone(),
+        key: BlobKey::parse(&storage.key).map_err(domain)?,
+        preview_key: Some(BlobKey::parse(&storage.preview_key).map_err(domain)?),
+    })
 }
 
 impl TransactionAttachmentFiles {
     pub fn new(root: PathBuf, attachments: Arc<TransactionAttachmentsService>) -> Result<Self> {
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
-        }
-        builder.create(&root)?;
-        if std::fs::symlink_metadata(&root)?.file_type().is_symlink() {
-            anyhow::bail!("Attachment root must not be a symlink");
-        }
+        let store = LocalBlobStore::new(root).map_err(domain)?;
         Ok(Self {
-            root,
+            files: Arc::new(StoredFileService::new(Arc::new(store), 2)),
             attachments,
-            render_slots: Arc::new(Semaphore::new(2)),
         })
     }
 
-    /// Hold before reading the upload body to bound both buffering and decoding.
     pub async fn upload_slot(&self) -> Result<OwnedSemaphorePermit> {
-        self.render_slots
-            .clone()
-            .acquire_owned()
-            .await
-            .context("Attachment uploads unavailable")
-    }
-
-    fn activity_directory(&self, activity_id: &str) -> Result<PathBuf> {
-        if activity_id.is_empty() || activity_id.len() > 120 {
-            return Err(invalid("Invalid transaction ID"));
-        }
-        use std::fmt::Write as _;
-        let mut encoded = String::with_capacity(activity_id.len() * 2);
-        for byte in activity_id.bytes() {
-            write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
-        }
-        Ok(self.root.join(encoded))
-    }
-
-    fn paths(&self, activity_id: &str, id: &str) -> Result<(PathBuf, PathBuf)> {
-        let id = Uuid::parse_str(id)
-            .map_err(|_| invalid("Invalid attachment ID"))?
-            .to_string();
-        let root = self.activity_directory(activity_id)?;
-        Ok((
-            root.join(format!("{id}.original")),
-            root.join(format!("{id}.webp")),
-        ))
+        self.files.render_slot().await.map_err(domain)
     }
 
     pub async fn upload(
@@ -182,58 +108,120 @@ impl TransactionAttachmentFiles {
         if attachments.len() >= crate::transaction_attachments::MAX_ATTACHMENTS {
             return Err(invalid("Maximum 10 attachments per transaction"));
         }
-        validate_filename(filename)?;
-        if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_BYTES {
-            return Err(invalid("Attachment must be between 1 byte and 20 MiB"));
-        }
-        let content_type = content_type.to_owned();
-        let render_type = content_type.clone();
-        let id = Uuid::new_v4().to_string();
-        let (original_path, thumbnail_path) = self.paths(activity_id, &id)?;
-        let original = original_path.clone();
-        let thumb = thumbnail_path.clone();
-        let size_bytes = bytes.len() as i64;
-        let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            // Blocking jobs outlive a cancelled HTTP future; retain the permit
-            // inside the job so a timeout cannot bypass the rendering limit.
-            let _slot = slot;
-            let preview = thumbnail(&bytes, &render_type)?;
-            let parent = original.parent().expect("attachment paths have a parent");
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::DirBuilderExt;
-                builder.mode(0o700);
-            }
-            builder.create(parent)?;
-            if std::fs::symlink_metadata(parent)?.file_type().is_symlink() {
-                return Err(invalid("Invalid attachment directory"));
-            }
-            // UUID names are generated here; filenames are display metadata only.
-            private_write(&original, &bytes)?;
-            private_write(&thumb, &preview)?;
-            Ok(())
-        })
-        .await?;
+        let (id, key, preview_key) = prepare(filename, &bytes)?;
         let attachment = TransactionAttachment {
-            id,
+            id: id.to_string(),
             activity_id: activity_id.into(),
             filename: filename.into(),
-            content_type,
-            size_bytes,
+            content_type: content_type.into(),
+            size_bytes: bytes.len() as i64,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        let result = match result {
-            Ok(()) => self.attachments.add_attachment(attachment.clone()).await,
-            Err(e) => Err(e),
-        };
-        if let Err(error) = result {
-            let _ = tokio::fs::remove_file(original_path).await;
-            let _ = tokio::fs::remove_file(thumbnail_path).await;
-            return Err(error);
-        }
+        let row = attachment.clone();
+        self.files
+            .store_with_preview(
+                StoreRequest {
+                    key,
+                    preview_key,
+                    filename,
+                    content_type,
+                    bytes,
+                },
+                slot,
+                move |stored| async move {
+                    self.attachments
+                        .add_attachment(StoredAttachment {
+                            attachment: row,
+                            storage: storage_of(stored),
+                        })
+                        .await
+                        .map_err(DomainError)
+                },
+            )
+            .await
+            .map_err(|DomainError(error)| error)?;
         Ok(attachment)
+    }
+
+    pub async fn upload_draft(
+        &self,
+        token: &str,
+        filename: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+        slot: OwnedSemaphorePermit,
+    ) -> Result<AttachmentDraft> {
+        let (id, key, preview_key) = prepare(filename, &bytes)?;
+        let draft = AttachmentDraft {
+            id: id.to_string(),
+            token: token.into(),
+            filename: filename.into(),
+            content_type: content_type.into(),
+            size_bytes: bytes.len() as i64,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let row = draft.clone();
+        self.files
+            .store_with_preview(
+                StoreRequest {
+                    key,
+                    preview_key,
+                    filename,
+                    content_type,
+                    bytes,
+                },
+                slot,
+                move |stored| async move {
+                    self.attachments
+                        .add_draft(StoredDraft {
+                            draft: row,
+                            storage: storage_of(stored),
+                        })
+                        .await
+                        .map_err(DomainError)
+                },
+            )
+            .await
+            .map_err(|DomainError(error)| error)?;
+        Ok(draft)
+    }
+
+    pub async fn read_draft(
+        &self,
+        token: &str,
+        id: &str,
+        preview: bool,
+    ) -> Result<(AttachmentDraft, Vec<u8>)> {
+        let stored = self.attachments.stored_draft(token, id).await?;
+        let bytes = self
+            .files
+            .read(&file_ref(&stored.storage)?, preview)
+            .await
+            .map_err(domain)?;
+        Ok((stored.draft, bytes))
+    }
+
+    pub async fn delete_draft(&self, token: &str, id: &str) -> Result<()> {
+        // Read the location before the row that holds it goes away.
+        let stored = self.attachments.stored_draft(token, id).await?;
+        self.attachments.delete_draft(token, id).await?;
+        self.remove_all(std::slice::from_ref(&stored.storage)).await
+    }
+
+    pub async fn discard_drafts(&self, token: &str) -> Result<()> {
+        let storage = self.attachments.discard_drafts(token).await?;
+        self.remove_all(&storage).await
+    }
+
+    pub async fn sweep_drafts(&self) -> Result<usize> {
+        let storage = self.attachments.sweep_drafts().await?;
+        let swept = storage.len();
+        self.remove_all(&storage).await?;
+        Ok(swept)
+    }
+
+    pub async fn claim_drafts(&self, token: &str, activity_id: &str) -> Result<usize> {
+        self.attachments.claim_drafts(token, activity_id).await
     }
 
     pub async fn read(
@@ -242,85 +230,24 @@ impl TransactionAttachmentFiles {
         id: &str,
         preview: bool,
     ) -> Result<(TransactionAttachment, Vec<u8>)> {
-        let attachment = self.attachments.attachment(activity_id, id).await?;
-        let (original, thumbnail) = self.paths(activity_id, &attachment.id)?;
-        let path = if preview { thumbnail } else { original };
-        if !tokio::fs::symlink_metadata(&path)
-            .await?
-            .file_type()
-            .is_file()
-        {
-            return Err(invalid("Invalid attachment file"));
-        }
-        let bytes = tokio::fs::read(path).await?;
-        Ok((attachment, bytes))
+        let stored = self.attachments.stored(activity_id, id).await?;
+        let bytes = self
+            .files
+            .read(&file_ref(&stored.storage)?, preview)
+            .await
+            .map_err(domain)?;
+        Ok((stored.attachment, bytes))
     }
 
     pub async fn delete(&self, activity_id: &str, id: &str) -> Result<()> {
+        // Read the location before the row that holds it goes away.
+        let stored = self.attachments.stored(activity_id, id).await?;
         self.attachments.delete_attachment(activity_id, id).await?;
-        self.remove_files(activity_id, id).await
+        self.remove_all(std::slice::from_ref(&stored.storage)).await
     }
 
-    /// Called after a successful transaction/account deletion. The directory
-    /// contains only this transaction's server-generated UUID files.
-    pub async fn remove_transaction(&self, activity_id: &str) -> Result<()> {
-        let path = self.activity_directory(activity_id)?;
-        match tokio::fs::remove_dir_all(path).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    pub async fn remove_files(&self, activity_id: &str, id: &str) -> Result<()> {
-        let (original, thumbnail) = self.paths(activity_id, id)?;
-        for path in [original, thumbnail] {
-            match tokio::fs::remove_file(path).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn filenames_and_file_types_are_checked() {
-        for name in [
-            "../receipt.png",
-            "a/b.png",
-            "a\\b.png",
-            "\r\nreceipt.png",
-            "",
-            "..",
-        ] {
-            assert!(validate_filename(name).is_err());
-        }
-        assert!(validate_filename("領収書.png").is_ok());
-        assert!(thumbnail(b"<svg/>", "image/png").is_err());
-        assert!(thumbnail(b"not a PDF", "application/pdf").is_err());
-        assert!(thumbnail(b"GIF89a", "image/gif").is_err());
-    }
-    #[test]
-    fn image_preview_is_an_aspect_preserving_webp() {
-        let image = image::DynamicImage::new_rgb8(1500, 900);
-        let mut input = Cursor::new(Vec::new());
-        image.write_to(&mut input, ImageFormat::Png).unwrap();
-        let output = thumbnail(input.get_ref(), "image/png").unwrap();
-        assert_eq!(image::guess_format(&output).unwrap(), ImageFormat::WebP);
-        let decoded = image::load_from_memory(&output).unwrap();
-        assert_eq!((decoded.width(), decoded.height()), (480, 288));
-        assert_ne!(input.get_ref(), &output);
-
-        let portrait = image::DynamicImage::new_rgb8(900, 1500);
-        let mut input = Cursor::new(Vec::new());
-        portrait.write_to(&mut input, ImageFormat::Png).unwrap();
-        let decoded =
-            image::load_from_memory(&thumbnail(input.get_ref(), "image/png").unwrap()).unwrap();
-        assert_eq!((decoded.width(), decoded.height()), (288, 480));
+    pub async fn remove_all(&self, storage: &[AttachmentStorage]) -> Result<()> {
+        let files = storage.iter().map(file_ref).collect::<Result<Vec<_>>>()?;
+        self.files.remove(&files).await.map_err(domain)
     }
 }

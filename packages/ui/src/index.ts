@@ -25,6 +25,8 @@ export * from "./components/ui/dropdown-menu";
 export * from "./components/ui/empty-placeholder";
 export * from "./components/ui/faceted-filter";
 export * from "./components/ui/faceted-search-input";
+export * from "./components/ui/file-dropzone";
+export * from "./components/ui/file-tile";
 export * from "./components/ui/form";
 export * from "./components/ui/hover-card";
 export * from "./components/ui/icons";

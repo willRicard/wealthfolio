@@ -142,19 +142,26 @@ async fn save_activities(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(request): Json<ActivityBulkMutationRequest>,
 ) -> ApiResult<Json<ActivityBulkMutationResult>> {
+    let pending = state
+        .transaction_attachments_service
+        .storage_for_activities(&request.delete_ids)
+        .await?;
     let result = state
         .activity_service
         .bulk_mutate_activities(request)
         .await?;
-    for deleted in &result.deleted {
-        if state
+    let files = wealthfolio_spending::transaction_attachments::storage_for_deleted(
+        pending,
+        result.deleted.iter().map(|activity| activity.id.as_str()),
+    );
+    if !files.is_empty()
+        && state
             .transaction_attachment_files
-            .remove_transaction(&deleted.id)
+            .remove_all(&files)
             .await
             .is_err()
-        {
-            tracing::warn!("Transaction attachment cleanup failed");
-        }
+    {
+        tracing::warn!("Transaction attachment cleanup failed");
     }
     state.health_service.clear_cache().await;
     // Domain events handle asset enrichment and portfolio recalculation
@@ -165,12 +172,21 @@ async fn delete_activity(
     Path(id): Path<String>,
     axum::Extension(state): axum::Extension<Arc<AppState>>,
 ) -> ApiResult<Json<Activity>> {
+    let pending = state
+        .transaction_attachments_service
+        .storage_for_activities(std::slice::from_ref(&id))
+        .await?;
     let deleted = state.activity_service.delete_activity(id).await?;
-    if state
-        .transaction_attachment_files
-        .remove_transaction(&deleted.id)
-        .await
-        .is_err()
+    let files = wealthfolio_spending::transaction_attachments::storage_for_deleted(
+        pending,
+        std::iter::once(deleted.id.as_str()),
+    );
+    if !files.is_empty()
+        && state
+            .transaction_attachment_files
+            .remove_all(&files)
+            .await
+            .is_err()
     {
         tracing::warn!("Transaction attachment cleanup failed");
     }

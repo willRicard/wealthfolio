@@ -362,6 +362,8 @@ impl NativeProfiles {
     }
 }
 
+pub const PROFILE_SCOPE_HEADER: &str = "x-wf-profile-scope";
+
 /// Command-boundary access to the runtime admitted for the caller's profile session.
 /// Extraction checks window identity, scope and runtime generation once. The captured
 /// runtime never changes when another profile opens; this is not a revocable lease
@@ -429,8 +431,16 @@ impl<'de, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for ProfileAccess {
                 .get("scopeId")
                 .and_then(|v| v.as_str())
                 .and_then(|s| Uuid::parse_str(s).ok()),
-            _ => None,
+            tauri::ipc::InvokeBody::Raw(_) => None,
         }
+        .or_else(|| {
+            command
+                .message
+                .headers()
+                .get(PROFILE_SCOPE_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| Uuid::parse_str(value).ok())
+        })
         .ok_or_else(|| tauri::ipc::InvokeError::from(ProfileError::Locked.to_string()))?;
         let profiles = webview
             .try_state::<NativeProfiles>()

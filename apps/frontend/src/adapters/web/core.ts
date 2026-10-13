@@ -20,6 +20,12 @@ type CommandMap = Record<string, { method: string; path: string }>;
 
 export const COMMANDS: CommandMap = {
   get_transaction_attachments: { method: "GET", path: "/spending/transactions" },
+  get_transaction_attachment_drafts: { method: "GET", path: "/spending/attachment-drafts" },
+  discard_transaction_attachment_drafts: {
+    method: "DELETE",
+    path: "/spending/attachment-drafts",
+  },
+  claim_transaction_attachment_drafts: { method: "POST", path: "/spending/transactions" },
   cloud_backup_action: { method: "POST", path: "/cloud-backups/action" },
   cloud_backup_capture: { method: "POST", path: "/cloud-backups/capture" },
   get_accounts: { method: "GET", path: "/accounts" },
@@ -1848,6 +1854,17 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "get_transaction_attachments": {
       const { activityId } = payload as { activityId: string };
       url += `/${encodeURIComponent(activityId)}/attachments`;
+      break;
+    }
+    case "get_transaction_attachment_drafts":
+    case "discard_transaction_attachment_drafts": {
+      const { token } = payload as { token: string };
+      url += `/${encodeURIComponent(token)}`;
+      break;
+    }
+    case "claim_transaction_attachment_drafts": {
+      const { token, activityId } = payload as { token: string; activityId: string };
+      url += `/${encodeURIComponent(activityId)}/attachment-drafts/${encodeURIComponent(token)}`;
       break;
     }
     // Net Worth commands

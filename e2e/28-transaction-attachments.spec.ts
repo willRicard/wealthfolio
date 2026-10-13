@@ -50,25 +50,29 @@ test("Spending saves detailed notes and displays attachment thumbnails", async (
   await expect(panel).toBeVisible();
   await expect(panel.getByLabel("Detailed notes")).toBeEnabled();
   await panel.getByLabel("Detailed notes").fill("Line items and receipt details");
-  await panel.getByLabel("Attachments", { exact: true }).setInputFiles([receipt, pdfReceipt]);
-  const requests: string[] = [];
+  const uploads: string[] = [];
+  const reads: string[] = [];
   page.context().on("request", (request) => {
-    if (request.url().includes("/attachments/")) requests.push(request.url());
+    if (request.method() === "POST" && request.url().endsWith("/attachments"))
+      uploads.push(request.url());
+    if (request.url().includes("/attachments/")) reads.push(request.url());
   });
+  await panel.getByLabel("Attachments", { exact: true }).setInputFiles([receipt, pdfReceipt]);
+  await expect.poll(() => uploads.length, { timeout: 30000 }).toBe(2);
   await panel.getByRole("button", { name: "Update", exact: true }).click();
   await expect(panel).not.toBeVisible({ timeout: 30000 });
   await row.getByRole("button", { name: "Row actions" }).click();
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
   await expect(panel.getByLabel("Detailed notes")).toHaveValue("Line items and receipt details");
-  const previews = panel.locator("img[src*='/thumbnail']");
+  const previews = panel.locator("[data-testid='attachment-thumbnail'] img");
   await expect(previews).toHaveCount(2);
   for (const image of await previews.all()) {
     await expect
       .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth))
       .toBeGreaterThan(0);
   }
-  expect(requests.filter((url) => !url.includes("/thumbnail"))).toEqual([]);
-  await panel.getByLabel("Attachments", { exact: true }).scrollIntoViewIfNeeded();
+  expect(reads.filter((url) => !url.includes("/thumbnail"))).toEqual([]);
+  await panel.getByRole("button", { name: "Click to upload" }).scrollIntoViewIfNeeded();
   await panel.screenshot({ path: testInfo.outputPath("transaction-attachments.png") });
   const [original] = await Promise.all([
     page.waitForEvent("popup"),

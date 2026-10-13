@@ -86,6 +86,26 @@ fn multipart(filename: &str, content_type: &str, data: &[u8]) -> Vec<u8> {
     body.extend(b"\r\n--receipt--\r\n");
     body
 }
+async fn cross_site(
+    app: &Router,
+    method: &str,
+    path: &str,
+    body: Vec<u8>,
+    content_type: &str,
+) -> Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("sec-fetch-site", "cross-site")
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
 async fn upload(app: &Router, filename: &str, content_type: &str, data: &[u8]) -> Response {
     request(
         app,
@@ -509,6 +529,157 @@ async fn profile_scope_and_lock_protect_attachment_metadata_originals_and_thumbn
             .await
             .status(),
             StatusCode::LOCKED
+        );
+    }
+}
+
+#[tokio::test]
+async fn attachment_drafts_stage_then_claim_without_refetching_bytes() {
+    let (_dir, _state, app) = setup().await;
+    let token = "8f14e45f-ceea-467a-9c2a-1b2c3d4e5f60";
+    let drafts = format!("/api/v1/spending/attachment-drafts/{token}");
+
+    let staged = json_body(
+        request(
+            &app,
+            "POST",
+            &drafts,
+            multipart("receipt.png", "image/png", PNG),
+            "multipart/form-data; boundary=receipt",
+        )
+        .await,
+    )
+    .await;
+    let id = staged["id"].as_str().unwrap().to_owned();
+    assert_eq!(staged["token"], token);
+    assert!(staged["activityId"].is_null());
+
+    let listed =
+        json_body(request(&app, "GET", &drafts, Vec::new(), "application/json").await).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+
+    let preview = request(
+        &app,
+        "GET",
+        &format!("{drafts}/{id}/thumbnail"),
+        Vec::new(),
+        "application/json",
+    )
+    .await;
+    assert_eq!(preview.status(), StatusCode::OK);
+    assert_eq!(preview.headers()["content-type"], "image/webp");
+    assert_eq!(preview.headers()["cache-control"], "private, no-store");
+    assert_eq!(preview.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(
+        preview.headers()["content-security-policy"],
+        "sandbox; default-src 'none'"
+    );
+
+    let claimed = request(
+        &app,
+        "POST",
+        &format!("/api/v1/spending/transactions/transaction-1/attachment-drafts/{token}"),
+        Vec::new(),
+        "application/json",
+    )
+    .await;
+    assert_eq!(claimed.status(), StatusCode::OK);
+    assert_eq!(json_body(claimed).await, serde_json::json!(1));
+
+    let remaining =
+        json_body(request(&app, "GET", &drafts, Vec::new(), "application/json").await).await;
+    assert!(remaining.as_array().unwrap().is_empty());
+    let attachments = json_body(
+        request(
+            &app,
+            "GET",
+            "/api/v1/spending/transactions/transaction-1/attachments",
+            Vec::new(),
+            "application/json",
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(attachments.as_array().unwrap().len(), 1);
+    assert_eq!(attachments[0]["id"], id);
+    assert_eq!(attachments[0]["activityId"], "transaction-1");
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &format!("/api/v1/spending/transactions/transaction-1/attachments/{id}"),
+            Vec::new(),
+            "application/json",
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn draft_routes_reject_a_non_uuid_token_and_a_cross_site_caller() {
+    let (_dir, _state, app) = setup().await;
+    let token = "8f14e45f-ceea-467a-9c2a-1b2c3d4e5f60";
+
+    for bad in ["not-a-uuid", "..", "1"] {
+        let response = request(
+            &app,
+            "GET",
+            &format!("/api/v1/spending/attachment-drafts/{bad}"),
+            Vec::new(),
+            "application/json",
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "token {bad} should be rejected"
+        );
+    }
+
+    assert_eq!(
+        cross_site(
+            &app,
+            "POST",
+            &format!("/api/v1/spending/attachment-drafts/{token}"),
+            multipart("receipt.png", "image/png", PNG),
+            "multipart/form-data; boundary=receipt",
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN,
+        "a cross-site upload should be refused"
+    );
+    for (method, path) in [
+        ("GET", format!("/api/v1/spending/attachment-drafts/{token}")),
+        (
+            "DELETE",
+            format!("/api/v1/spending/attachment-drafts/{token}"),
+        ),
+        (
+            "GET",
+            format!("/api/v1/spending/attachment-drafts/{token}/some-id"),
+        ),
+        (
+            "DELETE",
+            format!("/api/v1/spending/attachment-drafts/{token}/some-id"),
+        ),
+        (
+            "GET",
+            format!("/api/v1/spending/attachment-drafts/{token}/some-id/thumbnail"),
+        ),
+        (
+            "POST",
+            format!("/api/v1/spending/transactions/transaction-1/attachment-drafts/{token}"),
+        ),
+    ] {
+        assert_eq!(
+            cross_site(&app, method, &path, Vec::new(), "application/json")
+                .await
+                .status(),
+            StatusCode::FORBIDDEN,
+            "{method} {path} should refuse a cross-site caller"
         );
     }
 }

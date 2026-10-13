@@ -9261,6 +9261,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wealthfolio-files"
+version = "3.9.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "image",
+ "pdfium-render",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "wealthfolio-http"
 version = "3.9.2"
 dependencies = [
@@ -9397,9 +9411,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "chrono-tz",
- "image",
  "log",
- "pdfium-render",
  "proptest",
  "regex",
  "rust_decimal",
@@ -9409,6 +9421,7 @@ dependencies = [
  "tokio",
  "uuid",
  "wealthfolio-core",
+ "wealthfolio-files",
 ]
 
 [[package]]

@@ -28,15 +28,12 @@ export const logger: Logger = {
   },
 };
 
-/**
- * Invoke a Tauri command (internal - use typed adapter functions instead)
- */
-export const invoke = async <T>(command: string, payload?: Record<string, unknown>): Promise<T> => {
+async function withTimeout<T>(command: string, run: () => Promise<T>): Promise<T> {
   const timeoutMs = invokeTimeoutMs(command);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      tauriInvoke<T>(command, payload),
+      run(),
       new Promise<never>(
         (_, reject) =>
           (timer = setTimeout(
@@ -52,7 +49,39 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   } finally {
     clearTimeout(timer);
   }
-};
+}
+
+/**
+ * Invoke a Tauri command (internal - use typed adapter functions instead)
+ */
+export const invoke = <T>(command: string, payload?: Record<string, unknown>): Promise<T> =>
+  withTimeout(command, () => tauriInvoke<T>(command, payload));
+
+/**
+ * Invoke a Tauri command with a raw byte body, keeping JSON out of the transfer.
+ *
+ * `tauriInvoke` injects the profile scope by spreading the payload object, and spreading
+ * an `ArrayBuffer` yields `{}` — the scope would be dropped and the command would fail its
+ * `ProfileAccess` guard. So the scope travels as an IPC header here, which is where the
+ * Rust extractor looks when the body is raw. Metadata rides alongside it in `headers`.
+ */
+export const invokeRaw = <T>(
+  command: string,
+  body: ArrayBuffer,
+  headers: Record<string, string> = {},
+): Promise<T> =>
+  withTimeout(command, async () => {
+    try {
+      const result = await rawInvoke<T>(command, body, {
+        headers: { ...headers, "x-wf-profile-scope": profileScope() },
+      });
+      profileScope(); // discard a response delivered after local revocation
+      return result;
+    } catch (error) {
+      if (/PROFILE_(LOCKED|STALE)/.test(String(error))) revokeProfileSession();
+      throw error;
+    }
+  });
 
 // Re-export tauriInvoke for cases where we need direct access (e.g., Channel streaming)
 export async function tauriInvoke<T>(

@@ -464,6 +464,9 @@ async fn build_context(
             transaction_attachments_service.clone(),
         )?,
     );
+    if let Err(error) = transaction_attachment_files.sweep_drafts().await {
+        log::warn!("Failed to sweep abandoned attachment drafts: {error}");
+    }
     let final_cash_migration = run_final_cash_migration(
         settings_service.as_ref(),
         activity_repository.as_ref(),

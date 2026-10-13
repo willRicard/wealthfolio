@@ -7,4 +7,5 @@ export { useCallbackRef } from "./use-callback-ref";
 export { useDebouncedCallback } from "./use-debounced-callback";
 export { dateFnsLocaleFor, useDateFnsLocale } from "./use-date-fns-locale";
 export { useIsMobile } from "./use-mobile";
+export { useObjectUrl } from "./use-object-url";
 export { usePersistentState } from "./use-persistent-state";

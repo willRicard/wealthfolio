@@ -1,0 +1,28 @@
+[package]
+name = "wealthfolio-files"
+version.workspace = true
+edition.workspace = true
+description = "Owner-agnostic private file storage and thumbnail rendering for Wealthfolio"
+authors = ["Aziz Fadil"]
+license = "AGPL-3.0"
+repository = "https://github.com/afadil/wealthfolio"
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+
+image = { version = "0.25", optional = true, default-features = false, features = ["jpeg", "png", "webp"] }
+pdfium-render = { version = "0.9", optional = true, default-features = false, features = ["pdfium_7881", "image_latest", "thread_safe"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[features]
+thumbnails = ["dep:image", "dep:pdfium-render", "tokio/fs", "tokio/rt", "tokio/sync"]

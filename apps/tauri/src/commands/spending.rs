@@ -825,23 +825,140 @@ pub async fn get_transaction_attachments(
         .map_err(|e| e.to_string())
 }
 
+const TARGET_KIND_HEADER: &str = "x-wf-target-kind";
+const TARGET_ID_HEADER: &str = "x-wf-target-id";
+const CONTENT_TYPE_HEADER: &str = "x-wf-content-type";
+const FILENAME_HEADER: &str = "x-wf-filename";
+
+fn header<'a>(request: &'a tauri::ipc::Request<'_>, name: &str) -> Result<&'a str, String> {
+    request
+        .headers()
+        .get(name)
+        .ok_or_else(|| format!("Missing {name} header"))?
+        .to_str()
+        .map_err(|_| format!("Invalid {name} header"))
+}
+
+fn decoded_header(request: &tauri::ipc::Request<'_>, name: &str) -> Result<String, String> {
+    urlencoding::decode(header(request, name)?)
+        .map(|value| value.into_owned())
+        .map_err(|_| format!("Invalid {name} header"))
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum UploadedAttachment {
+    Attachment(wealthfolio_spending::transaction_attachments::TransactionAttachment),
+    Draft(wealthfolio_spending::transaction_attachments::AttachmentDraft),
+}
+
 #[tauri::command]
 pub async fn upload_transaction_attachment(
     state: ProfileAccess,
-    activity_id: String,
-    filename: String,
-    content_type: String,
-    bytes: Vec<u8>,
-) -> Result<wealthfolio_spending::transaction_attachments::TransactionAttachment, String> {
+    request: tauri::ipc::Request<'_>,
+) -> Result<UploadedAttachment, String> {
+    let kind = header(&request, TARGET_KIND_HEADER)?.to_string();
+    if kind != "activity" && kind != "draft" {
+        return Err(format!("Unsupported attachment target '{kind}'"));
+    }
+    let target_id = decoded_header(&request, TARGET_ID_HEADER)?;
+    let filename = decoded_header(&request, FILENAME_HEADER)?;
+    let content_type = header(&request, CONTENT_TYPE_HEADER)?.to_string();
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+        // Android has no raw IPC body; the ArrayBuffer arrives as a JSON number array.
+        tauri::ipc::InvokeBody::Json(value) => Vec::<u8>::deserialize(value)
+            .map_err(|_| "Attachment payload must be bytes".to_string())?,
+    };
+
     let context = state.context()?;
-    let slot = context
-        .transaction_attachment_files
-        .upload_slot()
+    let files = &context.transaction_attachment_files;
+    if kind == "draft" {
+        if let Err(error) = files.sweep_drafts().await {
+            log::warn!("Failed to sweep abandoned attachment drafts: {error}");
+        }
+    }
+    let slot = files.upload_slot().await.map_err(|e| e.to_string())?;
+    if kind == "draft" {
+        files
+            .upload_draft(&target_id, &filename, &content_type, bytes, slot)
+            .await
+            .map(UploadedAttachment::Draft)
+    } else {
+        files
+            .upload(&target_id, &filename, &content_type, bytes, slot)
+            .await
+            .map(UploadedAttachment::Attachment)
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_transaction_attachment_drafts(
+    state: ProfileAccess,
+    token: String,
+) -> Result<Vec<wealthfolio_spending::transaction_attachments::AttachmentDraft>, String> {
+    state
+        .context()?
+        .transaction_attachments_service
+        .list_drafts(&token)
         .await
-        .map_err(|e| e.to_string())?;
-    context
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn read_transaction_attachment_draft(
+    state: ProfileAccess,
+    token: String,
+    attachment_id: String,
+    preview: bool,
+) -> Result<tauri::ipc::Response, String> {
+    state
+        .context()?
         .transaction_attachment_files
-        .upload(&activity_id, &filename, &content_type, bytes, slot)
+        .read_draft(&token, &attachment_id, preview)
+        .await
+        .map(|(_, bytes)| tauri::ipc::Response::new(bytes))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_transaction_attachment_draft(
+    state: ProfileAccess,
+    token: String,
+    attachment_id: String,
+) -> Result<(), String> {
+    state
+        .context()?
+        .transaction_attachment_files
+        .delete_draft(&token, &attachment_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn discard_transaction_attachment_drafts(
+    state: ProfileAccess,
+    token: String,
+) -> Result<(), String> {
+    state
+        .context()?
+        .transaction_attachment_files
+        .discard_drafts(&token)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn claim_transaction_attachment_drafts(
+    state: ProfileAccess,
+    token: String,
+    activity_id: String,
+) -> Result<usize, String> {
+    state
+        .context()?
+        .transaction_attachment_files
+        .claim_drafts(&token, &activity_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -852,13 +969,13 @@ pub async fn read_transaction_attachment(
     activity_id: String,
     attachment_id: String,
     preview: bool,
-) -> Result<Vec<u8>, String> {
+) -> Result<tauri::ipc::Response, String> {
     state
         .context()?
         .transaction_attachment_files
         .read(&activity_id, &attachment_id, preview)
         .await
-        .map(|(_, bytes)| bytes)
+        .map(|(_, bytes)| tauri::ipc::Response::new(bytes))
         .map_err(|e| e.to_string())
 }
 

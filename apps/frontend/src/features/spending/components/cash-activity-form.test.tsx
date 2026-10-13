@@ -5,9 +5,11 @@ import type { ReactNode } from "react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  claimTransactionAttachmentDrafts,
   createActivity,
+  discardTransactionAttachmentDrafts,
+  listTransactionAttachments,
   updateActivity,
-  getTransactionAttachments,
   uploadTransactionAttachment,
 } from "@/adapters";
 import type { Activity } from "@/lib/types";
@@ -26,8 +28,13 @@ beforeAll(() => {
 
 vi.mock("@/adapters", () => ({
   createActivity: vi.fn(),
-  getTransactionAttachments: vi.fn(() => Promise.resolve([])),
+  listTransactionAttachments: vi.fn(() => Promise.resolve([])),
+  newAttachmentDraftToken: () => "draft-token",
+  claimTransactionAttachmentDrafts: vi.fn(() => Promise.resolve(1)),
+  discardTransactionAttachmentDrafts: vi.fn(() => Promise.resolve()),
   uploadTransactionAttachment: vi.fn(() => Promise.resolve({ id: "uploaded" })),
+  SUPPORTS_UPLOAD_PROGRESS: true,
+  SUPPORTS_UPLOAD_CANCEL: true,
   deleteTransactionAttachment: vi.fn(() => Promise.resolve()),
   fetchTransactionAttachmentThumbnail: vi.fn(() =>
     Promise.resolve(new Blob([new Uint8Array([0])], { type: "image/webp" })),
@@ -258,33 +265,104 @@ describe("CashActivityForm detailed notes", () => {
     await user.type(notes, "Receipt line items");
     await user.click(screen.getByRole("button", { name: /update/i }));
     await waitFor(() => expect(updateActivity).toHaveBeenCalled());
-    expect(getTransactionAttachments).toHaveBeenCalledWith("act-1");
+    expect(listTransactionAttachments).toHaveBeenCalledWith({ kind: "activity", id: "act-1" });
     expect(vi.mocked(updateActivity).mock.calls[0][0].detailedNotes).toBe("Receipt line items");
     expect(vi.mocked(updateActivity).mock.calls[0][0].comment).toBe("Sq *Morning Owl");
     expect(vi.mocked(updateActivity).mock.calls[0][0].metadata).toBeUndefined();
   });
 });
 
-it("retries a failed upload against the saved draft without creating another transaction", async () => {
+it("uploads on select in both modes, staging a new transaction's files under a draft token", async () => {
+  vi.clearAllMocks();
+  platformMock.isMobileViewport = false;
+  const receipt = () => new File(["receipt"], "receipt.png", { type: "image/png" });
+
+  const editing = render(
+    <CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />,
+    { wrapper },
+  );
+  const picker = await screen.findByLabelText("Attachments", { exact: true });
+  await waitFor(() => expect(picker).toBeEnabled());
+  await userEvent.setup().upload(picker, receipt());
+  await waitFor(() =>
+    expect(uploadTransactionAttachment).toHaveBeenCalledWith(
+      { kind: "activity", id: "act-1" },
+      expect.any(File),
+      expect.anything(),
+    ),
+  );
+  expect(updateActivity).not.toHaveBeenCalled();
+  expect(claimTransactionAttachmentDrafts).not.toHaveBeenCalled();
+  editing.unmount();
+
+  vi.clearAllMocks();
+  vi.mocked(createActivity).mockResolvedValue({ ...foreignCharge, id: "new-1" });
+  const user = userEvent.setup();
+  render(<CashActivityForm open onOpenChange={vi.fn()} />, { wrapper });
+  const creating = await screen.findByLabelText("Attachments", { exact: true });
+  await waitFor(() => expect(creating).toBeEnabled());
+  await user.upload(creating, receipt());
+
+  await waitFor(() =>
+    expect(uploadTransactionAttachment).toHaveBeenCalledWith(
+      { kind: "draft", token: "draft-token" },
+      expect.any(File),
+      expect.anything(),
+    ),
+  );
+  expect(createActivity).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: /^create$/i }));
+  await waitFor(() =>
+    expect(claimTransactionAttachmentDrafts).toHaveBeenCalledWith("draft-token", "new-1"),
+  );
+  expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1);
+});
+
+it("discards staged files when the sheet closes unsaved, but not after a claim", async () => {
+  vi.clearAllMocks();
+  platformMock.isMobileViewport = false;
+  vi.mocked(createActivity).mockResolvedValue({ ...foreignCharge, id: "new-2" });
+  const user = userEvent.setup();
+
+  const abandoned = render(<CashActivityForm open onOpenChange={vi.fn()} />, { wrapper });
+  await user.click(await screen.findByRole("button", { name: /cancel/i }));
+  expect(discardTransactionAttachmentDrafts).toHaveBeenCalledWith("draft-token");
+  abandoned.unmount();
+
+  vi.clearAllMocks();
+  render(<CashActivityForm open onOpenChange={vi.fn()} />, { wrapper });
+  await user.click(await screen.findByRole("button", { name: /^create$/i }));
+  await waitFor(() => expect(claimTransactionAttachmentDrafts).toHaveBeenCalled());
+  // The files belong to the transaction now; discarding would delete them.
+  expect(discardTransactionAttachmentDrafts).not.toHaveBeenCalled();
+});
+
+it("retries a failed claim against the saved draft without creating another transaction", async () => {
   vi.clearAllMocks();
   platformMock.isMobileViewport = false;
   vi.mocked(createActivity).mockResolvedValue({ ...foreignCharge, id: "saved-draft" });
-  vi.mocked(uploadTransactionAttachment).mockRejectedValueOnce(new Error("Upload failed"));
+  vi.mocked(claimTransactionAttachmentDrafts).mockRejectedValueOnce(
+    new Error("Maximum 10 attachments per transaction"),
+  );
   const user = userEvent.setup();
   const onOpenChange = vi.fn();
   render(<CashActivityForm open onOpenChange={onOpenChange} />, { wrapper });
-  await user.upload(
-    screen.getByLabelText("Attachments", { exact: true }),
-    new File(["receipt"], "receipt.png", { type: "image/png" }),
-  );
+  const picker = await screen.findByLabelText("Attachments", { exact: true });
+  await waitFor(() => expect(picker).toBeEnabled());
+  await user.upload(picker, new File(["receipt"], "receipt.png", { type: "image/png" }));
+  await waitFor(() => expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1));
+
   const submit = screen.getByRole("button", { name: /^create$/i });
   await user.click(submit);
-  await waitFor(() => expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(claimTransactionAttachmentDrafts).toHaveBeenCalledTimes(1));
   expect(onOpenChange).not.toHaveBeenCalledWith(false);
+
   await waitFor(() => expect(submit).toBeEnabled());
   await user.click(submit);
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   expect(createActivity).toHaveBeenCalledTimes(1);
   expect(updateActivity).toHaveBeenCalledWith(expect.objectContaining({ id: "saved-draft" }));
-  expect(uploadTransactionAttachment).toHaveBeenCalledTimes(2);
+  expect(claimTransactionAttachmentDrafts).toHaveBeenCalledTimes(2);
+  expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1);
 });

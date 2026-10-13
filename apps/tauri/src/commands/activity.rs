@@ -105,16 +105,26 @@ pub async fn delete_activity(
     let context = state.context()?;
     debug!("Deleting activity...");
     // Domain events handle recalculation automatically
+    let pending = context
+        .transaction_attachments_service
+        .storage_for_activities(std::slice::from_ref(&activity_id))
+        .await
+        .map_err(|e| e.to_string())?;
     let deleted = context
         .activity_service()
         .delete_activity(activity_id)
         .await
         .map_err(|e| e.to_string())?;
-    if context
-        .transaction_attachment_files
-        .remove_transaction(&deleted.id)
-        .await
-        .is_err()
+    let files = wealthfolio_spending::transaction_attachments::storage_for_deleted(
+        pending,
+        std::iter::once(deleted.id.as_str()),
+    );
+    if !files.is_empty()
+        && context
+            .transaction_attachment_files
+            .remove_all(&files)
+            .await
+            .is_err()
     {
         warn!("Transaction attachment cleanup failed");
     }
@@ -215,20 +225,28 @@ pub async fn save_activities(
     );
 
     // Domain events handle recalculation and asset enrichment automatically
+    let pending = context
+        .transaction_attachments_service
+        .storage_for_activities(&request.delete_ids)
+        .await
+        .map_err(|e| e.to_string())?;
     let result = context
         .activity_service()
         .bulk_mutate_activities(request)
         .await
         .map_err(|e| e.to_string())?;
-    for deleted in &result.deleted {
-        if context
+    let files = wealthfolio_spending::transaction_attachments::storage_for_deleted(
+        pending,
+        result.deleted.iter().map(|activity| activity.id.as_str()),
+    );
+    if !files.is_empty()
+        && context
             .transaction_attachment_files
-            .remove_transaction(&deleted.id)
+            .remove_all(&files)
             .await
             .is_err()
-        {
-            warn!("Transaction attachment cleanup failed");
-        }
+    {
+        warn!("Transaction attachment cleanup failed");
     }
     context.health_service().clear_cache().await;
     Ok(result)

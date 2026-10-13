@@ -1,26 +1,45 @@
 import { profileFetch, profileScope } from "@/features/profiles/session";
-import type { TransactionAttachment } from "../shared/transaction-attachments";
+import type {
+  AttachmentTarget,
+  AttachmentUploadOptions,
+  TransactionAttachment,
+} from "../shared/transaction-attachments";
 import { API_PREFIX } from "./core";
-const path = (activityId: string) =>
-  `${API_PREFIX}/spending/transactions/${encodeURIComponent(activityId)}/attachments`;
-function transactionAttachmentUrl(activityId: string, id: string, thumbnail = false) {
-  return `${path(activityId)}/${encodeURIComponent(id)}${thumbnail ? "/thumbnail" : ""}?profileScope=${encodeURIComponent(profileScope())}`;
+import { postFileWithProgress } from "./upload";
+
+/** `XMLHttpRequest` measures request-body progress and can abort it. */
+export const SUPPORTS_UPLOAD_PROGRESS = true;
+export const SUPPORTS_UPLOAD_CANCEL = true;
+
+/**
+ * The collection a target's files live in. Everything below composes onto it —
+ * `/{id}` and `/{id}/thumbnail` — so the two kinds differ in one place only.
+ */
+const path = (target: AttachmentTarget) =>
+  target.kind === "draft"
+    ? `${API_PREFIX}/spending/attachment-drafts/${encodeURIComponent(target.token)}`
+    : `${API_PREFIX}/spending/transactions/${encodeURIComponent(target.id)}/attachments`;
+
+function transactionAttachmentUrl(target: AttachmentTarget, id: string, thumbnail = false) {
+  // `window.open` and `img` cannot carry headers, so the scope travels in the query.
+  return `${path(target)}/${encodeURIComponent(id)}${thumbnail ? "/thumbnail" : ""}?profileScope=${encodeURIComponent(profileScope())}`;
 }
+
 export async function fetchTransactionAttachmentThumbnail(
-  activityId: string,
+  target: AttachmentTarget,
   id: string,
 ): Promise<Blob> {
-  const response = await checked(
-    await profileFetch(transactionAttachmentUrl(activityId, id, true)),
-  );
+  const response = await checked(await profileFetch(transactionAttachmentUrl(target, id, true)));
   return response.blob();
 }
+
 export async function openTransactionAttachment(
-  activityId: string,
+  target: AttachmentTarget,
   attachment: TransactionAttachment,
 ) {
-  window.open(transactionAttachmentUrl(activityId, attachment.id), "_blank", "noopener,noreferrer");
+  window.open(transactionAttachmentUrl(target, attachment.id), "_blank", "noopener,noreferrer");
 }
+
 async function checked(response: Response) {
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => ({}));
@@ -35,14 +54,17 @@ async function checked(response: Response) {
   }
   return response;
 }
-export async function uploadTransactionAttachment(activityId: string, file: File) {
-  const body = new FormData();
-  body.append("file", file);
-  const response = await checked(await profileFetch(path(activityId), { method: "POST", body }));
-  return (await response.json()) as TransactionAttachment;
+
+export async function uploadTransactionAttachment(
+  target: AttachmentTarget,
+  file: File,
+  options?: AttachmentUploadOptions,
+) {
+  return postFileWithProgress<TransactionAttachment>(path(target), file, options);
 }
-export async function deleteTransactionAttachment(activityId: string, id: string) {
+
+export async function deleteTransactionAttachment(target: AttachmentTarget, id: string) {
   await checked(
-    await profileFetch(`${path(activityId)}/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    await profileFetch(`${path(target)}/${encodeURIComponent(id)}`, { method: "DELETE" }),
   );
 }

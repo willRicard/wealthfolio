@@ -21,11 +21,9 @@ log = { workspace = true }
 rust_decimal = { workspace = true }
 regex = "1"
 
-image = { version = "0.25", optional = true, default-features = false, features = ["jpeg", "png", "webp"] }
-pdfium-render = { version = "0.9", optional = true, default-features = false, features = ["pdfium_7881", "image_latest", "thread_safe"] }
-
-# Sibling crate
+# Sibling crates
 wealthfolio-core = { path = "../core" }
+wealthfolio-files = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -35,4 +33,4 @@ proptest = "1.4"
 workspace = true
 
 [features]
-attachments = ["dep:image", "dep:pdfium-render", "tokio/fs", "tokio/rt", "tokio/sync"]
+attachments = ["dep:wealthfolio-files", "wealthfolio-files/thumbnails", "tokio/fs", "tokio/rt", "tokio/sync"]

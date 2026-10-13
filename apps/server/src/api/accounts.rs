@@ -67,20 +67,19 @@ async fn delete_account(
     Path(id): Path<String>,
     axum::Extension(state): axum::Extension<Arc<AppState>>,
 ) -> ApiResult<StatusCode> {
-    let activity_ids = state
+    let files = state
         .transaction_attachments_service
-        .activities_with_attachments(&id)
+        .storage_for_account(&id)
         .await?;
     state.account_service.delete_account(&id).await?;
-    for activity_id in activity_ids {
-        if state
+    if !files.is_empty()
+        && state
             .transaction_attachment_files
-            .remove_transaction(&activity_id)
+            .remove_all(&files)
             .await
             .is_err()
-        {
-            tracing::warn!("Account attachment cleanup failed");
-        }
+    {
+        tracing::warn!("Account attachment cleanup failed");
     }
     // Domain events handle portfolio recalculation
     Ok(StatusCode::NO_CONTENT)

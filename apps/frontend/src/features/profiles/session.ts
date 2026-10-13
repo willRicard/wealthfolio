@@ -1,4 +1,4 @@
-import { classifyAuthResponse, notifyUnauthorized } from "@/lib/auth-token";
+import { classifyAuthResponse, notifyUnauthorized, type AuthResponseLike } from "@/lib/auth-token";
 import { deferApplicationReload, reloadApplication } from "@/lib/reload-application";
 
 // Immutable for the lifetime of a financial application load. Old async work
@@ -41,19 +41,23 @@ export function profileHeaders(): Record<string, string> {
   return { "x-wf-profile-scope": profileScope() };
 }
 
-export async function profileFetch(
-  input: RequestInfo | URL,
-  init: RequestInit = {},
-): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set("x-wf-profile-scope", profileScope());
-  const response = await fetch(input, { ...init, headers });
+export function handleProfileStatus(response: AuthResponseLike) {
   if (classifyAuthResponse(response) === "signIn") {
     notifyUnauthorized("signIn");
     throw new Error("PROFILE_AUTH_REQUIRED");
   }
   if (response.status === 423) revokeProfileSession();
   profileScope();
+}
+
+export async function profileFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  for (const [name, value] of Object.entries(profileHeaders())) headers.set(name, value);
+  const response = await fetch(input, { ...init, headers });
+  handleProfileStatus(response);
   return response;
 }
 

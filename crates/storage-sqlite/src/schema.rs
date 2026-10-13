@@ -8,6 +8,23 @@ diesel::table! {
         content_type -> Text,
         size_bytes -> BigInt,
         created_at -> Text,
+        storage_backend -> Text,
+        storage_key -> Text,
+        preview_key -> Text,
+    }
+}
+
+diesel::table! {
+    spending_attachment_drafts (id) {
+        id -> Text,
+        token -> Text,
+        filename -> Text,
+        content_type -> Text,
+        size_bytes -> BigInt,
+        created_at -> Text,
+        storage_backend -> Text,
+        storage_key -> Text,
+        preview_key -> Text,
     }
 }
 
