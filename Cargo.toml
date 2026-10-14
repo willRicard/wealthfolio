@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "3.9.2"
+version = "3.10.0"
 edition = "2021"
 license = "AGPL-3.0"
 
@@ -26,6 +26,14 @@ panic = "warn"
 [profile.dev]
 # Keep file/line backtraces without full type and variable debug information.
 debug = "line-tables-only"
+
+# portfolio-engine's property tests take minutes unoptimized. opt-level leaves
+# the test profile's overflow checks and debug assertions on.
+[profile.test.package.wealthfolio-portfolio-engine]
+opt-level = 3
+
+[profile.test.package.rust_decimal]
+opt-level = 3
 
 [workspace.dependencies]
 # Async runtime

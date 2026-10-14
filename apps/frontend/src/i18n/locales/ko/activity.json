@@ -302,6 +302,7 @@
     "import_from_csv": "CSV에서 가져오기",
     "transfer_holdings": "보유 종목 이체",
     "add_personal_asset": "개인 자산 추가",
+    "connect_account": "계좌 연결",
     "add_activities": "활동 추가",
     "ask_ai_categorize": "AI에게 분류 요청",
     "investments": "투자",
@@ -1115,7 +1116,8 @@
       "total": "합계",
       "importAnother": "다른 파일 가져오기",
       "viewHoldings": "보유 종목 보기",
-      "viewActivities": "활동 보기"
+      "viewActivities": "활동 보기",
+      "syncAutomatically": "자동으로 동기화하시겠습니까?"
     },
     "assets": {
       "noAssetsTitle": "검토가 필요한 자산이 없습니다",
@@ -1236,9 +1238,11 @@
       "activitiesStep5Bold": "가져오기",
       "activitiesStep5": " — 활동을 확인하고 가져오세요",
       "requiredFields": "필수 필드:",
-      "activitiesRequiredFields": "date, activityType, symbol, quantity, unitPrice, amount",
+      "activitiesRequiredFields": "date, activityType, symbol, quantity, unitPrice",
       "optionalFields": "선택 필드:",
-      "activitiesOptionalFields": "account, currency, fee, tax, comment, fxRate, subtype, instrumentType, isin",
+      "activitiesOptionalFields": "amount, account, currency, fee, tax, comment, fxRate, subtype, instrumentType, isin",
+      "transactionsRequiredFields": "date, activityType, amount",
+      "transactionsOptionalFields": "account, currency, fee, tax, comment, fxRate, subtype",
       "tipBold": "💡 팁:",
       "activitiesTip": " 열 이름과 활동 유형이 정확히 일치하지 않아도 됩니다 — 가져오는 동안 매핑할 수 있습니다. 매핑은 이후 가져오기를 위해 사용자 지정 템플릿으로 저장할 수 있습니다.",
       "amountBold": "💰 금액 필드:",

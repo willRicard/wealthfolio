@@ -304,6 +304,7 @@
     "import_from_csv": "Importa da CSV",
     "transfer_holdings": "Trasferisci posizioni",
     "add_personal_asset": "Aggiungi asset personale",
+    "connect_account": "Collega conto",
     "add_activities": "Aggiungi movimenti",
     "ask_ai_categorize": "Chiedi all'IA di categorizzare",
     "investments": "Investimenti",
@@ -1164,7 +1165,8 @@
       "total": "Totale",
       "importAnother": "Importa un altro",
       "viewHoldings": "Visualizza posizioni",
-      "viewActivities": "Visualizza movimenti"
+      "viewActivities": "Visualizza movimenti",
+      "syncAutomatically": "Preferisci la sincronizzazione automatica?"
     },
     "assets": {
       "noAssetsTitle": "Nessun asset richiede revisione",
@@ -1300,9 +1302,11 @@
       "activitiesStep5Bold": "Importa",
       "activitiesStep5": " — Conferma e importa i tuoi movimenti",
       "requiredFields": "Campi obbligatori:",
-      "activitiesRequiredFields": "date, activityType, symbol, quantity, unitPrice, amount",
+      "activitiesRequiredFields": "date, activityType, symbol, quantity, unitPrice",
       "optionalFields": "Campi facoltativi:",
-      "activitiesOptionalFields": "account, currency, fee, tax, comment, fxRate, subtype, instrumentType, isin",
+      "activitiesOptionalFields": "amount, account, currency, fee, tax, comment, fxRate, subtype, instrumentType, isin",
+      "transactionsRequiredFields": "date, activityType, amount",
+      "transactionsOptionalFields": "account, currency, fee, tax, comment, fxRate, subtype",
       "tipBold": "💡 Suggerimento:",
       "activitiesTip": " I nomi delle colonne e i tipi di movimento non devono corrispondere esattamente: puoi associarli durante l'importazione. Le associazioni possono essere salvate come modelli personalizzati per le importazioni future.",
       "amountBold": "💰 Campo importo:",

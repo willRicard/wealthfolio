@@ -49,7 +49,7 @@ export {
 
 export type { HoldingCategoryFilterId } from "./constants";
 
-export type { ActivitySubtype, ImportRequiredField } from "./constants";
+export type { ActivitySubtype } from "./constants";
 
 export interface PortfolioWithAccounts {
   id: string;
@@ -1735,6 +1735,8 @@ export interface AlternativeAssetHolding {
 
 /** A liability's terms in effect and its milestones, as Holdings values it. */
 export interface LoanSummary {
+  /** Null means no balance is available; original principal is an unconfirmed fallback. */
+  balanceSource?: "recorded" | "schedule" | "original" | null;
   /** The balance follows a payment schedule rather than manual updates. */
   scheduled: boolean;
   originalAmount: number | null;

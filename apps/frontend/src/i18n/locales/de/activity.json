@@ -200,6 +200,7 @@
     "import_from_csv": "Aus CSV importieren",
     "transfer_holdings": "Bestände übertragen",
     "add_personal_asset": "Persönlichen Vermögenswert hinzufügen",
+    "connect_account": "Konto verbinden",
     "add_activities": "Aktivitäten hinzufügen",
     "ask_ai_categorize": "KI um Kategorisierung bitten",
     "investments": "Investitionen",
@@ -1130,7 +1131,8 @@
       "total": "Gesamt",
       "importAnother": "Weiteren importieren",
       "viewHoldings": "Bestände anzeigen",
-      "viewActivities": "Aktivitäten anzeigen"
+      "viewActivities": "Aktivitäten anzeigen",
+      "syncAutomatically": "Lieber automatisch synchronisieren?"
     },
     "assets": {
       "noAssetsTitle": "Keine Vermögenswerte zu prüfen",
@@ -1254,9 +1256,11 @@
       "activitiesStep5Bold": "Importieren",
       "activitiesStep5": " — Bestätigen und importieren Sie Ihre Aktivitäten",
       "requiredFields": "Erforderliche Felder:",
-      "activitiesRequiredFields": "date, activityType, symbol, quantity, unitPrice, amount",
+      "activitiesRequiredFields": "date, activityType, symbol, quantity, unitPrice",
       "optionalFields": "Optionale Felder:",
-      "activitiesOptionalFields": "account, currency, fee, tax, comment, fxRate, subtype, instrumentType, isin",
+      "activitiesOptionalFields": "amount, account, currency, fee, tax, comment, fxRate, subtype, instrumentType, isin",
+      "transactionsRequiredFields": "date, activityType, amount",
+      "transactionsOptionalFields": "account, currency, fee, tax, comment, fxRate, subtype",
       "tipBold": "💡 Tipp:",
       "activitiesTip": " Spaltennamen und Aktivitätstypen müssen nicht exakt übereinstimmen — Sie können sie beim Import zuordnen. Zuordnungen können als benutzerdefinierte Vorlagen für zukünftige Importe gespeichert werden.",
       "amountBold": "💰 Betragsfeld:",

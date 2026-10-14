@@ -561,6 +561,20 @@ impl ActivityService {
             Some(subtype) => Some(subtype),
             None => existing.subtype.as_deref(),
         };
+        // Normalize before classifying transfer economics: a cash repair must
+        // preserve its final amount and pass cash validation. An omitted
+        // subtype still carries the stored asset requirement.
+        if let Some(currency) = Self::cash_symbol_currency(
+            activity.asset.as_ref(),
+            &activity.activity_type,
+            effective_subtype,
+        ) {
+            if activity.currency.trim().is_empty() {
+                activity.currency = currency;
+            }
+            // Omission preserves the stored asset; an empty patch clears it.
+            activity.asset = Some(AssetResolutionInput::default());
+        }
         let effective_asset_id = match activity.asset.as_ref() {
             Some(asset) if asset.is_empty() => None,
             _ => activity
@@ -808,11 +822,27 @@ impl ActivityService {
         Ok(())
     }
 
+    /// A create whose asset only names the account's cash books cash: drop the
+    /// asset, keeping the symbol's currency when the row states none.
+    fn drop_cash_symbol_asset(activity: &mut NewActivity) {
+        if let Some(currency) = Self::cash_symbol_currency(
+            activity.asset.as_ref(),
+            &activity.activity_type,
+            activity.subtype.as_deref(),
+        ) {
+            if activity.currency.trim().is_empty() {
+                activity.currency = currency;
+            }
+            activity.asset = None;
+        }
+    }
+
     fn normalize_activity_for_preparation(mut activity: NewActivity) -> NewActivity {
         activity.subtype = NewActivity::canonicalize_subtype_for_activity(
             &activity.activity_type,
             activity.subtype.as_deref(),
         );
+        Self::drop_cash_symbol_asset(&mut activity);
         Self::normalize_new_activity_economic_signs(&mut activity);
         activity
     }
@@ -866,6 +896,33 @@ impl ActivityService {
         } else {
             classify_import_activity(activity_type, symbol, quantity, unit_price)
         }
+    }
+
+    /// Currency of a reserved cash placeholder on a symbol-optional activity.
+    /// A concrete asset id or an asset-backed subtype keeps asset resolution.
+    fn cash_symbol_currency(
+        asset: Option<&AssetResolutionInput>,
+        activity_type: &str,
+        subtype: Option<&str>,
+    ) -> Option<String> {
+        fn non_empty(value: Option<&str>) -> Option<&str> {
+            value.map(str::trim).filter(|v| !v.is_empty())
+        }
+        let asset = asset?;
+        let symbol = non_empty(asset.symbol.as_deref())?;
+        if !is_cash_symbol(symbol)
+            || non_empty(asset.id.as_deref()).is_some_and(|id| !is_cash_symbol(id))
+            || Self::requires_asset_identity(activity_type, subtype)
+        {
+            return None;
+        }
+        // Use the same uppercase spelling as is_cash_symbol and split at the
+        // currency separator, without slicing the original UTF-8 input.
+        symbol
+            .to_uppercase()
+            .rsplit(['-', '_', ':'])
+            .next()
+            .map(str::to_string)
     }
 
     fn requires_asset_identity(activity_type: &str, subtype: Option<&str>) -> bool {
@@ -2904,6 +2961,7 @@ impl ActivityService {
             activity.get_symbol_id().or(activity.get_symbol_code()),
             &account,
         )?;
+        Self::drop_cash_symbol_asset(&mut activity);
         let base_ccy = self.account_service.get_base_currency().unwrap_or_default();
         let account_currency = resolve_currency(&[&account.currency, &base_ccy]);
 
@@ -3448,14 +3506,6 @@ impl ActivityService {
         existing: Activity,
     ) -> Result<PreviewedActivityUpdate> {
         let account_currency = self.validate_update_request(&mut activity)?;
-        if activity
-            .get_symbol_code()
-            .is_some_and(|symbol| !symbol.trim().is_empty())
-        {
-            return Err(Self::invalid_activity_data(
-                "An update preview names the asset by its id, not by symbol",
-            ));
-        }
         let asset = match activity
             .get_symbol_id()
             .map(str::trim)
@@ -5075,6 +5125,14 @@ impl ActivityServiceTrait for ActivityService {
     ) -> Result<ActivityUpdatePreview> {
         // The same steps as `update_activity`, up to its writes.
         let existing = self.activity_repository.get_activity(&activity.id)?;
+        if activity
+            .get_symbol_code()
+            .is_some_and(|symbol| !symbol.trim().is_empty())
+        {
+            return Err(Self::invalid_activity_data(
+                "An update preview names the asset by its id, not by symbol",
+            ));
+        }
         self.hydrate_and_validate_update_against_existing(&mut activity, &existing)?;
 
         let pair = self.load_internal_transfer_pair_for_activity(&activity.id)?;
