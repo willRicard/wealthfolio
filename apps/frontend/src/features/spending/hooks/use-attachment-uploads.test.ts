@@ -65,19 +65,22 @@ describe("useAttachmentUploads", () => {
 
     act(() => result.current.add([png("a.png"), png("b.png")]));
 
-    await waitFor(() => expect(result.current.uploads).toHaveLength(0));
+    await waitFor(() => expect(result.current.isUploading).toBe(false));
     expect(uploadTransactionAttachment).toHaveBeenCalledTimes(2);
     expect(onUploaded).toHaveBeenCalledTimes(2);
-    expect(result.current.isUploading).toBe(false);
+    expect(result.current.uploads.map((upload) => upload.status)).toEqual(["done", "done"]);
+    expect(result.current.uploads.map((upload) => upload.attachmentId)).toEqual(["a.png", "b.png"]);
   });
 
   it("stages against a draft token when there is no transaction yet", async () => {
-    uploadTransactionAttachment.mockImplementation(async (_target, file: File) => stored(file.name));
+    uploadTransactionAttachment.mockImplementation(async (_target, file: File) =>
+      stored(file.name),
+    );
     const { result } = renderHook(() => useAttachmentUploads({ target: DRAFT }));
 
     act(() => result.current.add([png("a.png")]));
 
-    await waitFor(() => expect(result.current.uploads).toHaveLength(0));
+    await waitFor(() => expect(result.current.uploads[0].status).toBe("done"));
     expect(uploadTransactionAttachment).toHaveBeenCalledWith(
       DRAFT,
       expect.any(File),
@@ -123,7 +126,9 @@ describe("useAttachmentUploads", () => {
 
     uploadTransactionAttachment.mockResolvedValueOnce(stored("a"));
     act(() => result.current.retry(result.current.uploads[0].id));
-    await waitFor(() => expect(result.current.uploads).toHaveLength(0));
+    await waitFor(() => expect(result.current.uploads[0].status).toBe("done"));
+    expect(result.current.uploads[0].error).toBeUndefined();
+    expect(result.current.resolveAttachmentId(result.current.uploads[0].id)).toBe("a");
   });
 
   it("marks an aborted upload cancelled without deleting anything", async () => {
@@ -180,7 +185,7 @@ describe("useAttachmentUploads", () => {
     uploadTransactionAttachment.mockResolvedValueOnce(stored("file-8"));
     act(() => result.current.retry(result.current.uploads[0].id));
 
-    await waitFor(() => expect(result.current.uploads).toHaveLength(0));
+    await waitFor(() => expect(result.current.uploads[0].status).toBe("done"));
     expect(deleteTransactionAttachment).not.toHaveBeenCalled();
   });
 });

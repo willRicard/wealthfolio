@@ -275,6 +275,27 @@ async fn claim_drafts(
     ))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderRequest {
+    attachment_ids: Vec<String>,
+}
+
+async fn reorder(
+    Extension(state): Extension<Arc<AppState>>,
+    Extension(profiles): Extension<Arc<crate::profiles::WebProfiles>>,
+    Path(activity_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<ReorderRequest>,
+) -> ApiResult<()> {
+    same_origin(&profiles, &headers)?;
+    state
+        .transaction_attachment_files
+        .reorder(&activity_id, &body.attachment_ids)
+        .await?;
+    Ok(())
+}
+
 pub fn router() -> Router {
     let body_limit = || DefaultBodyLimit::max(MAX_ATTACHMENT_BYTES + 64 * 1024);
     Router::new()
@@ -289,6 +310,10 @@ pub fn router() -> Router {
         .route(
             "/spending/transactions/{activity_id}/attachments/{id}/thumbnail",
             get(thumbnail),
+        )
+        .route(
+            "/spending/transactions/{activity_id}/attachments/order",
+            axum::routing::put(reorder),
         )
         .route(
             "/spending/attachment-drafts/{token}",

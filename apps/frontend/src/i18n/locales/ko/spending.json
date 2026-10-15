@@ -1032,6 +1032,8 @@
     "orDrop": "또는 끌어서 놓기",
     "limits": "JPEG, PNG, WebP 또는 PDF · 파일당 20 MiB · 거래당 10개",
     "remove": "삭제",
+    "moveLeft": "{{filename}}을(를) 왼쪽으로 이동",
+    "moveRight": "{{filename}}을(를) 오른쪽으로 이동",
     "queued": "업로드 대기 중",
     "uploading": "업로드 중…",
     "uploadProgress": "{{percent}}%",

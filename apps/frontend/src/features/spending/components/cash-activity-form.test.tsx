@@ -9,6 +9,7 @@ import {
   createActivity,
   discardTransactionAttachmentDrafts,
   listTransactionAttachments,
+  reorderTransactionAttachments,
   updateActivity,
   uploadTransactionAttachment,
 } from "@/adapters";
@@ -32,6 +33,7 @@ vi.mock("@/adapters", () => ({
   newAttachmentDraftToken: () => "draft-token",
   claimTransactionAttachmentDrafts: vi.fn(() => Promise.resolve(1)),
   discardTransactionAttachmentDrafts: vi.fn(() => Promise.resolve()),
+  reorderTransactionAttachments: vi.fn(() => Promise.resolve()),
   uploadTransactionAttachment: vi.fn(() => Promise.resolve({ id: "uploaded" })),
   SUPPORTS_UPLOAD_PROGRESS: true,
   SUPPORTS_UPLOAD_CANCEL: true,
@@ -317,6 +319,43 @@ it("uploads on select in both modes, staging a new transaction's files under a d
     expect(claimTransactionAttachmentDrafts).toHaveBeenCalledWith("draft-token", "new-1"),
   );
   expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1);
+});
+
+it("sends the arranged attachment order on save, and only once it was arranged", async () => {
+  const stored = (id: string, filename: string) => ({
+    id,
+    activityId: "act-1",
+    filename,
+    contentType: "image/png",
+    sizeBytes: 10,
+    createdAt: "2026-10-13",
+  });
+  const listed = [stored("file-1", "first.png"), stored("file-2", "second.png")];
+  vi.clearAllMocks();
+  platformMock.isMobileViewport = false;
+  vi.mocked(listTransactionAttachments).mockResolvedValue(listed);
+  const user = userEvent.setup();
+
+  const untouched = render(
+    <CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />,
+    { wrapper },
+  );
+  await screen.findByRole("button", { name: "Open original: first.png" });
+  await user.click(screen.getByRole("button", { name: /update/i }));
+  await waitFor(() => expect(updateActivity).toHaveBeenCalled());
+  expect(reorderTransactionAttachments).not.toHaveBeenCalled();
+  untouched.unmount();
+
+  vi.clearAllMocks();
+  vi.mocked(listTransactionAttachments).mockResolvedValue(listed);
+  render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
+  await screen.findByRole("button", { name: "Open original: first.png" });
+  await user.click(screen.getByRole("button", { name: "Move second.png left" }));
+  await user.click(screen.getByRole("button", { name: /update/i }));
+
+  await waitFor(() =>
+    expect(reorderTransactionAttachments).toHaveBeenCalledWith("act-1", ["file-2", "file-1"]),
+  );
 });
 
 it("discards staged files when the sheet closes unsaved, but not after a claim", async () => {

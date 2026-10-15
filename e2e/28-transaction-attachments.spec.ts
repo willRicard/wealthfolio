@@ -100,6 +100,31 @@ test("Spending saves detailed notes and displays attachment thumbnails", async (
   ).data[0];
   expect(storedActivity.comment).toBe("Receipt test payee");
   expect(storedActivity.detailedNotes).toBe("Line items and receipt details");
+
+  const storedOrder = async () =>
+    (
+      (await (
+        await page.request.get(
+          `${BASE_URL}/api/v1/spending/transactions/${activity.id}/attachments`,
+        )
+      ).json()) as { filename: string }[]
+    ).map((attachment) => attachment.filename);
+  expect(await storedOrder()).toEqual(["receipt.png", "receipt.pdf"]);
+
+  const tile = (filename: string) =>
+    panel.locator("[data-testid='attachment-thumbnail']").filter({ hasText: filename });
+  await tile("receipt.pdf").hover();
+  await panel.getByRole("button", { name: "Move receipt.pdf left" }).click();
+  await panel.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(panel).not.toBeVisible({ timeout: 30000 });
+  await expect.poll(storedOrder, { timeout: 20000 }).toEqual(["receipt.pdf", "receipt.png"]);
+
+  await row.getByRole("button", { name: "Row actions" }).click();
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
+  await expect(
+    panel.getByRole("button", { name: /^Open original: / }).first(),
+  ).toHaveAccessibleName("Open original: receipt.pdf");
+
   await panel.getByRole("button", { name: "Remove", exact: true }).first().click();
   await expect(previews).toHaveCount(1);
 });

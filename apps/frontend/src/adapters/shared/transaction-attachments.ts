@@ -59,3 +59,9 @@ export const discardTransactionAttachmentDrafts = (token: string) =>
 /** Hands the staged files to a saved transaction. Returns how many moved. */
 export const claimTransactionAttachmentDrafts = (token: string, activityId: string) =>
   invoke<number>("claim_transaction_attachment_drafts", { token, activityId });
+
+/**
+ * Stores the order the user arranged the tiles in `attachmentIds`.
+ */
+export const reorderTransactionAttachments = (activityId: string, attachmentIds: string[]) =>
+  invoke<void>("reorder_transaction_attachments", { activityId, attachmentIds });

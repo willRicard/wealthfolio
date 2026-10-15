@@ -1032,6 +1032,8 @@
     "orDrop": "或拖放文件",
     "limits": "JPEG、PNG、WebP 或 PDF · 每个文件 20 MiB · 每笔交易 10 个文件",
     "remove": "移除",
+    "moveLeft": "将 {{filename}} 左移",
+    "moveRight": "将 {{filename}} 右移",
     "queued": "等待上传",
     "uploading": "上传中…",
     "uploadProgress": "{{percent}}%",

@@ -224,6 +224,10 @@ impl TransactionAttachmentFiles {
         self.attachments.claim_drafts(token, activity_id).await
     }
 
+    pub async fn reorder(&self, activity_id: &str, ids: &[String]) -> Result<()> {
+        self.attachments.reorder(activity_id, ids).await
+    }
+
     pub async fn read(
         &self,
         activity_id: &str,

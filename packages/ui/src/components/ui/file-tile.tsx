@@ -95,12 +95,7 @@ export function FileTile({
       </div>
 
       {busy && !indeterminate && (
-        <Progress
-          value={percent}
-          aria-valuenow={percent}
-          aria-label={name}
-          className="h-1 rounded-none"
-        />
+        <Progress value={percent} aria-valuenow={percent} aria-label={name} className="h-1 rounded-none" />
       )}
       {busy && indeterminate && (
         <div aria-hidden className="bg-secondary h-1 overflow-hidden">

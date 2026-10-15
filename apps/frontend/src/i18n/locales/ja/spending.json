@@ -1032,6 +1032,8 @@
     "orDrop": "またはドラッグ＆ドロップ",
     "limits": "JPEG・PNG・WebP・PDF · 1ファイル20 MiBまで · 1取引10ファイルまで",
     "remove": "削除",
+    "moveLeft": "{{filename}} を左へ移動",
+    "moveRight": "{{filename}} を右へ移動",
     "queued": "アップロード待ち",
     "uploading": "アップロード中…",
     "uploadProgress": "{{percent}}%",

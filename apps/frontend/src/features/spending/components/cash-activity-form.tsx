@@ -13,11 +13,13 @@ import {
   discardTransactionAttachmentDrafts,
   listTransactionAttachments,
   newAttachmentDraftToken,
+  reorderTransactionAttachments,
   updateActivity,
   type AttachmentTarget,
 } from "@/adapters";
 import { TransactionAttachments } from "./transaction-attachments";
 import { useAttachmentUploads } from "../hooks/use-attachment-uploads";
+import { useAttachmentOrder } from "../hooks/use-attachment-order";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
@@ -202,9 +204,7 @@ export function CashActivityForm({
   const claimed = useRef(false);
   const target = useMemo<AttachmentTarget>(
     () =>
-      activity?.id
-        ? { kind: "activity", id: activity.id }
-        : { kind: "draft", token: draftToken },
+      activity?.id ? { kind: "activity", id: activity.id } : { kind: "draft", token: draftToken },
     [activity?.id, draftToken],
   );
   const targetKey = target.kind === "draft" ? target.token : target.id;
@@ -218,6 +218,7 @@ export function CashActivityForm({
     onUploaded: () =>
       void qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey] }),
   });
+  const attachmentOrder = useAttachmentOrder(attachments.data ?? [], uploads.uploads);
   const closeForm = useCallback(
     (next: boolean) => {
       if (!next && !claimed.current && target.kind === "draft")
@@ -315,6 +316,7 @@ export function CashActivityForm({
       claimed.current = false;
       setDraftToken(newAttachmentDraftToken());
       uploads.reset();
+      attachmentOrder.reset();
       setEventId(activity?.eventId ?? null);
       setCurrentStep(activity?.id ? 2 : 1);
     }
@@ -467,6 +469,12 @@ export function CashActivityForm({
       if (target.kind === "draft") {
         await claimTransactionAttachmentDrafts(target.token, saved.id);
         claimed.current = true;
+      }
+      if (attachmentOrder.isDirty) {
+        const ordered = attachmentOrder
+          .currentOrder()
+          .map((key) => uploads.resolveAttachmentId(key) ?? key);
+        await reorderTransactionAttachments(saved.id, ordered);
       }
       await qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, saved.id] });
       return saved;
@@ -935,8 +943,8 @@ export function CashActivityForm({
                     )}
                     <TransactionAttachments
                       target={target}
-                      attachments={attachments.data ?? []}
                       uploads={uploads}
+                      order={attachmentOrder}
                       disabled={saveMutation.isPending || !attachments.isSuccess}
                     />
 

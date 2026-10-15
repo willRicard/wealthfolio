@@ -9,7 +9,7 @@ import {
   type TransactionAttachment,
 } from "@/adapters";
 
-export type AttachmentUploadStatus = "queued" | "uploading" | "failed" | "cancelled";
+export type AttachmentUploadStatus = "queued" | "uploading" | "done" | "failed" | "cancelled";
 
 export interface AttachmentUpload {
   id: string;
@@ -18,6 +18,7 @@ export interface AttachmentUpload {
   /** Fraction in 0..1, only on a transport that can measure it. */
   progress?: number;
   error?: string;
+  attachmentId?: string;
 }
 
 export interface UseAttachmentUploadsOptions {
@@ -35,6 +36,7 @@ export interface UseAttachmentUploads {
   /** Run the queue to completion, retrying what failed. Throws if any still fails. */
   flush: () => Promise<void>;
   reset: () => void;
+  resolveAttachmentId: (id: string) => string | undefined;
 }
 
 const localId = () => crypto.randomUUID();
@@ -90,7 +92,12 @@ export function useAttachmentUploads({
           patch(item.id, { status: "cancelled", progress: undefined });
           return;
         }
-        write(list.current.filter((entry) => entry.id !== item.id));
+        patch(item.id, {
+          status: "done",
+          attachmentId: attachment.id,
+          progress: undefined,
+          error: undefined,
+        });
         uploaded.current?.();
       } catch (error) {
         const aborted = error instanceof Error && error.name === "AbortError";
@@ -180,6 +187,11 @@ export function useAttachmentUploads({
     if (failed) throw new Error(failed.error ?? "Upload failed");
   }, [drain, write]);
 
+  const resolveAttachmentId = useCallback(
+    (id: string) => list.current.find((item) => item.id === id)?.attachmentId,
+    [],
+  );
+
   const reset = useCallback(() => {
     for (const controller of controllers.current.values()) controller.abort();
     controllers.current.clear();
@@ -196,6 +208,7 @@ export function useAttachmentUploads({
     remove,
     flush,
     reset,
+    resolveAttachmentId,
   };
 }
 

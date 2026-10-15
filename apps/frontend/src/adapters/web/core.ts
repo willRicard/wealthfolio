@@ -26,6 +26,7 @@ export const COMMANDS: CommandMap = {
     path: "/spending/attachment-drafts",
   },
   claim_transaction_attachment_drafts: { method: "POST", path: "/spending/transactions" },
+  reorder_transaction_attachments: { method: "PUT", path: "/spending/transactions" },
   cloud_backup_action: { method: "POST", path: "/cloud-backups/action" },
   cloud_backup_capture: { method: "POST", path: "/cloud-backups/capture" },
   get_accounts: { method: "GET", path: "/accounts" },
@@ -1866,6 +1867,15 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "claim_transaction_attachment_drafts": {
       const { token, activityId } = payload as { token: string; activityId: string };
       url += `/${encodeURIComponent(activityId)}/attachment-drafts/${encodeURIComponent(token)}`;
+      break;
+    }
+    case "reorder_transaction_attachments": {
+      const { activityId, attachmentIds } = payload as {
+        activityId: string;
+        attachmentIds: string[];
+      };
+      url += `/${encodeURIComponent(activityId)}/attachments/order`;
+      body = JSON.stringify({ attachmentIds });
       break;
     }
     // Net Worth commands

@@ -22,6 +22,7 @@ struct AttachmentRow {
     content_type: String,
     size_bytes: i64,
     created_at: String,
+    position: i32,
     storage_backend: String,
     storage_key: String,
     preview_key: String,
@@ -54,6 +55,7 @@ impl From<StoredAttachment> for AttachmentRow {
             content_type: value.attachment.content_type,
             size_bytes: value.attachment.size_bytes,
             created_at: value.attachment.created_at,
+            position: 0,
             storage_backend: value.storage.backend,
             storage_key: value.storage.key,
             preview_key: value.storage.preview_key,
@@ -91,6 +93,7 @@ struct DraftRow {
     content_type: String,
     size_bytes: i64,
     created_at: String,
+    position: i32,
     storage_backend: String,
     storage_key: String,
     preview_key: String,
@@ -123,6 +126,7 @@ impl From<StoredDraft> for DraftRow {
             content_type: value.draft.content_type,
             size_bytes: value.draft.size_bytes,
             created_at: value.draft.created_at,
+            position: 0,
             storage_backend: value.storage.backend,
             storage_key: value.storage.key,
             preview_key: value.storage.preview_key,
@@ -199,7 +203,11 @@ impl TransactionAttachmentsRepository for SqliteTransactionAttachmentsRepository
         let mut conn = get_connection(&self.pool)?;
         Ok(attachments::table
             .filter(attachments::activity_id.eq(activity_id))
-            .order((attachments::created_at.asc(), attachments::id.asc()))
+            .order((
+                attachments::position.asc(),
+                attachments::created_at.asc(),
+                attachments::id.asc(),
+            ))
             .select(AttachmentRow::as_select())
             .load::<AttachmentRow>(&mut conn)?
             .into_iter()
@@ -223,8 +231,16 @@ impl TransactionAttachmentsRepository for SqliteTransactionAttachmentsRepository
     async fn insert_attachment(&self, value: StoredAttachment) -> Result<()> {
         self.writer
             .exec_tx(move |tx| {
+                let mut row = AttachmentRow::from(value);
+                let next = attachments::table
+                    .filter(attachments::activity_id.eq(&row.activity_id))
+                    .select(diesel::dsl::max(attachments::position))
+                    .first::<Option<i32>>(tx.conn())
+                    .map_err(StorageError::from)?
+                    .map_or(0, |highest| highest + 1);
+                row.position = next;
                 diesel::insert_into(attachments::table)
-                    .values(AttachmentRow::from(value))
+                    .values(row)
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
                 Ok(())
@@ -254,7 +270,11 @@ impl TransactionAttachmentsRepository for SqliteTransactionAttachmentsRepository
         let mut conn = get_connection(&self.pool)?;
         Ok(drafts::table
             .filter(drafts::token.eq(token))
-            .order((drafts::created_at.asc(), drafts::id.asc()))
+            .order((
+                drafts::position.asc(),
+                drafts::created_at.asc(),
+                drafts::id.asc(),
+            ))
             .select(DraftRow::as_select())
             .load::<DraftRow>(&mut conn)?
             .into_iter()
@@ -274,8 +294,16 @@ impl TransactionAttachmentsRepository for SqliteTransactionAttachmentsRepository
     async fn insert_draft(&self, value: StoredDraft) -> Result<()> {
         self.writer
             .exec_tx(move |tx| {
+                let mut row = DraftRow::from(value);
+                let next = drafts::table
+                    .filter(drafts::token.eq(&row.token))
+                    .select(diesel::dsl::max(drafts::position))
+                    .first::<Option<i32>>(tx.conn())
+                    .map_err(StorageError::from)?
+                    .map_or(0, |highest| highest + 1);
+                row.position = next;
                 diesel::insert_into(drafts::table)
-                    .values(DraftRow::from(value))
+                    .values(row)
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
                 Ok(())
@@ -300,18 +328,45 @@ impl TransactionAttachmentsRepository for SqliteTransactionAttachmentsRepository
             .await
             .map_err(Into::into)
     }
+    async fn reorder(&self, activity_id: &str, ids: &[String]) -> Result<()> {
+        let activity_id = activity_id.to_owned();
+        let ids = ids.to_vec();
+        self.writer
+            .exec_tx(move |tx| {
+                for (index, id) in ids.iter().enumerate() {
+                    diesel::update(
+                        attachments::table
+                            .filter(attachments::activity_id.eq(&activity_id))
+                            .filter(attachments::id.eq(id)),
+                    )
+                    .set(attachments::position.eq(index as i32))
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(Into::into)
+    }
     async fn claim_drafts(&self, token: &str, activity_id: &str) -> Result<usize> {
         let token = token.to_owned();
         let activity_id = activity_id.to_owned();
         self.writer
             .exec_tx(move |tx| {
+                let offset = attachments::table
+                    .filter(attachments::activity_id.eq(&activity_id))
+                    .select(diesel::dsl::max(attachments::position))
+                    .first::<Option<i32>>(tx.conn())
+                    .map_err(StorageError::from)?
+                    .map_or(0, |highest| highest + 1);
                 let claimed = diesel::sql_query(
                     "INSERT INTO spending_transaction_attachments \
-                     (id, activity_id, filename, content_type, size_bytes, created_at, storage_backend, storage_key, preview_key) \
-                     SELECT id, ?, filename, content_type, size_bytes, created_at, storage_backend, storage_key, preview_key \
+                     (id, activity_id, filename, content_type, size_bytes, created_at, position, storage_backend, storage_key, preview_key) \
+                     SELECT id, ?, filename, content_type, size_bytes, created_at, position + ?, storage_backend, storage_key, preview_key \
                      FROM spending_attachment_drafts WHERE token = ?",
                 )
                 .bind::<diesel::sql_types::Text, _>(&activity_id)
+                .bind::<diesel::sql_types::Integer, _>(offset)
                 .bind::<diesel::sql_types::Text, _>(&token)
                 .execute(tx.conn())
                 .map_err(StorageError::from)?;
@@ -555,5 +610,118 @@ mod tests {
         assert_eq!(swept.len(), 1);
         assert_eq!(swept[0].key, "ab/stale.original");
         assert_eq!(repo.list_drafts("token-c").await.expect("drafts").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn attachment_positions_append_reorder_and_survive_a_claim() {
+        std::env::set_var("CONNECT_API_URL", "http://test.local");
+        let directory = tempfile::tempdir().expect("temporary database");
+        let path =
+            init(directory.path().to_str().expect("temporary path")).expect("initialize database");
+        run_migrations(&path).expect("migrations");
+        let pool = create_pool(&path).expect("pool");
+        let writer = spawn_writer(pool.as_ref().clone()).expect("writer");
+        let repo = SqliteTransactionAttachmentsRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("connection");
+        diesel::sql_query("INSERT INTO accounts (id,name,account_type,currency,is_default,is_active,is_archived,tracking_mode,created_at,updated_at) VALUES ('account','Test','CASH','USD',0,1,0,'TRANSACTIONS',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").execute(&mut conn).expect("account");
+        for activity in ["first", "second"] {
+            diesel::sql_query(format!("INSERT INTO activities (id,account_id,activity_type,status,activity_date,amount,currency,is_user_modified,needs_review,created_at,updated_at) VALUES ('{activity}','account','WITHDRAWAL','POSTED','2026-10-09T00:00:00Z','42','USD',0,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")).execute(&mut conn).expect("activity");
+        }
+        let now = "2026-10-13T00:00:00+00:00";
+        let attachment = |id: &str, activity_id: &str| StoredAttachment {
+            attachment: TransactionAttachment {
+                id: id.into(),
+                activity_id: activity_id.into(),
+                filename: "receipt.png".into(),
+                content_type: "image/png".into(),
+                size_bytes: 42,
+                created_at: now.into(),
+            },
+            storage: AttachmentStorage {
+                backend: "local".into(),
+                key: format!("ab/{id}.original"),
+                preview_key: format!("ab/{id}.webp"),
+            },
+        };
+        let ids = |attachments: Vec<TransactionAttachment>| {
+            attachments
+                .into_iter()
+                .map(|attachment| attachment.id)
+                .collect::<Vec<_>>()
+        };
+
+        for id in ["c", "a", "b"] {
+            repo.insert_attachment(attachment(id, "first"))
+                .await
+                .expect("attachment");
+        }
+        for id in ["z", "y"] {
+            repo.insert_attachment(attachment(id, "second"))
+                .await
+                .expect("attachment");
+        }
+        assert_eq!(
+            ids(repo.list("first").await.expect("attachments")),
+            ["c", "a", "b"]
+        );
+        assert_eq!(
+            ids(repo.list("second").await.expect("attachments")),
+            ["z", "y"]
+        );
+
+        repo.reorder("first", &["b".into(), "c".into(), "a".into()])
+            .await
+            .expect("reorder");
+        assert_eq!(
+            ids(repo.list("first").await.expect("attachments")),
+            ["b", "c", "a"]
+        );
+        repo.insert_attachment(attachment("d", "first"))
+            .await
+            .expect("attachment");
+        assert_eq!(
+            ids(repo.list("first").await.expect("attachments")),
+            ["b", "c", "a", "d"]
+        );
+        assert_eq!(
+            ids(repo.list("second").await.expect("attachments")),
+            ["z", "y"]
+        );
+
+        let draft = |id: &str, token: &str| StoredDraft {
+            draft: AttachmentDraft {
+                id: id.into(),
+                token: token.into(),
+                filename: "receipt.png".into(),
+                content_type: "image/png".into(),
+                size_bytes: 42,
+                created_at: now.into(),
+            },
+            storage: AttachmentStorage {
+                backend: "local".into(),
+                key: format!("cd/{id}.original"),
+                preview_key: format!("cd/{id}.webp"),
+            },
+        };
+        for id in ["s", "r", "t"] {
+            repo.insert_draft(draft(id, "token")).await.expect("draft");
+        }
+        assert_eq!(
+            repo.list_drafts("token")
+                .await
+                .expect("drafts")
+                .into_iter()
+                .map(|draft| draft.id)
+                .collect::<Vec<_>>(),
+            ["s", "r", "t"]
+        );
+        assert_eq!(
+            repo.claim_drafts("token", "second").await.expect("claim"),
+            3
+        );
+        assert_eq!(
+            ids(repo.list("second").await.expect("attachments")),
+            ["z", "y", "s", "r", "t"]
+        );
     }
 }

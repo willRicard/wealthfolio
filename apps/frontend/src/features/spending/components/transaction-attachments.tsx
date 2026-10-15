@@ -1,8 +1,19 @@
 import { QueryKeys } from "@/lib/query-keys";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileDropzone, FileTile, useObjectUrl } from "@wealthfolio/ui";
+import {
+  closestCenter,
+  DndContext,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { cn, FileDropzone, FileTile, Icons, useObjectUrl } from "@wealthfolio/ui";
 import {
   deleteTransactionAttachment,
   fetchTransactionAttachmentThumbnail,
@@ -12,37 +23,44 @@ import {
   type TransactionAttachment,
 } from "@/adapters";
 
+import type { AttachmentSavedItem, UseAttachmentOrder } from "../hooks/use-attachment-order";
 import type { AttachmentUpload, UseAttachmentUploads } from "../hooks/use-attachment-uploads";
 import { MAX_TRANSACTION_FILES, transactionFileError } from "../lib/transaction-files";
 
 interface TransactionAttachmentsProps {
   target: AttachmentTarget;
-  attachments: TransactionAttachment[];
   uploads: UseAttachmentUploads;
+  order: UseAttachmentOrder;
   disabled?: boolean;
 }
 
+const PLACEHOLDER = "bg-muted flex h-24 w-full items-center justify-center rounded";
+
 function PendingPreview({ file }: { file: File }) {
   const url = useObjectUrl(file.type.startsWith("image/") ? file : undefined);
-  if (!url) return null;
+  if (!url) return <span className={PLACEHOLDER} aria-hidden />;
   return <img src={url} alt="" className="bg-muted h-24 w-full rounded object-contain" />;
 }
 
 function AttachmentPreview({
   target,
   attachment,
+  localFile,
 }: {
   target: AttachmentTarget;
   attachment: TransactionAttachment;
+  localFile?: File;
 }) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
+  const [thumbnailReady, setThumbnailReady] = useState(false);
   const blobQuery = useQuery({
     queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachment.id, "thumbnail"],
     queryFn: () => fetchTransactionAttachmentThumbnail(target, attachment.id),
     staleTime: Infinity,
   });
   const blobUrl = useObjectUrl(blobQuery.data);
+  const localUrl = useObjectUrl(localFile?.type.startsWith("image/") ? localFile : undefined);
 
   if (failed || blobQuery.isError)
     return (
@@ -50,21 +68,109 @@ function AttachmentPreview({
         {t("spending:transactionAttachments.thumbnailError")}
       </p>
     );
+
+  const showLocal = !!localUrl && !thumbnailReady;
+  const src = showLocal ? localUrl : blobUrl;
   return (
-    <img
-      src={blobUrl}
-      alt=""
-      className="bg-muted h-24 w-full rounded object-contain"
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
+    <>
+      {showLocal && blobUrl && (
+        <img
+          src={blobUrl}
+          alt=""
+          aria-hidden
+          className="hidden"
+          onLoad={() => setThumbnailReady(true)}
+          onError={() => setThumbnailReady(true)}
+        />
+      )}
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          className="bg-muted h-24 w-full rounded object-contain"
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className={PLACEHOLDER} aria-hidden />
+      )}
+    </>
+  );
+}
+
+function SortableTile({
+  id,
+  index,
+  count,
+  filename,
+  reorderable,
+  onMoveBy,
+  children,
+}: {
+  id: string;
+  index: number;
+  count: number;
+  filename: string;
+  reorderable: boolean;
+  onMoveBy: (delta: number) => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !reorderable,
+  });
+
+  const nudge = (delta: number, label: string, icon: ReactNode, disabled: boolean) => (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => onMoveBy(delta)}
+      className="hover:bg-muted focus-visible:ring-ring flex size-6 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40"
+    >
+      {icon}
+    </button>
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "group relative",
+        reorderable && "cursor-grab",
+        isDragging && "z-10 opacity-80",
+      )}
+      {...listeners}
+    >
+      {children}
+      {reorderable && count > 1 && (
+        <div className="bg-popover pointer-fine:group-hover:flex pointer-fine:group-focus-within:flex absolute -left-2 -top-2 hidden gap-0.5 rounded-full border p-0.5 shadow-sm">
+          {nudge(
+            -1,
+            t("spending:transactionAttachments.moveLeft", { filename }),
+            <Icons.ChevronLeft className="size-4" aria-hidden />,
+            index === 0,
+          )}
+          {nudge(
+            1,
+            t("spending:transactionAttachments.moveRight", { filename }),
+            <Icons.ChevronRight className="size-4" aria-hidden />,
+            index === count - 1,
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
 export function TransactionAttachments({
   target,
-  attachments,
   uploads,
+  order,
   disabled,
 }: TransactionAttachmentsProps) {
   const { t } = useTranslation();
@@ -78,7 +184,13 @@ export function TransactionAttachments({
       qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey] }),
   });
   const busy = disabled || deletion.isPending;
-  const total = attachments.length + uploads.uploads.length;
+  const items = order.items;
+  const pending = items.flatMap((item) => (item.kind === "upload" ? [item.upload.file] : []));
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   const describe = (upload: AttachmentUpload) => {
     switch (upload.status) {
@@ -94,7 +206,20 @@ export function TransactionAttachments({
               percent: Math.round(upload.progress * 100),
             })
           : t("spending:transactionAttachments.uploading");
+      case "done":
+        return undefined;
     }
+  };
+
+  const removeSaved = (item: AttachmentSavedItem) =>
+    deletion.mutate(item.attachment.id, {
+      onSuccess: () => {
+        if (item.uploadId) uploads.remove(item.uploadId);
+      },
+    });
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (over && active.id !== over.id) order.move(String(active.id), String(over.id));
   };
 
   return (
@@ -106,14 +231,16 @@ export function TransactionAttachments({
         id={fileInputId}
         multiple
         accept="image/jpeg,image/png,image/webp,application/pdf"
-        disabled={busy || total >= MAX_TRANSACTION_FILES}
+        disabled={busy || items.length >= MAX_TRANSACTION_FILES}
         ariaLabel={t("spending:transactionAttachments.clickToUpload")}
         label={t("spending:transactionAttachments.clickToUpload")}
         hint={t("spending:transactionAttachments.orDrop")}
         description={t("spending:transactionAttachments.limits")}
         onFiles={(picked) => {
-          const next = [...uploads.uploads.map((upload) => upload.file), ...picked];
-          const issue = transactionFileError(next, attachments.length);
+          const issue = transactionFileError(
+            [...pending, ...picked],
+            items.length - pending.length,
+          );
           setError(issue);
           if (!issue) uploads.add(picked);
         }}
@@ -128,45 +255,88 @@ export function TransactionAttachments({
           {deletion.error.message}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        {uploads.uploads.map((upload) => {
-          const inFlight = upload.status === "uploading";
-          const stopped = upload.status === "failed" || upload.status === "cancelled";
-          return (
-            <FileTile
-              key={upload.id}
-              name={upload.file.name}
-              preview={<PendingPreview file={upload.file} />}
-              caption={describe(upload)}
-              progress={SUPPORTS_UPLOAD_PROGRESS ? upload.progress : undefined}
-              indeterminate={inFlight && !SUPPORTS_UPLOAD_PROGRESS}
-              error={upload.status === "failed" ? upload.error : undefined}
-              onRetry={stopped ? () => uploads.retry(upload.id) : undefined}
-              retryLabel={t("common:retry")}
-              onCancel={inFlight ? () => uploads.cancel(upload.id) : undefined}
-              cancelLabel={t("spending:transactionAttachments.cancel")}
-              onRemove={inFlight ? undefined : () => uploads.remove(upload.id)}
-              removeLabel={t("spending:transactionAttachments.remove")}
-              disabled={busy}
-            />
-          );
-        })}
-        {attachments.map((attachment) => (
-          <FileTile
-            key={attachment.id}
-            data-testid="attachment-thumbnail"
-            name={attachment.filename}
-            preview={<AttachmentPreview target={target} attachment={attachment} />}
-            onOpen={() => void openTransactionAttachment(target, attachment)}
-            openLabel={t("spending:transactionAttachments.viewOriginal", {
-              filename: attachment.filename,
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={items.map((item) => item.key)} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-2 gap-3">
+            {items.map((item, index) => {
+              const filename =
+                item.kind === "upload" ? item.upload.file.name : item.attachment.filename;
+              return (
+                <SortableTile
+                  key={item.key}
+                  id={item.key}
+                  index={index}
+                  count={items.length}
+                  filename={filename}
+                  reorderable={!busy}
+                  onMoveBy={(delta) => order.moveBy(item.key, delta)}
+                >
+                  {item.kind === "upload" ? (
+                    <UploadTile
+                      upload={item.upload}
+                      caption={describe(item.upload)}
+                      uploads={uploads}
+                      disabled={busy}
+                    />
+                  ) : (
+                    <FileTile
+                      data-testid="attachment-thumbnail"
+                      name={item.attachment.filename}
+                      preview={
+                        <AttachmentPreview
+                          target={target}
+                          attachment={item.attachment}
+                          localFile={item.localFile}
+                        />
+                      }
+                      onOpen={() => void openTransactionAttachment(target, item.attachment)}
+                      openLabel={t("spending:transactionAttachments.viewOriginal", {
+                        filename: item.attachment.filename,
+                      })}
+                      onRemove={() => removeSaved(item)}
+                      removeLabel={t("spending:transactionAttachments.remove")}
+                      disabled={busy}
+                    />
+                  )}
+                </SortableTile>
+              );
             })}
-            onRemove={() => deletion.mutate(attachment.id)}
-            removeLabel={t("spending:transactionAttachments.remove")}
-            disabled={busy}
-          />
-        ))}
-      </div>
+          </div>
+        </SortableContext>
+      </DndContext>
     </section>
+  );
+}
+
+function UploadTile({
+  upload,
+  caption,
+  uploads,
+  disabled,
+}: {
+  upload: AttachmentUpload;
+  caption?: string;
+  uploads: UseAttachmentUploads;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const inFlight = upload.status === "uploading";
+  const stopped = upload.status === "failed" || upload.status === "cancelled";
+  return (
+    <FileTile
+      name={upload.file.name}
+      preview={<PendingPreview file={upload.file} />}
+      caption={caption}
+      progress={SUPPORTS_UPLOAD_PROGRESS ? upload.progress : undefined}
+      indeterminate={inFlight && !SUPPORTS_UPLOAD_PROGRESS}
+      error={upload.status === "failed" ? upload.error : undefined}
+      onRetry={stopped ? () => uploads.retry(upload.id) : undefined}
+      retryLabel={t("common:retry")}
+      onCancel={inFlight ? () => uploads.cancel(upload.id) : undefined}
+      cancelLabel={t("spending:transactionAttachments.cancel")}
+      onRemove={inFlight ? undefined : () => uploads.remove(upload.id)}
+      removeLabel={t("spending:transactionAttachments.remove")}
+      disabled={disabled}
+    />
   );
 }

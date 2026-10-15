@@ -342,6 +342,7 @@ pub fn run() {
             commands::spending::upload_transaction_attachment,
             commands::spending::read_transaction_attachment,
             commands::spending::delete_transaction_attachment,
+            commands::spending::reorder_transaction_attachments,
             commands::spending::get_transaction_attachment_drafts,
             commands::spending::read_transaction_attachment_draft,
             commands::spending::delete_transaction_attachment_draft,

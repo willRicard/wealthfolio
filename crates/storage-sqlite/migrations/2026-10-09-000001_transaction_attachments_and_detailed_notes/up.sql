@@ -7,6 +7,7 @@ CREATE TABLE spending_transaction_attachments (
     content_type TEXT NOT NULL CHECK(content_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
     size_bytes BIGINT NOT NULL CHECK(size_bytes > 0 AND size_bytes <= 20971520),
     created_at TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
     storage_backend TEXT NOT NULL,
     storage_key TEXT NOT NULL,
     preview_key TEXT NOT NULL
@@ -23,6 +24,7 @@ CREATE TABLE spending_attachment_drafts (
     content_type TEXT NOT NULL CHECK(content_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
     size_bytes BIGINT NOT NULL CHECK(size_bytes > 0 AND size_bytes <= 20971520),
     created_at TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
     storage_backend TEXT NOT NULL,
     storage_key TEXT NOT NULL,
     preview_key TEXT NOT NULL

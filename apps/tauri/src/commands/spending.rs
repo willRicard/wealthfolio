@@ -964,6 +964,20 @@ pub async fn claim_transaction_attachment_drafts(
 }
 
 #[tauri::command]
+pub async fn reorder_transaction_attachments(
+    state: ProfileAccess,
+    activity_id: String,
+    attachment_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .context()?
+        .transaction_attachment_files
+        .reorder(&activity_id, &attachment_ids)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn read_transaction_attachment(
     state: ProfileAccess,
     activity_id: String,

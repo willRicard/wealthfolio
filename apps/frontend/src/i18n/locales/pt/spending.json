@@ -1100,6 +1100,8 @@
     "orDrop": "ou arraste e solte",
     "limits": "JPEG, PNG, WebP ou PDF · 20 MiB por arquivo · 10 arquivos por transação",
     "remove": "Remover",
+    "moveLeft": "Mover {{filename}} para a esquerda",
+    "moveRight": "Mover {{filename}} para a direita",
     "queued": "Aguardando envio",
     "uploading": "Enviando…",
     "uploadProgress": "{{percent}}%",

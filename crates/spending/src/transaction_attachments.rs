@@ -3,6 +3,7 @@ use crate::{settings::SpendingSettingsService, SpendingError};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use wealthfolio_core::{
     activities::{ActivityError, ActivityServiceTrait},
@@ -76,6 +77,15 @@ pub fn storage_for_deleted<'a>(
         .collect()
 }
 
+fn covers_each_once(current: &[TransactionAttachment], ids: &[String]) -> bool {
+    let supplied: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    supplied.len() == ids.len()
+        && supplied.len() == current.len()
+        && current
+            .iter()
+            .all(|attachment| supplied.contains(attachment.id.as_str()))
+}
+
 #[async_trait]
 pub trait TransactionAttachmentsRepository: Send + Sync {
     async fn storage_for_account(&self, account_id: &str) -> Result<Vec<AttachmentStorage>>;
@@ -91,6 +101,7 @@ pub trait TransactionAttachmentsRepository: Send + Sync {
     ) -> Result<Option<StoredAttachment>>;
     async fn insert_attachment(&self, attachment: StoredAttachment) -> Result<()>;
     async fn delete_attachment(&self, activity_id: &str, id: &str) -> Result<()>;
+    async fn reorder(&self, activity_id: &str, ids: &[String]) -> Result<()>;
 
     async fn list_drafts(&self, token: &str) -> Result<Vec<AttachmentDraft>>;
     async fn find_draft(&self, token: &str, id: &str) -> Result<Option<StoredDraft>>;
@@ -206,6 +217,20 @@ impl TransactionAttachmentsService {
         self.repo.delete_attachment(activity_id, id).await
     }
 
+    pub async fn reorder(&self, activity_id: &str, ids: &[String]) -> Result<()> {
+        self.check_access(activity_id).await?;
+        let current = self.repo.list(activity_id).await?;
+        if !covers_each_once(&current, ids) {
+            return Err(SpendingError::InvalidInput {
+                message:
+                    "Attachment order must list every attachment of the transaction exactly once"
+                        .into(),
+            }
+            .into());
+        }
+        self.repo.reorder(activity_id, ids).await
+    }
+
     pub async fn list_drafts(&self, token: &str) -> Result<Vec<AttachmentDraft>> {
         validate_draft_token(token)?;
         self.repo.list_drafts(token).await
@@ -252,5 +277,40 @@ impl TransactionAttachmentsService {
     pub async fn sweep_drafts(&self) -> Result<Vec<AttachmentStorage>> {
         let cutoff = (chrono::Utc::now() - DRAFT_TTL).to_rfc3339();
         self.repo.sweep_drafts(&cutoff).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attachments(ids: &[&str]) -> Vec<TransactionAttachment> {
+        ids.iter()
+            .map(|id| TransactionAttachment {
+                id: (*id).into(),
+                activity_id: "transaction".into(),
+                filename: "receipt.png".into(),
+                content_type: "image/png".into(),
+                size_bytes: 42,
+                created_at: "2026-10-13T00:00:00+00:00".into(),
+            })
+            .collect()
+    }
+
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    #[test]
+    fn reorder_accepts_only_a_permutation_of_the_activitys_attachments() {
+        let current = attachments(&["a", "b", "c"]);
+        assert!(covers_each_once(&current, &ids(&["c", "a", "b"])));
+        assert!(covers_each_once(&current, &ids(&["a", "b", "c"])));
+        assert!(!covers_each_once(&current, &ids(&["a", "b"])));
+        assert!(!covers_each_once(&current, &ids(&["a", "b", "b"])));
+        assert!(!covers_each_once(&current, &ids(&["a", "b", "elsewhere"])));
+        assert!(!covers_each_once(&current, &ids(&["a", "b", "c", "d"])));
+        assert!(!covers_each_once(&current, &[]));
+        assert!(covers_each_once(&[], &[]));
     }
 }
