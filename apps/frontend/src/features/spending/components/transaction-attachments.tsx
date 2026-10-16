@@ -1,5 +1,5 @@
 import { QueryKeys } from "@/lib/query-keys";
-import { useId, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,6 +10,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type Modifier,
 } from "@dnd-kit/core";
 import { rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -148,7 +149,7 @@ function SortableTile({
     >
       {children}
       {reorderable && count > 1 && (
-        <div className="bg-popover pointer-fine:group-hover:flex pointer-fine:group-focus-within:flex absolute -left-2 -top-2 hidden gap-0.5 rounded-full border p-0.5 shadow-sm">
+        <div className="bg-popover pointer-fine:group-hover:flex pointer-fine:group-focus-within:flex absolute left-1 top-1 z-10 hidden gap-0.5 rounded-full border p-0.5 shadow-sm">
           {nudge(
             -1,
             t("spending:transactionAttachments.moveLeft", { filename }),
@@ -222,6 +223,24 @@ export function TransactionAttachments({
     if (over && active.id !== over.id) order.move(String(active.id), String(over.id));
   };
 
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const restrictToGridBounds = useCallback<Modifier>(({ transform, draggingNodeRect }) => {
+    if (!gridRef.current || !draggingNodeRect) return transform;
+    const grid = gridRef.current.getBoundingClientRect();
+    return {
+      ...transform,
+      x: Math.min(
+        Math.max(transform.x, grid.left - draggingNodeRect.left),
+        grid.right - draggingNodeRect.right,
+      ),
+      y: Math.min(
+        Math.max(transform.y, grid.top - draggingNodeRect.top),
+        grid.bottom - draggingNodeRect.bottom,
+      ),
+    };
+  }, []);
+
   return (
     <section className="space-y-3">
       <label htmlFor={fileInputId} className="text-sm font-medium">
@@ -255,9 +274,14 @@ export function TransactionAttachments({
           {deletion.error.message}
         </p>
       )}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={onDragEnd}
+        modifiers={[restrictToGridBounds]}
+      >
         <SortableContext items={items.map((item) => item.key)} strategy={rectSortingStrategy}>
-          <div className="grid grid-cols-2 gap-3">
+          <div ref={gridRef} className="grid grid-cols-2 gap-3">
             {items.map((item, index) => {
               const filename =
                 item.kind === "upload" ? item.upload.file.name : item.attachment.filename;
