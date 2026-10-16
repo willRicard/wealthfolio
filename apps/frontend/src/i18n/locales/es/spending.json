@@ -1114,6 +1114,12 @@
     "loadError": "No se pudieron cargar los detalles. Inténtalo de nuevo antes de guardar.",
     "fileCountError": "Máximo 10 archivos por transacción.",
     "fileSizeError": "Cada archivo debe tener entre 1 byte y 20 MiB.",
-    "fileTypeError": "Solo se admiten archivos JPEG, PNG, WebP y PDF."
+    "fileTypeError": "Solo se admiten archivos JPEG, PNG, WebP y PDF.",
+    "fileInfo": "Información del archivo",
+    "fileInfoButton": "Información del archivo: {{filename}}",
+    "fileName": "Nombre",
+    "fileSize": "Tamaño",
+    "fileType": "Tipo",
+    "uploadDate": "Subido"
   }
 }

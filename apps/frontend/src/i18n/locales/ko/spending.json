@@ -1046,6 +1046,12 @@
     "loadError": "거래 세부 정보를 불러오지 못했습니다. 저장하기 전에 다시 시도하세요.",
     "fileCountError": "거래당 최대 10개 파일입니다.",
     "fileSizeError": "각 파일은 1바이트 이상 20 MiB 이하여야 합니다.",
-    "fileTypeError": "JPEG, PNG, WebP 및 PDF 파일만 지원됩니다."
+    "fileTypeError": "JPEG, PNG, WebP 및 PDF 파일만 지원됩니다.",
+    "fileInfo": "파일 정보",
+    "fileInfoButton": "파일 정보: {{filename}}",
+    "fileName": "파일명",
+    "fileSize": "크기",
+    "fileType": "유형",
+    "uploadDate": "업로드됨"
   }
 }

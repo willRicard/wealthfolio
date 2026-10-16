@@ -1114,6 +1114,12 @@
     "loadError": "Impossible de charger les détails. Réessayez avant d’enregistrer.",
     "fileCountError": "10 fichiers maximum par transaction.",
     "fileSizeError": "Chaque fichier doit faire entre 1 octet et 20 MiB.",
-    "fileTypeError": "Seuls les fichiers JPEG, PNG, WebP et PDF sont acceptés."
+    "fileTypeError": "Seuls les fichiers JPEG, PNG, WebP et PDF sont acceptés.",
+    "fileInfo": "Informations sur le fichier",
+    "fileInfoButton": "Informations sur le fichier : {{filename}}",
+    "fileName": "Nom du fichier",
+    "fileSize": "Taille",
+    "fileType": "Type",
+    "uploadDate": "Envoyé le"
   }
 }

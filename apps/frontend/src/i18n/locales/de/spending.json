@@ -1055,6 +1055,12 @@
     "thumbnailError": "Vorschau nicht verfügbar",
     "loading": "Transaktionsdetails werden geladen…",
     "loadError": "Transaktionsdetails konnten nicht geladen werden. Bitte vor dem Speichern erneut versuchen.",
+    "fileInfo": "Dateiinformationen",
+    "fileInfoButton": "Dateiinformationen: {{filename}}",
+    "fileName": "Dateiname",
+    "fileSize": "Größe",
+    "fileType": "Typ",
+    "uploadDate": "Hochgeladen",
     "fileCountError": "Maximal 10 Dateien pro Transaktion.",
     "fileSizeError": "Jede Datei muss zwischen 1 Byte und 20 MiB groß sein.",
     "fileTypeError": "Nur JPEG, PNG, WebP und PDF werden unterstützt."

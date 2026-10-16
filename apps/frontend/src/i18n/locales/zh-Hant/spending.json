@@ -1057,6 +1057,12 @@
     "loadError": "無法載入交易詳情。請在儲存前重試。",
     "fileCountError": "每筆交易最多 10 個檔案。",
     "fileSizeError": "每個檔案須介於 1 位元組和 20 MiB 之間。",
-    "fileTypeError": "僅支援 JPEG、PNG、WebP 和 PDF 檔案。"
+    "fileTypeError": "僅支援 JPEG、PNG、WebP 和 PDF 檔案。",
+    "fileInfo": "檔案資訊",
+    "fileInfoButton": "檔案資訊：{{filename}}",
+    "fileName": "檔案名稱",
+    "fileSize": "大小",
+    "fileType": "類型",
+    "uploadDate": "上傳日期"
   }
 }

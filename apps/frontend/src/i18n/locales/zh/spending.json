@@ -1046,6 +1046,12 @@
     "loadError": "无法加载交易详情。请在保存前重试。",
     "fileCountError": "每笔交易最多 10 个文件。",
     "fileSizeError": "每个文件须介于 1 字节和 20 MiB 之间。",
-    "fileTypeError": "仅支持 JPEG、PNG、WebP 和 PDF 文件。"
+    "fileTypeError": "仅支持 JPEG、PNG、WebP 和 PDF 文件。",
+    "fileInfo": "文件信息",
+    "fileInfoButton": "文件信息：{{filename}}",
+    "fileName": "文件名",
+    "fileSize": "大小",
+    "fileType": "类型",
+    "uploadDate": "上传日期"
   }
 }

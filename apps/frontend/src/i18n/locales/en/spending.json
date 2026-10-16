@@ -1057,6 +1057,12 @@
     "loadError": "Could not load transaction details. Please retry before saving.",
     "fileCountError": "Maximum 10 files per transaction.",
     "fileSizeError": "Each file must be between 1 byte and 20 MiB.",
-    "fileTypeError": "Only JPEG, PNG, WebP and PDF files are supported."
+    "fileTypeError": "Only JPEG, PNG, WebP and PDF files are supported.",
+    "fileInfo": "File info",
+    "fileInfoButton": "File info: {{filename}}",
+    "fileName": "Filename",
+    "fileSize": "Size",
+    "fileType": "Type",
+    "uploadDate": "Uploaded"
   }
 }

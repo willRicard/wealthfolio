@@ -14,7 +14,18 @@ import {
 } from "@dnd-kit/core";
 import { rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { cn, FileDropzone, FileTile, Icons, useObjectUrl } from "@wealthfolio/ui";
+import {
+  cn,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  FileDropzone,
+  FileTile,
+  Icons,
+  useDateFormatting,
+  useObjectUrl,
+} from "@wealthfolio/ui";
 import {
   deleteTransactionAttachment,
   fetchTransactionAttachmentThumbnail,
@@ -27,6 +38,79 @@ import {
 import type { AttachmentSavedItem, UseAttachmentOrder } from "../hooks/use-attachment-order";
 import type { AttachmentUpload, UseAttachmentUploads } from "../hooks/use-attachment-uploads";
 import { MAX_TRANSACTION_FILES, transactionFileError } from "../lib/transaction-files";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentInfoDialog({
+  target,
+  attachment,
+}: {
+  target: AttachmentTarget;
+  attachment: TransactionAttachment;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const formatting = useDateFormatting();
+
+  const blobQuery = useQuery({
+    queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, attachment.id, "thumbnail"],
+    queryFn: () => fetchTransactionAttachmentThumbnail(target, attachment.id),
+    staleTime: Infinity,
+  });
+  const thumbnailUrl = useObjectUrl(blobQuery.data);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={t("spending:transactionAttachments.fileInfoButton", {
+          filename: attachment.filename,
+        })}
+        className="bg-popover pointer-fine:group-hover:flex pointer-fine:group-focus-within:flex absolute right-1 top-1 z-10 hidden size-6 items-center justify-center rounded-full border shadow-sm"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => setOpen(true)}
+      >
+        <Icons.Info className="size-3.5" aria-hidden />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen} useIsMobile={() => false}>
+        <DialogContent className="w-[calc(100%-2rem)]">
+          <DialogHeader>
+            <DialogTitle>{t("spending:transactionAttachments.fileInfo")}</DialogTitle>
+          </DialogHeader>
+          {thumbnailUrl && (
+            <img
+              src={thumbnailUrl}
+              alt=""
+              className="bg-muted max-h-64 w-full rounded-md object-contain"
+            />
+          )}
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            <dt className="text-muted-foreground">
+              {t("spending:transactionAttachments.fileName")}
+            </dt>
+            <dd className="min-w-0 break-all">{attachment.filename}</dd>
+            <dt className="text-muted-foreground">
+              {t("spending:transactionAttachments.fileSize")}
+            </dt>
+            <dd>{formatBytes(attachment.sizeBytes)}</dd>
+            <dt className="text-muted-foreground">
+              {t("spending:transactionAttachments.fileType")}
+            </dt>
+            <dd>{attachment.contentType}</dd>
+            <dt className="text-muted-foreground">
+              {t("spending:transactionAttachments.uploadDate")}
+            </dt>
+            <dd>{formatting.formatDate(attachment.createdAt)}</dd>
+          </dl>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 interface TransactionAttachmentsProps {
   target: AttachmentTarget;
@@ -303,24 +387,27 @@ export function TransactionAttachments({
                       disabled={busy}
                     />
                   ) : (
-                    <FileTile
-                      data-testid="attachment-thumbnail"
-                      name={item.attachment.filename}
-                      preview={
-                        <AttachmentPreview
-                          target={target}
-                          attachment={item.attachment}
-                          localFile={item.localFile}
-                        />
-                      }
-                      onOpen={() => void openTransactionAttachment(target, item.attachment)}
-                      openLabel={t("spending:transactionAttachments.viewOriginal", {
-                        filename: item.attachment.filename,
-                      })}
-                      onRemove={() => removeSaved(item)}
-                      removeLabel={t("spending:transactionAttachments.remove")}
-                      disabled={busy}
-                    />
+                    <>
+                      <FileTile
+                        data-testid="attachment-thumbnail"
+                        name={item.attachment.filename}
+                        preview={
+                          <AttachmentPreview
+                            target={target}
+                            attachment={item.attachment}
+                            localFile={item.localFile}
+                          />
+                        }
+                        onOpen={() => void openTransactionAttachment(target, item.attachment)}
+                        openLabel={t("spending:transactionAttachments.viewOriginal", {
+                          filename: item.attachment.filename,
+                        })}
+                        onRemove={() => removeSaved(item)}
+                        removeLabel={t("spending:transactionAttachments.remove")}
+                        disabled={busy}
+                      />
+                      <AttachmentInfoDialog target={target} attachment={item.attachment} />
+                    </>
                   )}
                 </SortableTile>
               );

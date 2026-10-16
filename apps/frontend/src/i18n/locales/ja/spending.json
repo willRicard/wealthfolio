@@ -1046,6 +1046,12 @@
     "loadError": "取引の詳細を読み込めませんでした。保存前に再試行してください。",
     "fileCountError": "1取引につき10ファイルまでです。",
     "fileSizeError": "各ファイルは1バイト以上20 MiB以下にしてください。",
-    "fileTypeError": "JPEG・PNG・WebP・PDFのみ対応しています。"
+    "fileTypeError": "JPEG・PNG・WebP・PDFのみ対応しています。",
+    "fileInfo": "ファイル情報",
+    "fileInfoButton": "ファイル情報：{{filename}}",
+    "fileName": "ファイル名",
+    "fileSize": "サイズ",
+    "fileType": "種類",
+    "uploadDate": "アップロード日"
   }
 }
