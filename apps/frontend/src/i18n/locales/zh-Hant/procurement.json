@@ -40,5 +40,16 @@
   "addAlias": "新增別名",
   "selectAll": "選取所有商品",
   "selectItem": "選取{{name}}",
-  "selected_other": "已選取{{count}}項"
+  "selected_other": "已選取{{count}}項",
+  "purchases": "購買的商品",
+  "item": "商品",
+  "quantity": "數量",
+  "unitPrice": "單價",
+  "addPurchase": "新增商品",
+  "pickItem": "選擇商品",
+  "searchItems": "搜尋商品…",
+  "noItems": "找不到商品。",
+  "moveUp": "上移",
+  "moveDown": "下移",
+  "purchaseIncomplete": "每個商品都需要數量和價格。"
 }

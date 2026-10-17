@@ -24,6 +24,8 @@ export const QueryKeys = {
   // Procurement related keys
   PROCUREMENT_ITEMS: "procurement-items",
   PROCUREMENT_ITEM_PRICES: "procurement-item-prices",
+  PROCUREMENT_ITEM_PHOTO: "procurement-item-photo",
+  PROCUREMENT_ACTIVITY_PURCHASES: "procurement-activity-purchases",
 
   // Portfolio related keys
   HOLDINGS: "holdings",

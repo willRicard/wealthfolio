@@ -44,6 +44,41 @@ impl PurchasesService {
         )?;
         Ok(ItemPrices { prices, stats })
     }
+    pub fn list_for_activity(&self, activity_id: &str) -> Result<Vec<Purchase>> {
+        self.repository.list_for_activity(activity_id)
+    }
+    pub async fn set_for_activity(
+        &self,
+        activity_id: &str,
+        purchases: Vec<SavePurchase>,
+    ) -> Result<Vec<Purchase>> {
+        let mut seen = std::collections::HashSet::new();
+        for input in &purchases {
+            if input.activity_id != activity_id {
+                return Err(ProcurementError::InvalidInput(
+                    "Purchase identifiers must match the activity".into(),
+                )
+                .into());
+            }
+            if !seen.insert(input.item_id.as_str()) {
+                return Err(ProcurementError::InvalidInput(
+                    "An item can only be purchased once per activity".into(),
+                )
+                .into());
+            }
+            validate_amounts(input)?;
+            self.require_item(&input.item_id)?;
+        }
+        if !purchases.is_empty() {
+            let activity = self.activities.get_activity(activity_id)?;
+            self.fx
+                .ensure_fx_pairs(vec![(activity.currency, self.base_currency()?)])
+                .await?;
+        }
+        self.repository
+            .set_for_activity(activity_id, purchases)
+            .await
+    }
     fn require_item(&self, id: &str) -> Result<()> {
         if self.items.get(id)?.is_none() {
             return Err(ProcurementError::NotFound {
@@ -58,26 +93,6 @@ impl PurchasesService {
         self.settings.get_base_currency()?.ok_or_else(|| {
             ProcurementError::InvalidInput("Base currency is not configured".into()).into()
         })
-    }
-    async fn validate(&self, input: &SavePurchase) -> Result<()> {
-        validate_amounts(input)?;
-        self.require_item(&input.item_id)?;
-        let activity = self.activities.get_activity(&input.activity_id)?;
-        self.fx
-            .ensure_fx_pairs(vec![(activity.currency, self.base_currency()?)])
-            .await?;
-        Ok(())
-    }
-    pub async fn create(&self, input: SavePurchase) -> Result<Purchase> {
-        self.validate(&input).await?;
-        self.repository.create(input).await
-    }
-    pub async fn update(&self, input: SavePurchase) -> Result<Purchase> {
-        self.validate(&input).await?;
-        self.repository.update(input).await
-    }
-    pub async fn delete(&self, activity_id: &str, item_id: &str) -> Result<()> {
-        self.repository.delete(activity_id, item_id).await
     }
 }
 

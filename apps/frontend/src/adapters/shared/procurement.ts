@@ -31,18 +31,16 @@ export const deleteProcurementItem = (id: string): Promise<void> =>
 export const getProcurementItemPrices = (id: string): Promise<ProcurementItemPrices> =>
   invoke<ProcurementItemPrices>("get_procurement_item_prices", { id });
 
-export const createProcurementPurchase = (
-  input: SaveProcurementPurchase,
-): Promise<ProcurementPurchase> =>
-  invoke<ProcurementPurchase>("create_procurement_purchase", { input });
+export const getProcurementActivityPurchases = (
+  activityId: string,
+): Promise<ProcurementPurchase[]> =>
+  invoke<ProcurementPurchase[]>("get_procurement_activity_purchases", { activityId });
 
-export const updateProcurementPurchase = (
-  input: SaveProcurementPurchase,
-): Promise<ProcurementPurchase> =>
-  invoke<ProcurementPurchase>("update_procurement_purchase", { input });
-
-export const deleteProcurementPurchase = (activityId: string, itemId: string): Promise<void> =>
-  invoke<void>("delete_procurement_purchase", { activityId, itemId });
+export const setProcurementActivityPurchases = (
+  activityId: string,
+  purchases: SaveProcurementPurchase[],
+): Promise<ProcurementPurchase[]> =>
+  invoke<ProcurementPurchase[]>("set_procurement_activity_purchases", { activityId, purchases });
 
 export const discardProcurementPhotoDraft = (id: string): Promise<void> =>
   invoke<void>("discard_procurement_photo_draft", { id });

@@ -11,12 +11,21 @@ import {
   claimTransactionAttachmentDrafts,
   createActivity,
   discardTransactionAttachmentDrafts,
+  getProcurementActivityPurchases,
   listTransactionAttachments,
   newAttachmentDraftToken,
   reorderTransactionAttachments,
+  setProcurementActivityPurchases,
   updateActivity,
   type AttachmentTarget,
 } from "@/adapters";
+import {
+  ActivityPurchases,
+  hasIncompletePurchaseRow,
+  purchaseRowsFrom,
+  purchaseRowsToSave,
+  type ActivityPurchaseRow,
+} from "@/features/procurement/components/activity-purchases";
 import { TransactionAttachments } from "./transaction-attachments";
 import { useAttachmentUploads } from "../hooks/use-attachment-uploads";
 import { useAttachmentOrder } from "../hooks/use-attachment-order";
@@ -219,6 +228,18 @@ export function CashActivityForm({
       void qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey] }),
   });
   const attachmentOrder = useAttachmentOrder(attachments.data ?? [], uploads.uploads);
+  const [purchases, setPurchases] = useState<ActivityPurchaseRow[]>([]);
+  const purchasesDirty = useRef(false);
+  const savedPurchases = useQuery({
+    queryKey: [QueryKeys.PROCUREMENT_ACTIVITY_PURCHASES, activity?.id],
+    queryFn: () => getProcurementActivityPurchases(activity?.id ?? ""),
+    enabled: open && !!activity?.id,
+  });
+  const savedPurchaseData = savedPurchases.data;
+  useEffect(() => {
+    if (!open || purchasesDirty.current) return;
+    setPurchases(savedPurchaseData ? purchaseRowsFrom(savedPurchaseData) : []);
+  }, [open, savedPurchaseData]);
   const closeForm = useCallback(
     (next: boolean) => {
       if (!next && !claimed.current && target.kind === "draft")
@@ -314,6 +335,8 @@ export function CashActivityForm({
       });
       savedDraft.current = undefined;
       claimed.current = false;
+      purchasesDirty.current = false;
+      setPurchases([]);
       setDraftToken(newAttachmentDraftToken());
       uploads.reset();
       attachmentOrder.reset();
@@ -476,6 +499,9 @@ export function CashActivityForm({
           .map((key) => uploads.resolveAttachmentId(key) ?? key);
         await reorderTransactionAttachments(saved.id, ordered);
       }
+      if (purchasesDirty.current) {
+        await setProcurementActivityPurchases(saved.id, purchaseRowsToSave(purchases, saved.id));
+      }
       await qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, saved.id] });
       return saved;
     },
@@ -483,6 +509,11 @@ export function CashActivityForm({
       invalidateSpendingCaches(qc);
       qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
       qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
+      if (purchasesDirty.current || purchases.length > 0) {
+        qc.invalidateQueries({ queryKey: [QueryKeys.PROCUREMENT_ITEMS] });
+        qc.invalidateQueries({ queryKey: [QueryKeys.PROCUREMENT_ITEM_PRICES] });
+        qc.invalidateQueries({ queryKey: [QueryKeys.PROCUREMENT_ACTIVITY_PURCHASES] });
+      }
       toast.success(
         isEditing ? t("spending:cashForm.activityUpdated") : t("spending:cashForm.activityCreated"),
       );
@@ -556,7 +587,10 @@ export function CashActivityForm({
         </SheetHeader>
         <Form {...form}>
           <form
-            onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))}
+            onSubmit={form.handleSubmit((v) => {
+              if (hasIncompletePurchaseRow(purchases)) return;
+              saveMutation.mutate(v);
+            })}
             className={cn(
               isMobile
                 ? "flex min-h-0 flex-1 flex-col"
@@ -946,6 +980,18 @@ export function CashActivityForm({
                       uploads={uploads}
                       order={attachmentOrder}
                       disabled={saveMutation.isPending || !attachments.isSuccess}
+                    />
+
+                    <ActivityPurchases
+                      rows={purchases}
+                      onChange={(next) => {
+                        purchasesDirty.current = true;
+                        setPurchases(next);
+                      }}
+                      currency={form.watch("currency")?.trim() || selectedAccount?.currency}
+                      categoryId={form.watch("category")?.split(":")[1] || undefined}
+                      disabled={saveMutation.isPending}
+                      showErrors={form.formState.isSubmitted}
                     />
 
                     {/* Collapsed by default, so the everyday case — a charge in

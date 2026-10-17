@@ -84,41 +84,27 @@ pub async fn get_procurement_item_prices(
 }
 
 #[tauri::command]
-pub async fn create_procurement_purchase(
-    state: ProfileAccess,
-    input: SavePurchase,
-) -> Result<Purchase, String> {
-    let context = state.context()?;
-    context
-        .procurement_purchases
-        .create(input)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn update_procurement_purchase(
-    state: ProfileAccess,
-    input: SavePurchase,
-) -> Result<Purchase, String> {
-    let context = state.context()?;
-    context
-        .procurement_purchases
-        .update(input)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn delete_procurement_purchase(
+pub async fn get_procurement_activity_purchases(
     state: ProfileAccess,
     activity_id: String,
-    item_id: String,
-) -> Result<(), String> {
+) -> Result<Vec<Purchase>, String> {
     let context = state.context()?;
     context
         .procurement_purchases
-        .delete(&activity_id, &item_id)
+        .list_for_activity(&activity_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_procurement_activity_purchases(
+    state: ProfileAccess,
+    activity_id: String,
+    purchases: Vec<SavePurchase>,
+) -> Result<Vec<Purchase>, String> {
+    let context = state.context()?;
+    context
+        .procurement_purchases
+        .set_for_activity(&activity_id, purchases)
         .await
         .map_err(|e| e.to_string())
 }

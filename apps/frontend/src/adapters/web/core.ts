@@ -27,9 +27,8 @@ export const COMMANDS: CommandMap = {
   clone_procurement_item: { method: "POST", path: "/procurement/items" },
   delete_procurement_item: { method: "DELETE", path: "/procurement/items" },
   get_procurement_item_prices: { method: "GET", path: "/procurement/items" },
-  create_procurement_purchase: { method: "POST", path: "/procurement/purchases" },
-  update_procurement_purchase: { method: "PUT", path: "/procurement/purchases" },
-  delete_procurement_purchase: { method: "DELETE", path: "/procurement/purchases" },
+  get_procurement_activity_purchases: { method: "GET", path: "/procurement/activities" },
+  set_procurement_activity_purchases: { method: "PUT", path: "/procurement/activities" },
   discard_procurement_photo_draft: { method: "DELETE", path: "/procurement/photo-drafts" },
 
   get_transaction_attachments: { method: "GET", path: "/spending/transactions" },
@@ -853,22 +852,17 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       if (input !== undefined) body = JSON.stringify(input);
       break;
     }
-    case "update_procurement_purchase": {
-      const { input } = payload as { input: SaveProcurementPurchase };
-      url += `/${encodeURIComponent(input.activityId)}/${encodeURIComponent(input.itemId)}`;
-      body = JSON.stringify(input);
-      break;
-    }
-    case "delete_procurement_purchase": {
-      const { activityId, itemId } = payload as {
+    case "get_procurement_activity_purchases":
+    case "set_procurement_activity_purchases": {
+      const { activityId, purchases } = payload as {
         activityId: string;
-        itemId: string;
+        purchases?: SaveProcurementPurchase[];
       };
-      url += `/${encodeURIComponent(activityId)}/${encodeURIComponent(itemId)}`;
+      url += `/${encodeURIComponent(activityId)}/purchases`;
+      if (purchases !== undefined) body = JSON.stringify(purchases);
       break;
     }
-    case "create_procurement_item":
-    case "create_procurement_purchase": {
+    case "create_procurement_item": {
       const { input } = payload as { input: unknown };
       body = JSON.stringify(input);
       break;

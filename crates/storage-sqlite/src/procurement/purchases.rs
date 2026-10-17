@@ -8,11 +8,8 @@ use async_trait::async_trait;
 use diesel::prelude::*;
 use rust_decimal::Decimal;
 use std::{str::FromStr, sync::Arc};
-use wealthfolio_procurement::{
-    purchases::{
-        validate_amounts, Purchase, PurchasePrice, PurchasesRepositoryTrait, SavePurchase,
-    },
-    ProcurementError,
+use wealthfolio_procurement::purchases::{
+    validate_amounts, Purchase, PurchasePrice, PurchasesRepositoryTrait, SavePurchase,
 };
 
 #[derive(Queryable, Selectable, Insertable, AsChangeset, Clone)]
@@ -47,43 +44,6 @@ pub struct PurchasesRepository {
 impl PurchasesRepository {
     pub fn new(pool: Arc<DbPool>, writer: WriteHandle) -> Self {
         Self { pool, writer }
-    }
-    async fn save(&self, updating: bool, input: SavePurchase) -> Result<Purchase> {
-        validate_amounts(&input)?;
-        let now = chrono::Utc::now().to_rfc3339();
-        let row = PurchaseDB {
-            item_id: input.item_id,
-            activity_id: input.activity_id,
-            quantity: input.quantity.normalize().to_string(),
-            unit_price: input.unit_price.normalize().to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        let saved = self
-            .writer
-            .exec_tx(move |tx| {
-                let mut row = row;
-                if updating {
-                    let existing = purchases::table
-                        .find((&row.activity_id, &row.item_id))
-                        .select(PurchaseDB::as_select())
-                        .first::<PurchaseDB>(tx.conn())
-                        .map_err(StorageError::from)?;
-                    row.created_at = existing.created_at;
-                    diesel::update(purchases::table.find((&row.activity_id, &row.item_id)))
-                        .set(&row)
-                        .execute(tx.conn())
-                        .map_err(StorageError::from)?;
-                } else {
-                    diesel::insert_into(purchases::table)
-                        .values(&row)
-                        .execute(tx.conn())
-                        .map_err(StorageError::from)?;
-                }
-                Ok(row)
-            })
-            .await?;
-        saved.into_model()
     }
 }
 #[async_trait]
@@ -121,30 +81,78 @@ impl PurchasesRepositoryTrait for PurchasesRepository {
             })
             .collect()
     }
-    async fn create(&self, input: SavePurchase) -> Result<Purchase> {
-        self.save(false, input).await
+    fn list_for_activity(&self, activity_id: &str) -> Result<Vec<Purchase>> {
+        let mut conn = get_connection(&self.pool)?;
+        purchases::table
+            .filter(purchases::activity_id.eq(activity_id))
+            .order((purchases::created_at.asc(), purchases::item_id.asc()))
+            .select(PurchaseDB::as_select())
+            .load::<PurchaseDB>(&mut conn)?
+            .into_iter()
+            .map(PurchaseDB::into_model)
+            .collect()
     }
-    async fn update(&self, input: SavePurchase) -> Result<Purchase> {
-        self.save(true, input).await
-    }
-    async fn delete(&self, activity_id: &str, item_id: &str) -> Result<()> {
-        let target = (activity_id.to_string(), item_id.to_string());
-        let deleted = self
+    async fn set_for_activity(
+        &self,
+        activity_id: &str,
+        purchases: Vec<SavePurchase>,
+    ) -> Result<Vec<Purchase>> {
+        for input in &purchases {
+            validate_amounts(input)?;
+        }
+        let activity_id = activity_id.to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let rows: Vec<PurchaseDB> = purchases
+            .into_iter()
+            .map(|input| PurchaseDB {
+                item_id: input.item_id,
+                activity_id: activity_id.clone(),
+                quantity: input.quantity.normalize().to_string(),
+                unit_price: input.unit_price.normalize().to_string(),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .collect();
+        let saved = self
             .writer
             .exec_tx(move |tx| {
-                diesel::delete(purchases::table.find(target))
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)
-                    .map_err(Into::into)
+                let kept: Vec<&str> = rows.iter().map(|row| row.item_id.as_str()).collect();
+                diesel::delete(
+                    purchases::table
+                        .filter(purchases::activity_id.eq(&activity_id))
+                        .filter(purchases::item_id.ne_all(kept)),
+                )
+                .execute(tx.conn())
+                .map_err(StorageError::from)?;
+                let mut rows = rows;
+                for row in &mut rows {
+                    // Keeps the link's own creation time, which also keeps the
+                    // read order stable across edits.
+                    let existing = purchases::table
+                        .find((&row.activity_id, &row.item_id))
+                        .select(purchases::created_at)
+                        .first::<String>(tx.conn())
+                        .optional()
+                        .map_err(StorageError::from)?;
+                    match existing {
+                        Some(created_at) => {
+                            row.created_at = created_at;
+                            diesel::update(purchases::table.find((&row.activity_id, &row.item_id)))
+                                .set(&*row)
+                                .execute(tx.conn())
+                                .map_err(StorageError::from)?;
+                        }
+                        None => {
+                            diesel::insert_into(purchases::table)
+                                .values(&*row)
+                                .execute(tx.conn())
+                                .map_err(StorageError::from)?;
+                        }
+                    }
+                }
+                Ok(rows)
             })
             .await?;
-        if deleted == 0 {
-            return Err(ProcurementError::NotFound {
-                entity: "Purchase",
-                id: format!("{activity_id}/{item_id}"),
-            }
-            .into());
-        }
-        Ok(())
+        saved.into_iter().map(PurchaseDB::into_model).collect()
     }
 }

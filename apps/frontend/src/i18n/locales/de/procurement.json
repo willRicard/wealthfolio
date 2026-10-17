@@ -41,5 +41,16 @@
   "selectAll": "Alle Artikel auswählen",
   "selectItem": "{{name}} auswählen",
   "selected_one": "{{count}} ausgewählt",
-  "selected_other": "{{count}} ausgewählt"
+  "selected_other": "{{count}} ausgewählt",
+  "purchases": "Gekaufte Artikel",
+  "item": "Artikel",
+  "quantity": "Menge",
+  "unitPrice": "Stückpreis",
+  "addPurchase": "Artikel hinzufügen",
+  "pickItem": "Artikel auswählen",
+  "searchItems": "Artikel suchen…",
+  "noItems": "Keine Artikel gefunden.",
+  "moveUp": "Nach oben verschieben",
+  "moveDown": "Nach unten verschieben",
+  "purchaseIncomplete": "Jeder Artikel braucht eine Menge und einen Preis."
 }

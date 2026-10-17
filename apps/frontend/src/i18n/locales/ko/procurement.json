@@ -40,5 +40,16 @@
   "addAlias": "별칭 추가",
   "selectAll": "모든 항목 선택",
   "selectItem": "{{name}} 선택",
-  "selected_other": "{{count}}개 선택됨"
+  "selected_other": "{{count}}개 선택됨",
+  "purchases": "구매 항목",
+  "item": "항목",
+  "quantity": "수량",
+  "unitPrice": "단가",
+  "addPurchase": "항목 추가",
+  "pickItem": "항목 선택",
+  "searchItems": "항목 검색…",
+  "noItems": "항목을 찾을 수 없습니다.",
+  "moveUp": "위로 이동",
+  "moveDown": "아래로 이동",
+  "purchaseIncomplete": "각 항목에 수량과 가격을 입력하세요."
 }

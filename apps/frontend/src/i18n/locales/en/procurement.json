@@ -41,5 +41,16 @@
   "selectAll": "Select all items",
   "selectItem": "Select {{name}}",
   "selected_one": "{{count}} selected",
-  "selected_other": "{{count}} selected"
+  "selected_other": "{{count}} selected",
+  "purchases": "Items purchased",
+  "item": "Item",
+  "quantity": "Qty",
+  "unitPrice": "Unit price",
+  "addPurchase": "Add item",
+  "pickItem": "Pick an item",
+  "searchItems": "Search items…",
+  "noItems": "No items found.",
+  "moveUp": "Move up",
+  "moveDown": "Move down",
+  "purchaseIncomplete": "Each item needs a quantity and a price."
 }

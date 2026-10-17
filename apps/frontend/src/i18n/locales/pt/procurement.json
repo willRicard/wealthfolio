@@ -42,5 +42,16 @@
   "selectItem": "Selecionar {{name}}",
   "selected_one": "{{count}} selecionado",
   "selected_other": "{{count}} selecionados",
-  "selected_many": "{{count}} selecionados"
+  "selected_many": "{{count}} selecionados",
+  "purchases": "Itens comprados",
+  "item": "Item",
+  "quantity": "Qtd.",
+  "unitPrice": "Preço unitário",
+  "addPurchase": "Adicionar item",
+  "pickItem": "Escolher um item",
+  "searchItems": "Pesquisar itens…",
+  "noItems": "Nenhum item encontrado.",
+  "moveUp": "Mover para cima",
+  "moveDown": "Mover para baixo",
+  "purchaseIncomplete": "Cada item precisa de uma quantidade e um preço."
 }

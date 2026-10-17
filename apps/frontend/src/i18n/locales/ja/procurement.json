@@ -40,5 +40,16 @@
   "addAlias": "別名を追加",
   "selectAll": "すべての商品を選択",
   "selectItem": "{{name}}を選択",
-  "selected_other": "{{count}}件選択中"
+  "selected_other": "{{count}}件選択中",
+  "purchases": "購入した商品",
+  "item": "商品",
+  "quantity": "数量",
+  "unitPrice": "単価",
+  "addPurchase": "商品を追加",
+  "pickItem": "商品を選択",
+  "searchItems": "商品を検索…",
+  "noItems": "商品が見つかりません。",
+  "moveUp": "上へ移動",
+  "moveDown": "下へ移動",
+  "purchaseIncomplete": "各商品に数量と価格を入力してください。"
 }

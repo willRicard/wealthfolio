@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Icons } from "@wealthfolio/ui";
+import { useQuery } from "@tanstack/react-query";
+import { Icons, useObjectUrl } from "@wealthfolio/ui";
 import { Avatar, AvatarFallback, AvatarImage } from "@wealthfolio/ui/components/ui/avatar";
 import { fetchProcurementPhoto } from "@/adapters";
+import { QueryKeys } from "@/lib/query-keys";
 import type { ProcurementItem } from "../types";
 
 export function ItemPhoto({
@@ -11,28 +12,14 @@ export function ItemPhoto({
   item: ProcurementItem;
   className?: string;
 }) {
-  const [url, setUrl] = useState<string>();
   const photoKey = item.photo?.key;
-  useEffect(() => {
-    let disposed = false;
-    let objectUrl: string | undefined;
-    setUrl(undefined);
-    if (photoKey) {
-      void fetchProcurementPhoto(item.id)
-        .then((blob) => {
-          if (disposed) return;
-          objectUrl = URL.createObjectURL(blob);
-          setUrl(objectUrl);
-        })
-        .catch(() => {
-          if (!disposed) setUrl(undefined);
-        });
-    }
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [item.id, photoKey]);
+  const { data: blob } = useQuery({
+    queryKey: [QueryKeys.PROCUREMENT_ITEM_PHOTO, item.id, photoKey],
+    queryFn: () => fetchProcurementPhoto(item.id),
+    enabled: !!photoKey,
+    staleTime: Infinity,
+  });
+  const url = useObjectUrl(blob);
   return (
     <Avatar className={className}>
       <AvatarImage src={url} alt={item.name} className="rounded-full object-cover" />

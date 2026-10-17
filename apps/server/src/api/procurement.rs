@@ -6,7 +6,7 @@ use axum::{
     extract::{DefaultBodyLimit, Multipart, Path},
     http::{header, HeaderMap},
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
     Extension, Json, Router,
 };
 use std::sync::Arc;
@@ -65,34 +65,26 @@ async fn get_procurement_item_prices(
     Ok(Json(context.procurement_purchases.list_for_item(&id)?))
 }
 
-async fn create_procurement_purchase(
+async fn get_procurement_activity_purchases(
     Extension(context): Extension<Arc<AppState>>,
-    Json(input): Json<SavePurchase>,
-) -> ApiResult<Json<Purchase>> {
-    Ok(Json(context.procurement_purchases.create(input).await?))
-}
-
-async fn update_procurement_purchase(
-    Extension(context): Extension<Arc<AppState>>,
-    Path((activity_id, item_id)): Path<(String, String)>,
-    Json(input): Json<SavePurchase>,
-) -> ApiResult<Json<Purchase>> {
-    if input.activity_id != activity_id || input.item_id != item_id {
-        return Err(ApiError::BadRequest(
-            "Purchase identifiers must match the route".into(),
-        ));
-    }
-    Ok(Json(context.procurement_purchases.update(input).await?))
-}
-
-async fn delete_procurement_purchase(
-    Extension(context): Extension<Arc<AppState>>,
-    Path((activity_id, item_id)): Path<(String, String)>,
-) -> ApiResult<Json<()>> {
+    Path(activity_id): Path<String>,
+) -> ApiResult<Json<Vec<Purchase>>> {
     Ok(Json(
         context
             .procurement_purchases
-            .delete(&activity_id, &item_id)
+            .list_for_activity(&activity_id)?,
+    ))
+}
+
+async fn set_procurement_activity_purchases(
+    Extension(context): Extension<Arc<AppState>>,
+    Path(activity_id): Path<String>,
+    Json(purchases): Json<Vec<SavePurchase>>,
+) -> ApiResult<Json<Vec<Purchase>>> {
+    Ok(Json(
+        context
+            .procurement_purchases
+            .set_for_activity(&activity_id, purchases)
             .await?,
     ))
 }
@@ -172,10 +164,9 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
             get(get_procurement_item_prices),
         )
         .route("/procurement/items/{id}/photo", get(photo))
-        .route("/procurement/purchases", post(create_procurement_purchase))
         .route(
-            "/procurement/purchases/{activity_id}/{item_id}",
-            put(update_procurement_purchase).delete(delete_procurement_purchase),
+            "/procurement/activities/{activity_id}/purchases",
+            get(get_procurement_activity_purchases).put(set_procurement_activity_purchases),
         )
         .route(
             "/procurement/photo-drafts/{id}",
