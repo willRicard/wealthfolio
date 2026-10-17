@@ -98,6 +98,7 @@
   "connect": "Connect",
   "addons": "擴充功能",
   "nav": {
+    "label_procurement": "採購",
     "label_dashboard": "檢視儀表板",
     "label_insights": "檢視分析",
     "label_holdings": "檢視持有部位",

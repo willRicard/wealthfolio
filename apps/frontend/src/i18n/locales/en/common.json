@@ -98,6 +98,7 @@
   "connect": "Connect",
   "addons": "Add-ons",
   "nav": {
+    "label_procurement": "Procurement",
     "label_dashboard": "View Dashboard",
     "label_insights": "View Insights",
     "label_holdings": "View Holdings",

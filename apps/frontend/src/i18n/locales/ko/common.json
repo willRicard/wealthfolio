@@ -98,6 +98,7 @@
   "connect": "연결",
   "addons": "애드온",
   "nav": {
+    "label_procurement": "구매 관리",
     "label_dashboard": "대시보드 보기",
     "label_insights": "인사이트 보기",
     "label_holdings": "보유 종목 보기",

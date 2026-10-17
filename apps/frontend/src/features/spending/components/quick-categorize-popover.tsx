@@ -29,6 +29,7 @@ export interface QuickCategorizePopoverProps {
   selectedCategoryId?: string | null;
   /** Category bucket to show. Categories label the cash-flow bucket; they do not change it. */
   scope?: QuickCategorizeScope;
+  taxonomyId?: string;
   onSelect: (taxonomyId: string, categoryId: string) => void;
   onClear?: () => void;
   align?: "start" | "center" | "end";
@@ -62,6 +63,7 @@ export function QuickCategorizePopover({
   trigger,
   selectedCategoryId,
   scope = "both",
+  taxonomyId,
   onSelect,
   onClear,
   align = "start",
@@ -73,11 +75,12 @@ export function QuickCategorizePopover({
     Income: t("spending:cashFlow.income"),
   };
   const [open, setOpen] = useState(false);
-  const spending = useTaxonomy(SPENDING_TAXONOMY);
-  const income = useTaxonomy(INCOME_TAXONOMY);
-  const savings = useTaxonomy(SAVINGS_TAXONOMY);
+  const spending = useTaxonomy(taxonomyId ?? SPENDING_TAXONOMY);
+  const income = useTaxonomy(taxonomyId ? null : INCOME_TAXONOMY);
+  const savings = useTaxonomy(taxonomyId ? null : SAVINGS_TAXONOMY);
 
   const options = useMemo<FlatOption[]>(() => {
+    if (taxonomyId) return flattenTaxonomy(taxonomyId, spending.data?.categories ?? [], "Expense");
     const out: FlatOption[] = [];
     if (scope === "expense" || scope === "both" || scope === "all") {
       out.push(...flattenTaxonomy(SPENDING_TAXONOMY, spending.data?.categories ?? [], "Expense"));
@@ -89,7 +92,13 @@ export function QuickCategorizePopover({
       out.push(...flattenTaxonomy(INCOME_TAXONOMY, income.data?.categories ?? [], "Income"));
     }
     return out;
-  }, [spending.data?.categories, savings.data?.categories, income.data?.categories, scope]);
+  }, [
+    spending.data?.categories,
+    savings.data?.categories,
+    income.data?.categories,
+    scope,
+    taxonomyId,
+  ]);
 
   const grouped = useMemo(() => {
     const groups: Record<FlatOption["group"], FlatOption[]> = {
@@ -123,7 +132,10 @@ export function QuickCategorizePopover({
               const items = grouped[groupKey];
               if (items.length === 0) return null;
               return (
-                <CommandGroup key={groupKey} heading={groupLabels[groupKey]}>
+                <CommandGroup
+                  key={groupKey}
+                  heading={taxonomyId ? undefined : groupLabels[groupKey]}
+                >
                   {items.map((opt) => {
                     const label = opt.parent
                       ? `${opt.parent.name} / ${opt.category.name}`

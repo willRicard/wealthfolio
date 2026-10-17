@@ -55,6 +55,7 @@ import GoalsDashboardPage from "@/features/goals/pages/goals-dashboard-page";
 import GoalNewPage from "@/features/goals/pages/goal-new-page";
 import GoalDetailPage from "@/features/goals/pages/goal-detail-page";
 import GoalRetirementGuidePage from "@/features/goals/pages/goal-retirement-guide-page";
+import ProcurementPage from "@/features/procurement/pages/procurement-page";
 
 function NavigationEventBridge() {
   useNavigationEventListener();
@@ -117,6 +118,7 @@ export function AppRoutes() {
             path="allocation-targets"
             element={<Navigate to="/insights?tab=overview" replace />}
           />
+          <Route path="procurement" element={<ProcurementPage />} />
           <Route path="goals" element={<GoalsDashboardPage />} />
           <Route path="goals/new" element={<GoalNewPage />} />
           <Route path="goals/:goalId/guide" element={<GoalRetirementGuidePage />} />

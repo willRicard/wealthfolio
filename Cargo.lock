@@ -9222,6 +9222,7 @@ dependencies = [
  "wealthfolio-device-sync",
  "wealthfolio-market-data",
  "wealthfolio-mcp",
+ "wealthfolio-procurement",
  "wealthfolio-spending",
  "wealthfolio-storage-sqlite",
  "webkit2gtk",
@@ -9422,6 +9423,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "wealthfolio-procurement"
+version = "3.10.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "log",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+ "wealthfolio-core",
+ "wealthfolio-files",
+]
+
+[[package]]
 name = "wealthfolio-server"
 version = "3.10.0"
 dependencies = [
@@ -9470,6 +9489,7 @@ dependencies = [
  "wealthfolio-http",
  "wealthfolio-market-data",
  "wealthfolio-mcp",
+ "wealthfolio-procurement",
  "wealthfolio-spending",
  "wealthfolio-storage-sqlite",
  "zeroize",
@@ -9527,6 +9547,7 @@ dependencies = [
  "wealthfolio-core",
  "wealthfolio-device-sync",
  "wealthfolio-market-data",
+ "wealthfolio-procurement",
  "wealthfolio-spending",
  "zeroize",
 ]

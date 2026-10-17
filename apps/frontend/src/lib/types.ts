@@ -1843,7 +1843,7 @@ export interface NetWorthConfig {
 /**
  * Taxonomy - a classification system (e.g., "Asset Classes", "Regions", "Industries")
  */
-export type TaxonomyScope = "asset" | "activity";
+export type TaxonomyScope = "asset" | "activity" | "procurement";
 
 export interface Taxonomy {
   id: string;

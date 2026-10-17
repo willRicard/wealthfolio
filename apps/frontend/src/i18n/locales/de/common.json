@@ -95,6 +95,7 @@
   "connect": "Connect",
   "addons": "Add-ons",
   "nav": {
+    "label_procurement": "Beschaffung",
     "label_dashboard": "Übersicht anzeigen",
     "label_insights": "Einblicke anzeigen",
     "label_holdings": "Bestände anzeigen",

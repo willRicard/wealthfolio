@@ -114,6 +114,18 @@ impl IntoResponse for ApiError {
                         SpendingError::NotFound { .. } => StatusCode::NOT_FOUND,
                     };
                     (status, spending_err.to_string())
+                } else if let Some(error) =
+                    e.downcast_ref::<wealthfolio_procurement::ProcurementError>()
+                {
+                    let status = match error {
+                        wealthfolio_procurement::ProcurementError::InvalidInput(_) => {
+                            StatusCode::BAD_REQUEST
+                        }
+                        wealthfolio_procurement::ProcurementError::NotFound { .. } => {
+                            StatusCode::NOT_FOUND
+                        }
+                    };
+                    (status, error.to_string())
                 } else {
                     (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
                 }
@@ -183,6 +195,20 @@ impl From<ProviderApiError> for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn procurement_errors_are_client_errors() {
+        use wealthfolio_procurement::ProcurementError;
+        let invalid = ApiError::from(anyhow::Error::from(ProcurementError::InvalidInput(
+            "Invalid rating".into(),
+        )));
+        assert_eq!(invalid.into_response().status(), StatusCode::BAD_REQUEST);
+        let missing = ApiError::from(anyhow::Error::from(ProcurementError::NotFound {
+            entity: "Item",
+            id: "missing".into(),
+        }));
+        assert_eq!(missing.into_response().status(), StatusCode::NOT_FOUND);
+    }
 
     #[test]
     fn diagnostic_keeps_io_kind_without_logging_error_text() {

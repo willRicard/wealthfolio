@@ -92,6 +92,9 @@ pub struct ServiceContext {
         Arc<wealthfolio_spending::transaction_attachments::TransactionAttachmentsService>,
     pub transaction_attachment_files:
         Arc<wealthfolio_spending::transaction_attachment_files::TransactionAttachmentFiles>,
+    pub procurement_items: Arc<wealthfolio_procurement::items::ItemsService>,
+    pub procurement_purchases: Arc<wealthfolio_procurement::purchases::PurchasesService>,
+    pub procurement_photos: Arc<wealthfolio_procurement::photos::PhotoService>,
     pub spending_settings_service: Arc<SpendingSettingsService>,
     pub cash_activity_service: Arc<CashActivityService>,
     pub categorization_rules_service: Arc<CategorizationRulesService>,

@@ -27,6 +27,7 @@ pub mod mcp;
 pub mod platform;
 pub mod portfolio;
 pub mod portfolios;
+pub mod procurement;
 pub mod providers_settings;
 pub mod secrets;
 pub mod settings;

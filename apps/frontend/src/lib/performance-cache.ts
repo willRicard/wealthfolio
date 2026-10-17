@@ -17,4 +17,6 @@ export function invalidatePerformanceCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTS_SUMMARY] });
   queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH] });
   queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH_HISTORY] });
+  queryClient.invalidateQueries({ queryKey: [QueryKeys.PROCUREMENT_ITEMS] });
+  queryClient.invalidateQueries({ queryKey: [QueryKeys.PROCUREMENT_ITEM_PRICES] });
 }

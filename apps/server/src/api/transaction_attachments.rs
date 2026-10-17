@@ -21,7 +21,7 @@ async fn attachments(
     Ok(Json(state.transaction_attachments_service.list(&id).await?))
 }
 
-async fn one_file(mut multipart: Multipart) -> ApiResult<(String, String, Vec<u8>)> {
+pub(super) async fn one_file(mut multipart: Multipart) -> ApiResult<(String, String, Vec<u8>)> {
     let mut field = multipart
         .next_field()
         .await

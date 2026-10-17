@@ -1,0 +1,27 @@
+[package]
+name = "wealthfolio-procurement"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+log.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+wealthfolio-core.workspace = true
+wealthfolio-files = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+photos = ["dep:wealthfolio-files", "wealthfolio-files/thumbnails", "tokio/sync"]
+
+[lints]
+workspace = true

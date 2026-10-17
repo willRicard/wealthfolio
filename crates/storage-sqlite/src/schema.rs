@@ -1,6 +1,59 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    procurement_items (id) {
+        id -> Text,
+        name -> Text,
+        brand -> Nullable<Text>,
+        memo -> Nullable<Text>,
+        category_id -> Text,
+        subcategory_id -> Nullable<Text>,
+        rating -> Nullable<Double>,
+        photo_backend -> Nullable<Text>,
+        photo_key -> Nullable<Text>,
+        photo_preview_key -> Nullable<Text>,
+        photo_filename -> Nullable<Text>,
+        photo_content_type -> Nullable<Text>,
+        photo_size_bytes -> Nullable<BigInt>,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    procurement_item_aliases (id) {
+        id -> Text,
+        item_id -> Text,
+        alias -> Text,
+        sort_order -> Integer,
+    }
+}
+
+diesel::table! {
+    procurement_purchases (activity_id, item_id) {
+        item_id -> Text,
+        activity_id -> Text,
+        quantity -> Text,
+        unit_price -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    procurement_photo_drafts (id) {
+        id -> Text,
+        storage_backend -> Text,
+        storage_key -> Text,
+        preview_key -> Text,
+        filename -> Text,
+        content_type -> Text,
+        size_bytes -> BigInt,
+        created_at -> Text,
+    }
+}
+
+diesel::table! {
     spending_transaction_attachments (id) {
         id -> Text,
         activity_id -> Text,
@@ -887,6 +940,10 @@ diesel::table! {
 
 diesel::joinable!(allocation_target_constraints -> allocation_targets (target_id));
 
+diesel::joinable!(procurement_item_aliases -> procurement_items (item_id));
+diesel::joinable!(procurement_purchases -> procurement_items (item_id));
+diesel::joinable!(procurement_purchases -> activities (activity_id));
+
 diesel::joinable!(accounts -> platforms (platform_id));
 diesel::joinable!(activities -> accounts (account_id));
 diesel::joinable!(activities -> assets (asset_id));
@@ -930,6 +987,10 @@ diesel::joinable!(budget_rollover_settings -> taxonomies (taxonomy_id));
 diesel::joinable!(import_account_templates -> import_templates (template_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    procurement_items,
+    procurement_item_aliases,
+    procurement_purchases,
+    procurement_photo_drafts,
     import_account_templates,
     accounts,
     portfolios,

@@ -98,6 +98,7 @@
   "connect": "Connect",
   "addons": "插件",
   "nav": {
+    "label_procurement": "采购",
     "label_dashboard": "查看仪表盘",
     "label_insights": "查看洞察",
     "label_holdings": "查看持仓",

@@ -638,3 +638,46 @@ describe("scope-based routing — performance filters", () => {
     });
   });
 });
+
+describe("procurement transport", () => {
+  const itemId = "917d3182-80d0-4cd1-b03c-05fa8d997227";
+  const activityId = "e3166bb8-24fa-4719-bc8e-41e677b56d73";
+  it.each([
+    ["get_procurement_item", "GET", `/procurement/items/${itemId}`],
+    ["delete_procurement_item", "DELETE", `/procurement/items/${itemId}`],
+    ["clone_procurement_item", "POST", `/procurement/items/${itemId}/clone`],
+    ["get_procurement_item_prices", "GET", `/procurement/items/${itemId}/prices`],
+    ["discard_procurement_photo_draft", "DELETE", `/procurement/photo-drafts/${itemId}`],
+  ])("%s uses the expected route", async (command, method, path) => {
+    const mock = stubFetch(null);
+    await invoke(command, { id: itemId });
+    expect(lastCall(mock)).toMatchObject({ method, url: `/api/v1${path}` });
+  });
+  it.each([
+    ["create_procurement_item", "POST", "/procurement/items"],
+    ["update_procurement_item", "PUT", `/procurement/items/${itemId}`],
+    ["create_procurement_purchase", "POST", "/procurement/purchases"],
+    ["update_procurement_purchase", "PUT", `/procurement/purchases/${activityId}/${itemId}`],
+  ])("%s sends the unwrapped form", async (command, method, path) => {
+    const mock = stubFetch(null);
+    const input = {
+      activityId,
+      itemId,
+      quantity: "0.5",
+      unitPrice: "123.456",
+      draftId: null,
+    };
+    await invoke(command, { id: itemId, input });
+    const request = lastCall(mock);
+    expect(request).toMatchObject({ method, url: `/api/v1${path}` });
+    expect(JSON.parse(request.body as string)).toEqual(input);
+  });
+  it("deletes a purchase by its activity and item pair", async () => {
+    const mock = stubFetch(null);
+    await invoke("delete_procurement_purchase", { activityId, itemId });
+    expect(lastCall(mock)).toMatchObject({
+      method: "DELETE",
+      url: `/api/v1/procurement/purchases/${activityId}/${itemId}`,
+    });
+  });
+});

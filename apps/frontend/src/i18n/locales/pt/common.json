@@ -98,6 +98,7 @@
   "connect": "Connect",
   "addons": "Extensões",
   "nav": {
+    "label_procurement": "Compras",
     "label_dashboard": "Ver painel",
     "label_insights": "Ver análises",
     "label_holdings": "Ver posições",

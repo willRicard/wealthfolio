@@ -3,6 +3,7 @@ import { profileFetch } from "@/features/profiles/session";
 // This module exports invoke, logger, and platform constants for shared modules
 
 import { notifyUnauthorized } from "@/lib/auth-token";
+import type { SaveProcurementPurchase } from "@/features/procurement/types";
 import type { Logger } from "../types";
 import { invokeTimeoutMs } from "../invoke-timeout";
 
@@ -19,6 +20,18 @@ export const AI_CHAT_STREAM_ENDPOINT = `${API_PREFIX}/ai/chat/stream`;
 type CommandMap = Record<string, { method: string; path: string }>;
 
 export const COMMANDS: CommandMap = {
+  get_procurement_items: { method: "GET", path: "/procurement/items" },
+  get_procurement_item: { method: "GET", path: "/procurement/items" },
+  create_procurement_item: { method: "POST", path: "/procurement/items" },
+  update_procurement_item: { method: "PUT", path: "/procurement/items" },
+  clone_procurement_item: { method: "POST", path: "/procurement/items" },
+  delete_procurement_item: { method: "DELETE", path: "/procurement/items" },
+  get_procurement_item_prices: { method: "GET", path: "/procurement/items" },
+  create_procurement_purchase: { method: "POST", path: "/procurement/purchases" },
+  update_procurement_purchase: { method: "PUT", path: "/procurement/purchases" },
+  delete_procurement_purchase: { method: "DELETE", path: "/procurement/purchases" },
+  discard_procurement_photo_draft: { method: "DELETE", path: "/procurement/photo-drafts" },
+
   get_transaction_attachments: { method: "GET", path: "/spending/transactions" },
   get_transaction_attachment_drafts: { method: "GET", path: "/spending/attachment-drafts" },
   discard_transaction_attachment_drafts: {
@@ -825,6 +838,39 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "run_retirement_decision_sensitivity_map":
     case "run_retirement_sorr": {
       body = JSON.stringify(payload);
+      break;
+    }
+    case "get_procurement_item":
+    case "update_procurement_item":
+    case "delete_procurement_item":
+    case "clone_procurement_item":
+    case "get_procurement_item_prices":
+    case "discard_procurement_photo_draft": {
+      const { id, input } = payload as { id: string; input?: unknown };
+      url += `/${encodeURIComponent(id)}`;
+      if (command === "clone_procurement_item") url += "/clone";
+      if (command === "get_procurement_item_prices") url += "/prices";
+      if (input !== undefined) body = JSON.stringify(input);
+      break;
+    }
+    case "update_procurement_purchase": {
+      const { input } = payload as { input: SaveProcurementPurchase };
+      url += `/${encodeURIComponent(input.activityId)}/${encodeURIComponent(input.itemId)}`;
+      body = JSON.stringify(input);
+      break;
+    }
+    case "delete_procurement_purchase": {
+      const { activityId, itemId } = payload as {
+        activityId: string;
+        itemId: string;
+      };
+      url += `/${encodeURIComponent(activityId)}/${encodeURIComponent(itemId)}`;
+      break;
+    }
+    case "create_procurement_item":
+    case "create_procurement_purchase": {
+      const { input } = payload as { input: unknown };
+      body = JSON.stringify(input);
       break;
     }
     case "create_goal": {

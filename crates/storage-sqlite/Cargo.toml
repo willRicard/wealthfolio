@@ -16,6 +16,7 @@ wealthfolio-ai = { workspace = true }
 wealthfolio-connect = { workspace = true }
 wealthfolio-device-sync = { workspace = true }
 wealthfolio-spending = { workspace = true }
+wealthfolio-procurement = { workspace = true }
 wealthfolio-market-data = { workspace = true }
 
 # Workspace dependencies
@@ -49,3 +50,6 @@ libc = "0.2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+wealthfolio-procurement = { workspace = true, features = ["photos"] }

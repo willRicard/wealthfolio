@@ -21,6 +21,10 @@ export const QueryKeys = {
   ACTIVITY_DATA: "activity-data",
   ACTIVITIES: "activities",
 
+  // Procurement related keys
+  PROCUREMENT_ITEMS: "procurement-items",
+  PROCUREMENT_ITEM_PRICES: "procurement-item-prices",
+
   // Portfolio related keys
   HOLDINGS: "holdings",
   HOLDING: "holding",

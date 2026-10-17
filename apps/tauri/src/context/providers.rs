@@ -452,6 +452,47 @@ async fn build_context(
         .with_valuation_repository(valuation_repository.clone())
         .with_event_sink(domain_event_sink.clone()),
     );
+    let procurement_items_repo = Arc::new(
+        wealthfolio_storage_sqlite::procurement::items::ItemsRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let procurement_purchases_repo = Arc::new(
+        wealthfolio_storage_sqlite::procurement::purchases::PurchasesRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let procurement_photos = Arc::new(wealthfolio_procurement::photos::PhotoService::new(
+        std::path::PathBuf::from(app_data_dir).join("procurement-photos"),
+        Arc::new(
+            wealthfolio_storage_sqlite::procurement::photo_drafts::PhotoDraftsRepository::new(
+                pool.clone(),
+                writer.clone(),
+            ),
+        ),
+    )?);
+    if procurement_photos.sweep_drafts().await.is_err() {
+        log::warn!("Failed to sweep abandoned procurement photo drafts");
+    }
+    let procurement_items = Arc::new(
+        wealthfolio_procurement::items::ItemsService::new(
+            procurement_items_repo.clone(),
+            procurement_purchases_repo.clone(),
+            fx_service.clone(),
+            settings_service.clone(),
+        )
+        .with_photos(procurement_photos.clone()),
+    );
+    let procurement_purchases =
+        Arc::new(wealthfolio_procurement::purchases::PurchasesService::new(
+            procurement_purchases_repo,
+            procurement_items_repo,
+            activity_repository.clone(),
+            fx_service.clone(),
+            settings_service.clone(),
+        ));
     let transaction_attachments_service = Arc::new(
         wealthfolio_spending::transaction_attachments::TransactionAttachmentsService::new(
             Arc::new(wealthfolio_storage_sqlite::spending::transaction_attachments::SqliteTransactionAttachmentsRepository::new(pool.clone(), writer.clone())),
@@ -816,6 +857,9 @@ async fn build_context(
             custom_provider_service,
             portfolio_service,
             spending_settings_service,
+            procurement_items,
+            procurement_purchases,
+            procurement_photos,
             transaction_attachments_service,
             transaction_attachment_files,
             cash_activity_service,

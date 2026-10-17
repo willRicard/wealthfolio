@@ -58,6 +58,7 @@ mod performance;
 pub(crate) mod portable_backups;
 mod portfolio;
 mod portfolios;
+mod procurement;
 mod secrets;
 mod settings;
 pub mod shared;
@@ -221,6 +222,7 @@ fn app_router_with_profiles(
         .merge(health::router())
         .merge(custom_providers::router())
         .merge(spending::router())
+        .merge(procurement::router())
         .merge(transaction_attachments::router())
         .merge(allocation_targets::router())
         .merge(agent_access::router());

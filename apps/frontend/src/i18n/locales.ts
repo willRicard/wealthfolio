@@ -67,6 +67,7 @@ export const NAMESPACES = [
   "insights",
   "asset",
   "spending",
+  "procurement",
   "ui",
   "ai",
   "allocation",

@@ -554,3 +554,6 @@ export { downloadCloudBackup, previewCloudBackupRestore } from "./cloud-backups"
 
 export * from "../shared/transaction-attachments";
 export * from "./transaction-attachments";
+
+export * from "../shared/procurement";
+export { uploadProcurementPhotoDraft, fetchProcurementPhoto } from "./procurement-photo";

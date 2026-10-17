@@ -101,6 +101,7 @@ wealthfolio-device-sync = { path = "crates/device-sync" }
 wealthfolio-ai = { path = "crates/ai" }
 wealthfolio-files = { path = "crates/files" }
 wealthfolio-spending = { path = "crates/spending" }
+wealthfolio-procurement = { path = "crates/procurement" }
 wealthfolio-agent-tools = { path = "crates/agent-tools" }
 wealthfolio-mcp = { path = "crates/wealthfolio-mcp" }
 wealthfolio-portfolio-engine = { path = "crates/portfolio-engine" }

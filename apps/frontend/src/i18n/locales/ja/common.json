@@ -98,6 +98,7 @@
   "connect": "連携",
   "addons": "アドオン",
   "nav": {
+    "label_procurement": "調達",
     "label_dashboard": "ダッシュボードを表示",
     "label_insights": "インサイトを表示",
     "label_holdings": "保有銘柄を表示",
