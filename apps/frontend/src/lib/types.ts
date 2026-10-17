@@ -269,7 +269,22 @@ export interface ActivityDetails {
   counterpartCurrency?: string | null;
   counterpartFxRate?: string | null;
   subRows?: ActivityDetails[];
+  /**
+   * The account's cash in `cashBalanceCurrency`, as `cashBalanceScope` says:
+   * only when the search asked for balances and the account's holdings come
+   * from its activities.
+   */
+  cashBalance?: string | null;
+  cashBalanceCurrency?: string | null;
+  cashBalanceScope?: CashBalanceScope | null;
 }
+
+/**
+ * What a row's `cashBalance` measures: the cash after the row (`ROW`, cash and
+ * credit-card accounts), or at the end of the row's day in the account
+ * currency (`DAY`, every posted row of that day carries it).
+ */
+export type CashBalanceScope = "ROW" | "DAY";
 
 export interface ActivitySearchResponse {
   data: ActivityDetails[];
@@ -927,6 +942,8 @@ export interface Settings {
   font: string;
   language: string;
   formattingRegion: string;
+  /** Formatting regions for amounts in specific currencies, keyed by currency code. */
+  currencyFormattingRegions?: Record<string, string>;
   baseCurrency: string;
   defaultReturnMetric: "twr" | "irr" | "valueReturn";
   timezone: string;
@@ -1049,6 +1066,8 @@ export interface IncomeSummary {
   currency: string;
   monthlyAverage: number;
   yoyGrowth: number | null; // Changed from optional to nullable
+  /** Currencies with no exchange rate to `currency`, left out of the converted totals. */
+  unconvertedCurrencies: string[];
 }
 
 // Define custom DateRange type matching react-day-picker's
@@ -2226,6 +2245,8 @@ export interface SetDefaultProviderRequest {
 export interface FetchedModel {
   id: string;
   name?: string;
+  /** From the provider's model metadata, or the provider's defaults. */
+  capabilities?: ModelCapabilities;
 }
 
 /**

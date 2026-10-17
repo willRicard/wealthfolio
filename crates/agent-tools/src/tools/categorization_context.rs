@@ -901,6 +901,8 @@ mod tests {
             net_amount: -10.0,
             net_amount_base: None,
             visible_spending_amount: 0.0,
+            cash_balance: None,
+            cash_balance_currency: None,
         }
     }
 

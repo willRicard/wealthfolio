@@ -139,6 +139,17 @@ export const ActivityTable = ({
       currency: false,
     },
   );
+  // Rows carry a balance only when the search asked for them (one cash or
+  // credit-card account in date order), so their presence decides the column.
+  // End-of-day balances wait for the day-grouped list; this column shows the
+  // balance after each row.
+  const showsCashBalance = React.useMemo(
+    () =>
+      activities.some(
+        (activity) => activity.cashBalance != null && activity.cashBalanceScope !== "DAY",
+      ),
+    [activities],
+  );
   const symbolExchangeCountMap = React.useMemo(() => {
     const exchangesBySymbol = new Map<string, Set<string>>();
 
@@ -531,6 +542,41 @@ export const ActivityTable = ({
           );
         },
       },
+      ...(showsCashBalance
+        ? [
+            {
+              id: "cashBalance",
+              accessorKey: "cashBalance",
+              enableSorting: false,
+              enableHiding: true,
+              meta: {
+                label: t("activity:table_balance"),
+              },
+              header: ({ column }) => (
+                <DataTableColumnHeader
+                  className="justify-end text-right"
+                  column={column}
+                  title={t("activity:table_balance")}
+                />
+              ),
+              cell: ({ row }) => {
+                const { cashBalance, cashBalanceCurrency, cashBalanceScope } = row.original;
+                if (cashBalance == null || !cashBalanceCurrency || cashBalanceScope === "DAY") {
+                  return <div className="pr-4 text-right">-</div>;
+                }
+                return (
+                  <div className="whitespace-nowrap pr-4 text-right">
+                    <AmountDisplay
+                      value={Number(cashBalance)}
+                      currency={cashBalanceCurrency}
+                      isHidden={isBalanceHidden}
+                    />
+                  </div>
+                );
+              },
+            } satisfies ColumnDef<ActivityDetails>,
+          ]
+        : []),
       {
         id: "account",
         accessorKey: "accountName",
@@ -653,6 +699,7 @@ export const ActivityTable = ({
       onLinkTransfer,
       onUnlinkTransfer,
       numberFormatting,
+      showsCashBalance,
       symbolExchangeCountMap,
       t,
     ],

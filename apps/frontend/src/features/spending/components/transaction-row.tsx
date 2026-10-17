@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { Account } from "@/lib/types";
 import { AccountType } from "@/lib/constants";
 import { TruncatedText } from "@/components/truncated-text";
-import { HOVER_SLOT } from "@/lib/hover-slot";
+import { HOVER_SLOT, SELECTION_SLOT } from "@/lib/hover-slot";
 import { isRowBodyClick } from "@/lib/row-click";
 import { cn } from "@/lib/utils";
 import {
@@ -39,6 +39,8 @@ interface TransactionRowProps {
   appTimezone?: string;
   /** True when the loaded result set spans more than one account. */
   showAccount: boolean;
+  /** Adds the Balance cell: the list shows one account's running balance. */
+  showBalance?: boolean;
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   onAssignCategory: (activityId: string, taxonomyId: string, categoryId: string) => void;
@@ -72,6 +74,7 @@ function TransactionRowImpl({
   eventTypeColor,
   appTimezone,
   showAccount,
+  showBalance = false,
   isSelected,
   onToggleSelect,
   onAssignCategory,
@@ -128,6 +131,7 @@ function TransactionRowImpl({
           checked={isSelected}
           onCheckedChange={() => onToggleSelect(a.id)}
           aria-label={rowAriaLabel}
+          className={SELECTION_SLOT}
         />
       </TableCell>
       <TableCell className="text-muted-foreground hidden w-20 whitespace-nowrap px-3 py-2 text-xs tabular-nums md:table-cell">
@@ -265,6 +269,13 @@ function TransactionRowImpl({
         {sign}
         <PrivacyAmount value={Math.abs(safeAmount)} currency={a.currency} />
       </TableCell>
+      {showBalance && (
+        <TableCell className="text-muted-foreground hidden w-28 whitespace-nowrap px-3 py-2 text-right text-sm tabular-nums sm:table-cell">
+          {a.cashBalance != null && a.cashBalanceCurrency && (
+            <PrivacyAmount value={Number(a.cashBalance)} currency={a.cashBalanceCurrency} />
+          )}
+        </TableCell>
+      )}
       <TableCell className="w-10 px-3 py-2" data-row-click-ignore>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

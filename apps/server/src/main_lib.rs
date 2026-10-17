@@ -801,6 +801,7 @@ async fn initialize_profile_state(
             core_import_run_repository,
         )
         .with_timezone(timezone.clone())
+        .with_valuation_repository(valuation_repository.clone())
         .with_event_sink(domain_event_sink.clone()),
     );
     let transaction_attachments_service = Arc::new(

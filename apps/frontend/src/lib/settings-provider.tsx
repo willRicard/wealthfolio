@@ -23,6 +23,7 @@ interface ExtendedSettingsContextType extends SettingsContextType {
         | "font"
         | "language"
         | "formattingRegion"
+        | "currencyFormattingRegions"
         | "baseCurrency"
         | "defaultReturnMetric"
         | "timezone"
@@ -64,6 +65,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         | "font"
         | "language"
         | "formattingRegion"
+        | "currencyFormattingRegions"
         | "baseCurrency"
         | "defaultReturnMetric"
         | "timezone"
@@ -131,14 +133,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const uiLocale = settings ? settings.language : DEFAULT_LOCALE;
   const resolvedFormattingLocale = resolveFormattingLocale(formattingRegion);
   const formattingTimezone = settings?.timezone || undefined;
+  const currencyFormattingRegions = settings?.currencyFormattingRegions;
 
   useEffect(() => {
     setAddonLocalizationSnapshot({
       locale: resolvedFormattingLocale,
       uiLocale,
       timezone: formattingTimezone,
+      currencyFormattingRegions,
     });
-  }, [resolvedFormattingLocale, uiLocale, formattingTimezone]);
+  }, [resolvedFormattingLocale, uiLocale, formattingTimezone, currencyFormattingRegions]);
 
   if (settings && !formattingRegion) {
     throw new Error("Loaded settings are missing the required formatting region");
@@ -177,6 +181,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         locale={formattingRegion}
         uiLocale={uiLocale}
         timezone={formattingTimezone}
+        currencyFormattingRegions={settings?.currencyFormattingRegions}
       >
         {children}
       </FormattingProvider>
