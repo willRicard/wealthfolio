@@ -19,8 +19,9 @@ implemented and regression-tested now, before the linking UI is designed.
 no new background worker, queue, retry, or synchronization primitive; no change to the
 portfolio coordinator or `projection_state`; no new domain-event variant or planner branch;
 activity create/update/delete keeps its current ownership and failure propagation. Added:
-one migration, a new leaf crate `crates/procurement`, its SQLite repositories, parallel
-Tauri/Axum surfaces, and a blob root for item photos. Procurement tables are **not**
+one migration (including a photo-draft table), a new leaf crate `crates/procurement`, its
+SQLite repositories, parallel Tauri/Axum surfaces, a blob root for item photos, and a sweep of
+abandoned photo drafts that runs once at startup (not a worker). Procurement tables are **not**
 registered for device sync in this round.
 
 ---
@@ -51,6 +52,11 @@ procurement_purchases
   unit_price TEXT NOT NULL CHECK (CAST(unit_price AS REAL) >= 0),  -- Decimal-as-TEXT
   created_at TEXT, updated_at TEXT,
   UNIQUE (activity_id, item_id)
+
+procurement_photo_drafts
+  id TEXT PK, storage_backend TEXT NOT NULL, storage_key TEXT NOT NULL,
+  preview_key TEXT NOT NULL, filename TEXT NOT NULL, content_type TEXT NOT NULL,
+  size_bytes BIGINT NOT NULL, created_at TEXT NOT NULL      -- one row per uploaded, unsaved photo
 ```
 
 **`procurement_purchases` stores no date, no shop, and no currency.** All three are read by
@@ -171,8 +177,8 @@ retyped from spending to a trade keeps its procurement links.
 
 ### Storage, commands, routes
 
-- `crates/storage-sqlite/migrations/2026-10-17-000001_procurement/{up.sql,down.sql}` — tables,
-  FKs, indexes on `procurement_purchases(item_id)` and `(activity_id)`, taxonomy seed.
+- `crates/storage-sqlite/migrations/2026-10-17-000001_procurement/{up.sql,down.sql}` — tables
+  (including `procurement_photo_drafts`), FKs, indexes on `procurement_purchases(item_id)` and `(activity_id)`, taxonomy seed.
   No `projection_state` trigger (procurement does not affect valuation) and no
   `sync_table_state` row.
 - `crates/storage-sqlite/src/schema.rs` — `diesel::table!` blocks plus
@@ -197,15 +203,37 @@ Reuses `crates/files` as-is — `StoredFileService::store_with_preview(request, 
 validates the filename, renders the WebP preview off-thread, writes both objects, then runs the
 `commit` closure (our DB update) and removes both objects if commit fails.
 
-**Simplification vs. transaction attachments:** one photo, no ordering, and **no draft-token
-staging**. The create dialog holds the `File` in component state and uploads after the item row
-exists (`create_procurement_item` → `upload_procurement_item_photo`). This drops the drafts
-table, `claim`, `discard`, and the 24h sweep entirely. Cost: if the upload fails the item is
-saved without its photo and the user retries from Edit — acceptable, and surfaced as a toast.
+**Upload on selection, staged as a draft.** One photo per item, no ordering. Selecting a photo in
+the dialog uploads it immediately via `upload_procurement_photo_draft`. That runs
+`store_with_preview` with a commit closure that inserts a row in `procurement_photo_drafts` and
+returns the draft id to the frontend. Nothing is linked to an item yet.
+
+- **Save** passes the `draft_id` to `create_procurement_item` or `update_procurement_item`. In one
+  transaction, the commit copies the draft's storage references onto the item's photo columns and
+  deletes the draft row. On edit, the item's previous photo blobs are removed after the commit.
+- **Re-selecting** a photo discards the previous draft (row and blobs) and uploads the new one.
+- **Cancel** calls `discard_procurement_photo_draft`, which removes the row and both blobs.
+- **Upload failure** shows an inline error and creates no draft. Saving without a photo is still
+  allowed.
+
+**Why drafts are needed.** Uploading on selection stores files before any item exists. Without a
+draft row, a cancelled dialog or an app closed mid-edit leaves blobs that nothing references. The
+commit-failure cleanup in `store_with_preview` does not cover this, because the commit already
+succeeded. The draft row is the record that lets cleanup find those blobs.
+
+**Cleanup.** A sweep at startup deletes drafts older than 24 hours along with their blobs. This
+mirrors `sweep_drafts` in `apps/tauri/src/context/providers.rs:467` and is not a background worker,
+queue, or retry loop. Required behavior: discard on cancel, claim on save, and the startup sweep
+for drafts left behind by a closed app. Not in this round: sweeping while the app is running.
+
+**Why a new table rather than `spending_attachment_drafts`.** That table is keyed by a per-dialog
+`token`, constrained to attachment content types, and guarded by a 10-attachment trigger. None of
+those fit a single procurement photo, so the drafts table here is separate, using the same
+idea.
 
 Blob root `procurement-photos`, registered next to the existing
-`transaction-attachments` root in `apps/tauri/src/context/providers.rs:454` and
-`apps/server/src/main_lib.rs:806`.
+`transaction-attachments` root in `apps/tauri/src/context/providers.rs:463` and
+`apps/server/src/main_lib.rs:815`.
 
 ---
 
@@ -250,7 +278,8 @@ Top-right **Add** button in the page header opens the create dialog.
 `Dialog` + react-hook-form + Zod with the schema built inside the component so `t()` messages
 localize, following `apps/frontend/src/pages/settings/general/exchange-rates/add-exchange-rate-form.tsx`.
 Fields: name, photo, brand, category, subcategory (options filtered by the selected category),
-rating. Aliases go in a collapsible **Advanced** section built on the `Collapsible` shell from
+rating. The photo field uploads on selection and holds the returned draft id in form state; see
+Photo above. Aliases go in a collapsible **Advanced** section built on the `Collapsible` shell from
 `apps/frontend/src/pages/activity/components/forms/fields/advanced-options-section.tsx`.
 
 **Star rating needs a small extension.** `packages/ui/src/components/ui/star-rating.tsx`
@@ -287,7 +316,8 @@ Add `QueryKeys.PROCUREMENT_ITEMS` / `PROCUREMENT_ITEM_PRICES` in `apps/frontend/
 1. Migration + `schema.rs` + taxonomy seed.
 2. `crates/procurement` models, traits, services, errors; SQLite repositories.
 3. Context wiring, Tauri commands, Axum routes.
-4. Rust tests (below), then photos behind the `photos` feature.
+4. Rust tests (below), then photo upload, draft, claim, discard, and startup sweep behind the
+   `photos` feature.
 5. Frontend adapters + parity test.
 6. Table page, nav, route, i18n.
 7. Create/edit dialog incl. the `StarRating` `step` prop; view dialog + chart.
@@ -306,6 +336,12 @@ Add `QueryKeys.PROCUREMENT_ITEMS` / `PROCUREMENT_ITEM_PRICES` in `apps/frontend/
 - a two-currency item folds min/avg/latest over **converted** values, and a row whose pair has
   no FX history is excluded rather than counted raw;
 - `UNIQUE (activity_id, item_id)` rejects a duplicate link.
+- photo draft: discard removes the draft row and both blobs;
+- saving with a `draft_id` moves the photo onto the item and removes the draft row;
+- saving an edit with a new draft removes the previous photo blobs;
+- re-selecting a photo leaves exactly one draft;
+- a failed commit leaves no draft row and no blobs;
+- the startup sweep removes drafts older than 24 hours and keeps newer ones.
 
 ```
 cargo test --locked -p wealthfolio-procurement
