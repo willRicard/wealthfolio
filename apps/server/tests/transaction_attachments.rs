@@ -192,13 +192,15 @@ async fn attachments_are_private_generated_previews_and_delete_with_transaction(
         original.headers()["content-security-policy"],
         "sandbox; default-src 'none'"
     );
-    assert_eq!(
-        to_bytes(original.into_body(), 32 * 1024 * 1024)
-            .await
-            .unwrap()
-            .as_ref(),
-        PNG
-    );
+    assert_eq!(original.headers()["content-type"], "image/webp");
+    assert_eq!(attachment["filename"], "receipt.webp");
+    assert_eq!(attachment["contentType"], "image/webp");
+    let saved = to_bytes(original.into_body(), 32 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(attachment["sizeBytes"], saved.len());
+    assert!(saved.starts_with(b"RIFF"));
+    assert_eq!(&saved[8..12], b"WEBP");
     let preview = request(&app, "GET", &format!("{path}/thumbnail"), vec![], "").await;
     assert_eq!(preview.headers()["content-type"], "image/webp");
     let bytes = to_bytes(preview.into_body(), 1024 * 1024).await.unwrap();
@@ -552,6 +554,8 @@ async fn attachment_drafts_stage_then_claim_without_refetching_bytes() {
     .await;
     let id = staged["id"].as_str().unwrap().to_owned();
     assert_eq!(staged["token"], token);
+    assert_eq!(staged["filename"], "receipt.webp");
+    assert_eq!(staged["contentType"], "image/webp");
     assert!(staged["activityId"].is_null());
 
     let listed =
@@ -603,6 +607,9 @@ async fn attachment_drafts_stage_then_claim_without_refetching_bytes() {
     assert_eq!(attachments.as_array().unwrap().len(), 1);
     assert_eq!(attachments[0]["id"], id);
     assert_eq!(attachments[0]["activityId"], "transaction-1");
+    assert_eq!(attachments[0]["filename"], staged["filename"]);
+    assert_eq!(attachments[0]["contentType"], staged["contentType"]);
+    assert_eq!(attachments[0]["sizeBytes"], staged["sizeBytes"]);
     assert_eq!(
         request(
             &app,

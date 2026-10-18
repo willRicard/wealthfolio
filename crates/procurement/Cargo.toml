@@ -19,6 +19,7 @@ wealthfolio-files = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile = "3"
 
 [features]
 photos = ["dep:wealthfolio-files", "wealthfolio-files/thumbnails", "tokio/sync"]
