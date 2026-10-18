@@ -4,6 +4,9 @@ use crate::error::Result;
 use crate::key::BlobKey;
 use async_trait::async_trait;
 
+pub const LOCAL_BACKEND_ID: &str = "local";
+pub const S3_BACKEND_ID: &str = "s3";
+
 #[async_trait]
 pub trait BlobStore: Send + Sync {
     fn backend_id(&self) -> &'static str;

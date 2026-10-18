@@ -12,7 +12,7 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 use uuid::Uuid;
 use wealthfolio_files::{
-    validate_filename, BlobKey, FileStoreError, LocalBlobStore, StoreRequest, StoredFile,
+    stored_filename, validate_filename, BlobKey, FileStoreError, StoreRequest, StoredFile,
     StoredFileRef, StoredFileService,
 };
 
@@ -85,9 +85,8 @@ fn file_ref(storage: &AttachmentStorage) -> Result<StoredFileRef> {
 
 impl TransactionAttachmentFiles {
     pub fn new(root: PathBuf, attachments: Arc<TransactionAttachmentsService>) -> Result<Self> {
-        let store = LocalBlobStore::new(root).map_err(domain)?;
         Ok(Self {
-            files: Arc::new(StoredFileService::new(Arc::new(store), 2)),
+            files: Arc::new(StoredFileService::from_env(root, 2).map_err(domain)?),
             attachments,
         })
     }
@@ -109,7 +108,7 @@ impl TransactionAttachmentFiles {
             return Err(invalid("Maximum 10 attachments per transaction"));
         }
         let (id, key, preview_key) = prepare(filename, &bytes)?;
-        let attachment = TransactionAttachment {
+        let mut attachment = TransactionAttachment {
             id: id.to_string(),
             activity_id: activity_id.into(),
             filename: filename.into(),
@@ -117,8 +116,9 @@ impl TransactionAttachmentFiles {
             size_bytes: bytes.len() as i64,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        let row = attachment.clone();
-        self.files
+        let mut row = attachment.clone();
+        let stored = self
+            .files
             .store_with_preview(
                 StoreRequest {
                     key,
@@ -129,6 +129,9 @@ impl TransactionAttachmentFiles {
                 },
                 slot,
                 move |stored| async move {
+                    row.filename = stored_filename(&row.filename, &stored.content_type);
+                    row.content_type = stored.content_type.clone();
+                    row.size_bytes = stored.size_bytes;
                     self.attachments
                         .add_attachment(StoredAttachment {
                             attachment: row,
@@ -140,6 +143,9 @@ impl TransactionAttachmentFiles {
             )
             .await
             .map_err(|DomainError(error)| error)?;
+        attachment.filename = stored_filename(filename, &stored.content_type);
+        attachment.content_type = stored.content_type;
+        attachment.size_bytes = stored.size_bytes;
         Ok(attachment)
     }
 
@@ -152,7 +158,7 @@ impl TransactionAttachmentFiles {
         slot: OwnedSemaphorePermit,
     ) -> Result<AttachmentDraft> {
         let (id, key, preview_key) = prepare(filename, &bytes)?;
-        let draft = AttachmentDraft {
+        let mut draft = AttachmentDraft {
             id: id.to_string(),
             token: token.into(),
             filename: filename.into(),
@@ -160,8 +166,9 @@ impl TransactionAttachmentFiles {
             size_bytes: bytes.len() as i64,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        let row = draft.clone();
-        self.files
+        let mut row = draft.clone();
+        let stored = self
+            .files
             .store_with_preview(
                 StoreRequest {
                     key,
@@ -172,6 +179,9 @@ impl TransactionAttachmentFiles {
                 },
                 slot,
                 move |stored| async move {
+                    row.filename = stored_filename(&row.filename, &stored.content_type);
+                    row.content_type = stored.content_type.clone();
+                    row.size_bytes = stored.size_bytes;
                     self.attachments
                         .add_draft(StoredDraft {
                             draft: row,
@@ -183,6 +193,9 @@ impl TransactionAttachmentFiles {
             )
             .await
             .map_err(|DomainError(error)| error)?;
+        draft.filename = stored_filename(filename, &stored.content_type);
+        draft.content_type = stored.content_type;
+        draft.size_bytes = stored.size_bytes;
         Ok(draft)
     }
 

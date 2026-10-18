@@ -6,7 +6,7 @@
 
 use crate::error::{invalid, FileStoreError, Result};
 use crate::key::BlobKey;
-use crate::store::BlobStore;
+use crate::store::{BlobStore, LOCAL_BACKEND_ID};
 use async_trait::async_trait;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -35,7 +35,12 @@ fn private_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         options.mode(0o600);
     }
     let mut file = options.open(path)?;
-    file.write_all(bytes)
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        std::fs::remove_file(path).ok();
+        return Err(error);
+    }
+    Ok(())
 }
 
 impl LocalBlobStore {
@@ -59,7 +64,7 @@ impl LocalBlobStore {
 #[async_trait]
 impl BlobStore for LocalBlobStore {
     fn backend_id(&self) -> &'static str {
-        "local"
+        LOCAL_BACKEND_ID
     }
 
     async fn put(&self, key: &BlobKey, bytes: Vec<u8>, _content_type: &str) -> Result<()> {
