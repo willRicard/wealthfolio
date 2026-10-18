@@ -236,10 +236,6 @@ export function CashActivityForm({
     enabled: open && !!activity?.id,
   });
   const savedPurchaseData = savedPurchases.data;
-  useEffect(() => {
-    if (!open || purchasesDirty.current) return;
-    setPurchases(savedPurchaseData ? purchaseRowsFrom(savedPurchaseData) : []);
-  }, [open, savedPurchaseData]);
   const closeForm = useCallback(
     (next: boolean) => {
       if (!next && !claimed.current && target.kind === "draft")
@@ -335,8 +331,6 @@ export function CashActivityForm({
       });
       savedDraft.current = undefined;
       claimed.current = false;
-      purchasesDirty.current = false;
-      setPurchases([]);
       setDraftToken(newAttachmentDraftToken());
       uploads.reset();
       attachmentOrder.reset();
@@ -344,6 +338,16 @@ export function CashActivityForm({
       setCurrentStep(activity?.id ? 2 : 1);
     }
   }, [open, activity, spendingAccounts, form]);
+
+  useEffect(() => {
+    purchasesDirty.current = false;
+    setPurchases([]);
+  }, [open, activity?.id]);
+
+  useEffect(() => {
+    if (!open || purchasesDirty.current) return;
+    setPurchases(savedPurchaseData ? purchaseRowsFrom(savedPurchaseData) : []);
+  }, [open, activity?.id, savedPurchaseData]);
 
   const watchType = form.watch("activityType");
   const watchAccountId = form.watch("accountId");
@@ -589,6 +593,7 @@ export function CashActivityForm({
           <form
             onSubmit={form.handleSubmit((v) => {
               if (hasIncompletePurchaseRow(purchases)) return;
+              if (purchasesDirty.current && activity?.id && !savedPurchases.isSuccess) return;
               saveMutation.mutate(v);
             })}
             className={cn(
@@ -982,6 +987,18 @@ export function CashActivityForm({
                       disabled={saveMutation.isPending || !attachments.isSuccess}
                     />
 
+                    {savedPurchases.isError && (
+                      <div role="alert" className="text-destructive text-sm">
+                        <p>{t("procurement:loadFailed")}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void savedPurchases.refetch()}
+                        >
+                          {t("common:retry")}
+                        </Button>
+                      </div>
+                    )}
                     <ActivityPurchases
                       rows={purchases}
                       onChange={(next) => {
@@ -990,7 +1007,9 @@ export function CashActivityForm({
                       }}
                       currency={form.watch("currency")?.trim() || selectedAccount?.currency}
                       categoryId={form.watch("category")?.split(":")[1] || undefined}
-                      disabled={saveMutation.isPending}
+                      disabled={
+                        saveMutation.isPending || (!!activity?.id && !savedPurchases.isSuccess)
+                      }
                       showErrors={form.formState.isSubmitted}
                     />
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@/test/render";
+import { act, fireEvent, render, screen, waitFor } from "@/test/render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -7,12 +7,15 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   claimTransactionAttachmentDrafts,
   createActivity,
+  getProcurementActivityPurchases,
+  setProcurementActivityPurchases,
   discardTransactionAttachmentDrafts,
   listTransactionAttachments,
   reorderTransactionAttachments,
   updateActivity,
   uploadTransactionAttachment,
 } from "@/adapters";
+import { QueryKeys } from "@/lib/query-keys";
 import type { Activity } from "@/lib/types";
 import { CashActivityForm } from "./cash-activity-form";
 
@@ -29,6 +32,14 @@ beforeAll(() => {
 
 vi.mock("@/adapters", () => ({
   createActivity: vi.fn(),
+  getProcurementItems: vi.fn(() =>
+    Promise.resolve([
+      { id: "item-1", name: "Coffee", aliases: [], categoryId: "cat_groceries" },
+      { id: "item-2", name: "Tea", aliases: [], categoryId: "cat_groceries" },
+    ]),
+  ),
+  getProcurementActivityPurchases: vi.fn(() => Promise.resolve([])),
+  setProcurementActivityPurchases: vi.fn(() => Promise.resolve([])),
   listTransactionAttachments: vi.fn(() => Promise.resolve([])),
   newAttachmentDraftToken: () => "draft-token",
   claimTransactionAttachmentDrafts: vi.fn(() => Promise.resolve(1)),
@@ -404,4 +415,159 @@ it("retries a failed claim against the saved draft without creating another tran
   expect(updateActivity).toHaveBeenCalledWith(expect.objectContaining({ id: "saved-draft" }));
   expect(claimTransactionAttachmentDrafts).toHaveBeenCalledTimes(2);
   expect(uploadTransactionAttachment).toHaveBeenCalledTimes(1);
+});
+
+describe("CashActivityForm purchases", () => {
+  const stored = {
+    itemId: "item-1",
+    activityId: "act-1",
+    quantity: "2",
+    unitPrice: "3.50",
+    createdAt: "2026-10-01",
+    updatedAt: "2026-10-01",
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    platformMock.isMobileViewport = false;
+    vi.mocked(getProcurementActivityPurchases).mockResolvedValue([stored]);
+    vi.mocked(setProcurementActivityPurchases).mockResolvedValue([]);
+  });
+
+  function cachedForm() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData([QueryKeys.PROCUREMENT_ACTIVITY_PURCHASES, foreignCharge.id], [stored]);
+    const onOpenChange = vi.fn();
+    const view = (open: boolean) => (
+      <QueryClientProvider client={client}>
+        <CashActivityForm open={open} onOpenChange={onOpenChange} activity={foreignCharge} />
+      </QueryClientProvider>
+    );
+    return { client, onOpenChange, view, ...render(view(true)) };
+  }
+
+  it("hydrates fresh cached rows on mount and reopening, without writing untouched rows", async () => {
+    const user = userEvent.setup();
+    const { rerender, view } = cachedForm();
+    const quantity = await screen.findByLabelText("Qty 1");
+    expect(quantity).toHaveValue("2");
+    await user.clear(quantity);
+    await user.type(quantity, "4");
+    rerender(view(false));
+    rerender(view(true));
+    expect(await screen.findByLabelText("Qty 1")).toHaveValue("2");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled());
+    expect(setProcurementActivityPurchases).not.toHaveBeenCalled();
+  });
+
+  it("disables purchase changes until existing purchases load", async () => {
+    let resolve!: (value: (typeof stored)[]) => void;
+    vi.mocked(getProcurementActivityPurchases).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
+    expect(screen.getByRole("button", { name: "Add item" })).toBeDisabled();
+    act(() => resolve([stored]));
+    expect(await screen.findByLabelText("Qty 1")).toHaveValue("2");
+    expect(screen.getByRole("button", { name: "Add item" })).toBeEnabled();
+  });
+
+  it("shows load failure and allows unrelated activity edits without replacing purchases", async () => {
+    vi.mocked(getProcurementActivityPurchases).mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
+    await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
+    expect(screen.getByRole("button", { name: "Add item" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled());
+    expect(setProcurementActivityPurchases).not.toHaveBeenCalled();
+  });
+
+  it("loads purchases after retrying a failed read", async () => {
+    vi.mocked(getProcurementActivityPurchases).mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByLabelText("Qty 1")).toHaveValue("2");
+    expect(screen.getByRole("button", { name: "Add item" })).toBeEnabled();
+  });
+
+  it("preserves edited rows when query data refreshes and saves the full list", async () => {
+    const user = userEvent.setup();
+    const { client } = cachedForm();
+    const quantity = await screen.findByLabelText("Qty 1");
+    await user.clear(quantity);
+    await user.type(quantity, "4");
+    act(() => {
+      client.setQueryData(
+        [QueryKeys.PROCUREMENT_ACTIVITY_PURCHASES, foreignCharge.id],
+        [{ ...stored, quantity: "9" }],
+      );
+    });
+    expect(quantity).toHaveValue("4");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() =>
+      expect(setProcurementActivityPurchases).toHaveBeenCalledWith("act-1", [
+        { activityId: "act-1", itemId: "item-1", quantity: "4", unitPrice: "3.5" },
+      ]),
+    );
+  });
+
+  it("blocks a dirty replacement after a refresh fails, then preserves edits through retry", async () => {
+    const user = userEvent.setup();
+    const { client } = cachedForm();
+    const quantity = await screen.findByLabelText("Qty 1");
+    await user.clear(quantity);
+    await user.type(quantity, "4");
+    vi.mocked(getProcurementActivityPurchases).mockRejectedValueOnce(new Error("offline"));
+    await act(() =>
+      client.invalidateQueries({
+        queryKey: [QueryKeys.PROCUREMENT_ACTIVITY_PURCHASES, foreignCharge.id],
+      }),
+    );
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    expect(updateActivity).not.toHaveBeenCalled();
+    expect(setProcurementActivityPurchases).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(quantity).toBeEnabled());
+    expect(quantity).toHaveValue("4");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() =>
+      expect(setProcurementActivityPurchases).toHaveBeenCalledWith("act-1", [
+        { activityId: "act-1", itemId: "item-1", quantity: "4", unitPrice: "3.5" },
+      ]),
+    );
+  });
+
+  it("clears all purchases after deleting the last row", async () => {
+    const user = userEvent.setup();
+    cachedForm();
+    await user.click(await screen.findByRole("button", { name: "Delete 1" }));
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(setProcurementActivityPurchases).toHaveBeenCalledWith("act-1", []));
+  });
+
+  it("blocks incomplete rows and retains edits after a failed replacement", async () => {
+    const user = userEvent.setup();
+    const { onOpenChange } = cachedForm();
+    const price = await screen.findByLabelText("Unit price 1");
+    await user.clear(price);
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    expect(updateActivity).not.toHaveBeenCalled();
+    await user.type(price, "5");
+    vi.mocked(setProcurementActivityPurchases).mockRejectedValueOnce(new Error("failed"));
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(setProcurementActivityPurchases).toHaveBeenCalledTimes(1));
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(price).toHaveValue("5");
+    await waitFor(() => expect(screen.getByRole("button", { name: /update/i })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(setProcurementActivityPurchases).toHaveBeenCalledTimes(2);
+  });
 });

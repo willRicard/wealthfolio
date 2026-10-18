@@ -656,8 +656,6 @@ describe("procurement transport", () => {
   it.each([
     ["create_procurement_item", "POST", "/procurement/items"],
     ["update_procurement_item", "PUT", `/procurement/items/${itemId}`],
-    ["create_procurement_purchase", "POST", "/procurement/purchases"],
-    ["update_procurement_purchase", "PUT", `/procurement/purchases/${activityId}/${itemId}`],
   ])("%s sends the unwrapped form", async (command, method, path) => {
     const mock = stubFetch(null);
     const input = {
@@ -672,12 +670,26 @@ describe("procurement transport", () => {
     expect(request).toMatchObject({ method, url: `/api/v1${path}` });
     expect(JSON.parse(request.body as string)).toEqual(input);
   });
-  it("deletes a purchase by its activity and item pair", async () => {
-    const mock = stubFetch(null);
-    await invoke("delete_procurement_purchase", { activityId, itemId });
+  it("loads purchases by activity and encodes the identifier", async () => {
+    const mock = stubFetch([]);
+    await invoke("get_procurement_activity_purchases", { activityId: "activity/one" });
     expect(lastCall(mock)).toMatchObject({
-      method: "DELETE",
-      url: `/api/v1/procurement/purchases/${activityId}/${itemId}`,
+      method: "GET",
+      url: "/api/v1/procurement/activities/activity%2Fone/purchases",
     });
+    expect(lastCall(mock).body).toBeUndefined();
+  });
+  it.each([
+    { purchases: [] },
+    { purchases: [{ activityId, itemId, quantity: "0.5", unitPrice: "123.456" }] },
+  ])("replaces purchases with an unwrapped array (%j)", async ({ purchases }) => {
+    const mock = stubFetch([]);
+    await invoke("set_procurement_activity_purchases", { activityId, purchases });
+    const request = lastCall(mock);
+    expect(request).toMatchObject({
+      method: "PUT",
+      url: `/api/v1/procurement/activities/${activityId}/purchases`,
+    });
+    expect(JSON.parse(request.body as string)).toEqual(purchases);
   });
 });

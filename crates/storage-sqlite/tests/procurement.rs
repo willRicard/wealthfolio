@@ -69,8 +69,11 @@ fn purchase(item_id: &str) -> SavePurchase {
 async fn procurement_cascades_and_activity_edits_are_live() {
     let f = fixture().await;
     let i = f.items.create(item()).await.unwrap();
-    f.purchases.create(purchase(&i.id)).await.unwrap();
-    assert!(f.purchases.create(purchase(&i.id)).await.is_err());
+    f.purchases
+        .set_for_activity("activity", vec![purchase(&i.id)])
+        .await
+        .unwrap();
+
     let mut conn = db::get_connection(&f.pool).unwrap();
     diesel::update(activities::table.find("activity"))
         .set((
@@ -92,7 +95,10 @@ async fn procurement_cascades_and_activity_edits_are_live() {
 async fn procurement_delete_item_preserves_activity_and_removes_aliases() {
     let f = fixture().await;
     let i = f.items.create(item()).await.unwrap();
-    f.purchases.create(purchase(&i.id)).await.unwrap();
+    f.purchases
+        .set_for_activity("activity", vec![purchase(&i.id)])
+        .await
+        .unwrap();
     f.items.delete(&i.id).await.unwrap();
     let mut conn = db::get_connection(&f.pool).unwrap();
     assert_eq!(
@@ -127,10 +133,18 @@ async fn procurement_category_hierarchy_and_decimal_validation() {
     let i = f.items.create(input).await.unwrap();
     let mut p = purchase(&i.id);
     p.quantity = Decimal::ZERO;
-    assert!(f.purchases.create(p).await.is_err());
+    assert!(f
+        .purchases
+        .set_for_activity("activity", vec![p])
+        .await
+        .is_err());
     let mut p = purchase(&i.id);
     p.unit_price = -Decimal::ONE;
-    assert!(f.purchases.create(p).await.is_err());
+    assert!(f
+        .purchases
+        .set_for_activity("activity", vec![p])
+        .await
+        .is_err());
     let mut conn = db::get_connection(&f.pool).unwrap();
     assert_eq!(
         taxonomy_categories::table
@@ -314,7 +328,10 @@ async fn procurement_writes_do_not_dirty_valuation_or_register_sync() {
         .load::<(String, Option<String>, i64)>(&mut conn)
         .unwrap();
     let saved = f.items.create(item()).await.unwrap();
-    f.purchases.create(purchase(&saved.id)).await.unwrap();
+    f.purchases
+        .set_for_activity("activity", vec![purchase(&saved.id)])
+        .await
+        .unwrap();
     f.items.delete(&saved.id).await.unwrap();
     let after = projection_state::table
         .select((
@@ -382,13 +399,19 @@ async fn procurement_activity_date_edit_changes_latest_price() {
     use wealthfolio_procurement::purchases::stats::fold_prices;
     let f = fixture().await;
     let saved = f.items.create(item()).await.unwrap();
-    f.purchases.create(purchase(&saved.id)).await.unwrap();
+    f.purchases
+        .set_for_activity("activity", vec![purchase(&saved.id)])
+        .await
+        .unwrap();
     let mut conn = db::get_connection(&f.pool).unwrap();
     diesel::sql_query("INSERT INTO activities(id,account_id,activity_type,activity_date,currency,created_at,updated_at) VALUES('later','account','WITHDRAWAL','2026-10-10T00:00:00Z','JPY','2026-10-10T00:00:00Z','2026-10-10T00:00:00Z')").execute(&mut conn).unwrap();
     let mut next = purchase(&saved.id);
     next.activity_id = "later".into();
     next.unit_price = Decimal::from(200);
-    f.purchases.create(next).await.unwrap();
+    f.purchases
+        .set_for_activity("later", vec![next])
+        .await
+        .unwrap();
     let (_, stats) = fold_prices(
         f.purchases.list(Some(&saved.id)).unwrap(),
         "JPY",
@@ -428,4 +451,112 @@ async fn procurement_memo_round_trips_and_clears() {
     input.memo = None;
     f.items.update(&saved.id, input).await.unwrap();
     assert_eq!(f.items.get(&saved.id).unwrap().unwrap().memo, None);
+}
+
+#[tokio::test]
+async fn procurement_replace_purchases_updates_removes_and_clears() {
+    let f = fixture().await;
+    let first = f.items.create(item()).await.unwrap();
+    let second = f.items.create(item()).await.unwrap();
+    let initial = f
+        .purchases
+        .set_for_activity("activity", vec![purchase(&first.id), purchase(&second.id)])
+        .await
+        .unwrap();
+    assert_eq!(f.purchases.list_for_activity("activity").unwrap().len(), 2);
+    let mut updated = purchase(&first.id);
+    updated.quantity = Decimal::from(3);
+    updated.unit_price = Decimal::ZERO;
+    let saved = f
+        .purchases
+        .set_for_activity("activity", vec![updated])
+        .await
+        .unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].created_at, initial[0].created_at);
+    assert_eq!(saved[0].input.quantity, Decimal::from(3));
+    assert_eq!(saved[0].input.unit_price, Decimal::ZERO);
+    assert!(f.purchases.list(Some(&second.id)).unwrap().is_empty());
+    f.purchases
+        .set_for_activity("activity", vec![])
+        .await
+        .unwrap();
+    assert!(f
+        .purchases
+        .list_for_activity("activity")
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn procurement_failed_replacement_rolls_back_deletions_and_updates() {
+    let f = fixture().await;
+    let first = f.items.create(item()).await.unwrap();
+    let second = f.items.create(item()).await.unwrap();
+    f.purchases
+        .set_for_activity("activity", vec![purchase(&first.id), purchase(&second.id)])
+        .await
+        .unwrap();
+    let mut updated = purchase(&first.id);
+    updated.quantity = Decimal::from(7);
+    assert!(f
+        .purchases
+        .set_for_activity("activity", vec![updated, purchase("missing-item")])
+        .await
+        .is_err());
+    let saved = f.purchases.list_for_activity("activity").unwrap();
+    assert_eq!(saved.len(), 2);
+    assert!(saved.iter().all(|row| row.input.quantity == Decimal::ONE));
+}
+
+#[tokio::test]
+async fn procurement_service_validates_replacement_before_writing() {
+    let f = fixture().await;
+    let fx = Arc::new(wealthfolio_core::fx::FxService::new(Arc::new(
+        wealthfolio_storage_sqlite::fx::FxRepository::new(f.pool.clone(), f.writer.clone()),
+    )));
+    let settings = Arc::new(wealthfolio_core::settings::SettingsService::new(
+        Arc::new(
+            wealthfolio_storage_sqlite::settings::SettingsRepository::new(
+                f.pool.clone(),
+                f.writer.clone(),
+            ),
+        ),
+        fx.clone(),
+    ));
+    let service = wealthfolio_procurement::purchases::PurchasesService::new(
+        Arc::new(PurchasesRepository::new(f.pool.clone(), f.writer.clone())),
+        f.items.clone(),
+        Arc::new(
+            wealthfolio_storage_sqlite::activities::ActivityRepository::new(
+                f.pool.clone(),
+                f.writer.clone(),
+            ),
+        ),
+        fx,
+        settings,
+    );
+    let saved = f.items.create(item()).await.unwrap();
+    f.purchases
+        .set_for_activity("activity", vec![purchase(&saved.id)])
+        .await
+        .unwrap();
+    let mut mismatch = purchase(&saved.id);
+    mismatch.activity_id = "other-activity".into();
+    let mut zero_quantity = purchase(&saved.id);
+    zero_quantity.quantity = Decimal::ZERO;
+    let mut negative_price = purchase(&saved.id);
+    negative_price.unit_price = -Decimal::ONE;
+    for invalid in [
+        vec![mismatch],
+        vec![purchase(&saved.id), purchase(&saved.id)],
+        vec![zero_quantity],
+        vec![negative_price],
+        vec![purchase("missing")],
+    ] {
+        assert!(service.set_for_activity("activity", invalid).await.is_err());
+        assert_eq!(service.list_for_activity("activity").unwrap().len(), 1);
+    }
+    service.set_for_activity("activity", vec![]).await.unwrap();
+    assert!(service.list_for_activity("activity").unwrap().is_empty());
 }

@@ -85,6 +85,8 @@ for (const compact of [false, true]) {
     dialog = page.getByRole("dialog");
     const photo = dialog.getByRole("img", { name, exact: true });
     await expect(photo).toBeVisible();
+    const thumbnailSrc = await photo.getAttribute("src");
+    expect(thumbnailSrc).toMatch(/^data:image\/webp;base64,/);
     await dialog.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
@@ -112,6 +114,27 @@ for (const compact of [false, true]) {
     }
     await dialog.screenshot({ path: testInfo.outputPath("procurement-view.png") });
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    let photoRequests = 0;
+    page.on("request", (request) => {
+      if (/\/procurement\/items\/[^/]+\/photo$/.test(new URL(request.url()).pathname))
+        photoRequests++;
+    });
+    await row.getByRole("button", { name: `Actions: ${name}`, exact: true }).click();
+    await page.getByRole(compact ? "button" : "menuitem", { name: "Edit", exact: true }).click();
+    dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("img", { name, exact: true })).toHaveAttribute(
+      "src",
+      thumbnailSrc!,
+    );
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await row.getByRole("button", { name, exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("img", { name, exact: true })).toHaveAttribute(
+      "src",
+      thumbnailSrc!,
+    );
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    expect(photoRequests).toBe(0);
     await row.getByRole("button", { name: `Actions: ${name}`, exact: true }).click();
     await page.getByRole(compact ? "button" : "menuitem", { name: "Clone", exact: true }).click();
     await expect(page.getByRole("button", { name, exact: true })).toHaveCount(2);
@@ -215,32 +238,36 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
   const activityResponse = await page.request.post(`${api}/activities`, { data: activityInput });
   expect(activityResponse.ok()).toBeTruthy();
   const activity = (await activityResponse.json()) as { id: string };
-  const purchaseResponse = await page.request.post(`${api}/procurement/purchases`, {
-    data: {
-      itemId: item.id,
-      activityId: activity.id,
-      quantity: "2",
-      unitPrice: "12.50",
-    },
+  const purchasePath = `${api}/procurement/activities/${encodeURIComponent(activity.id)}/purchases`;
+  const purchaseResponse = await page.request.put(purchasePath, {
+    data: [
+      {
+        itemId: item.id,
+        activityId: activity.id,
+        quantity: "2",
+        unitPrice: "12.50",
+      },
+    ],
   });
   expect(purchaseResponse.ok()).toBeTruthy();
-  expect(await purchaseResponse.json()).not.toHaveProperty("id");
-  const purchasePath = `${api}/procurement/purchases/${encodeURIComponent(activity.id)}/${encodeURIComponent(item.id)}`;
+  expect(await purchaseResponse.json()).toHaveLength(1);
   const purchaseInput = {
     activityId: activity.id,
     itemId: item.id,
     quantity: "3",
     unitPrice: "12.50",
   };
-  const purchaseUpdate = await page.request.put(purchasePath, { data: purchaseInput });
+  const purchaseUpdate = await page.request.put(purchasePath, { data: [purchaseInput] });
   expect(purchaseUpdate.ok()).toBeTruthy();
-  expect(await purchaseUpdate.json()).toMatchObject({
-    activityId: activity.id,
-    itemId: item.id,
-    quantity: "3",
-  });
+  expect(await purchaseUpdate.json()).toMatchObject([
+    {
+      activityId: activity.id,
+      itemId: item.id,
+      quantity: "3",
+    },
+  ]);
   const mismatchedPurchase = await page.request.put(purchasePath, {
-    data: { ...purchaseInput, itemId: "another-item" },
+    data: [{ ...purchaseInput, activityId: "another-activity" }],
   });
   expect(mismatchedPurchase.status()).toBe(400);
   await gotoAppPath(page, "/procurement");
@@ -265,12 +292,12 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
   const prices = (await pricesResponse.json()) as { prices: { date: string; shop: string }[] };
   expect(prices.prices[0].shop).toBe("Shop B");
   expect(prices.prices[0].date).toContain("2026-02-02");
-  const purchaseDelete = await page.request.delete(purchasePath);
+  const purchaseDelete = await page.request.put(purchasePath, { data: [] });
   expect(purchaseDelete.ok()).toBeTruthy();
-  const missingPurchase = await page.request.delete(purchasePath);
-  expect(missingPurchase.status()).toBe(404);
-  const restoredPurchase = await page.request.post(`${api}/procurement/purchases`, {
-    data: purchaseInput,
+  const missingPurchase = await page.request.put(purchasePath, { data: [] });
+  expect(missingPurchase.ok()).toBeTruthy();
+  const restoredPurchase = await page.request.put(purchasePath, {
+    data: [purchaseInput],
   });
   expect(restoredPurchase.ok()).toBeTruthy();
   const deleteResponse = await page.request.delete(`${api}/activities/${activity.id}`);
@@ -283,3 +310,110 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
   await row.getByRole("button", { name: "Price history item", exact: true }).click();
   await expect(page.getByRole("dialog").getByText("No purchases yet.")).toBeVisible();
 });
+
+for (const compact of [false, true]) {
+  test(`Activity purchases create, edit, reopen and clear (${compact ? "mobile" : "desktop"})`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await completeOnboardingIfNeeded(page);
+    if (compact) await page.setViewportSize({ width: 390, height: 844 });
+    const api = `${BASE_URL}/api/v1`;
+    const suffix = compact ? "mobile" : "desktop";
+    const name = `Activity purchase ${suffix}`;
+    const accountResponse = await page.request.post(`${api}/accounts`, {
+      data: {
+        name: `Purchases ${suffix}`,
+        accountType: "CASH",
+        currency: "USD",
+        isDefault: false,
+        isActive: true,
+      },
+    });
+    expect(accountResponse.ok()).toBeTruthy();
+    const { id: accountId } = await accountResponse.json();
+    const settingsResponse = await page.request.get(`${api}/spending/settings`);
+    expect(settingsResponse.ok()).toBeTruthy();
+    const settings = await settingsResponse.json();
+    expect(
+      (
+        await page.request.put(`${api}/spending/settings`, {
+          data: { enabled: true, accountIds: [...settings.accountIds, accountId] },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    const itemResponse = await page.request.post(`${api}/procurement/items`, {
+      data: {
+        name,
+        brand: null,
+        categoryId: "cat_groceries",
+        subcategoryId: null,
+        rating: null,
+        aliases: [`Alias ${suffix}`],
+      },
+    });
+    expect(itemResponse.ok()).toBeTruthy();
+    const { id: itemId } = await itemResponse.json();
+    await gotoAppPath(page, "/activities?tab=spending");
+    if (compact) {
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+    } else {
+      await page.getByTestId("add-activities-button").click();
+      await page.getByTestId("add-transaction-action").click();
+    }
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("combobox", { name: "Account", exact: true }).click();
+    await page.getByRole("option", { name: `Purchases ${suffix} (USD)`, exact: true }).click();
+    if (compact) await dialog.getByRole("button", { name: "Next", exact: true }).click();
+    await dialog.getByLabel("Amount", { exact: true }).fill("25");
+    await dialog.getByLabel("Notes / Payee", { exact: true }).fill(name);
+    await dialog.getByRole("button", { name: "Add item", exact: true }).click();
+    await dialog.getByRole("button", { name: "Pick an item", exact: true }).click();
+    await page.getByPlaceholder("Search items…").fill(`Alias ${suffix}`);
+    await page.getByRole("option", { name, exact: true }).click();
+    await dialog.getByLabel("Qty 1", { exact: true }).fill("2");
+    await dialog
+      .getByRole("button", { name: compact ? "Create Transaction" : "Create", exact: true })
+      .click();
+    await expect(dialog.getByRole("alert")).toContainText(
+      "Each item needs a quantity and a price.",
+    );
+    await dialog.getByLabel("Unit price 1", { exact: true }).fill("12.50");
+    await dialog
+      .getByRole("button", { name: compact ? "Create Transaction" : "Create", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    const openEdit = async (quantity = "2") => {
+      const row = compact
+        ? page.locator(".spending-activity-list .bg-card").filter({ hasText: name })
+        : page.getByRole("row").filter({ hasText: name });
+      await row.getByRole("button", { name: "Row actions", exact: true }).click();
+      await page.getByRole(compact ? "button" : "menuitem", { name: "Edit", exact: true }).click();
+      await expect(dialog.getByLabel("Qty 1", { exact: true })).toHaveValue(quantity);
+    };
+    await openEdit();
+    await dialog.getByRole("button", { name: compact ? "Close" : "Cancel", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await openEdit();
+    await dialog.getByLabel("Qty 1", { exact: true }).fill("3");
+    await dialog
+      .getByRole("button", { name: compact ? "Update Transaction" : "Update", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    const pricesResponse = await page.request.get(`${api}/procurement/items/${itemId}/prices`);
+    expect(pricesResponse.ok()).toBeTruthy();
+    const { prices } = await pricesResponse.json();
+    expect(prices).toHaveLength(1);
+    expect(prices[0]).toMatchObject({ itemId, quantity: "3", unitPrice: "12.5" });
+    const purchasePath = `${api}/procurement/activities/${prices[0].activityId}/purchases`;
+    await openEdit("3");
+    await dialog.getByRole("button", { name: "Delete 1", exact: true }).click();
+    await dialog
+      .getByRole("button", { name: compact ? "Update Transaction" : "Update", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    const cleared = await page.request.get(purchasePath);
+    expect(cleared.ok()).toBeTruthy();
+    expect(await cleared.json()).toEqual([]);
+  });
+}

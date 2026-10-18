@@ -16,6 +16,7 @@ import enPerformance from "@/i18n/locales/en/performance.json";
 import enSettings from "@/i18n/locales/en/settings.json";
 import enInsights from "@/i18n/locales/en/insights.json";
 import enAsset from "@/i18n/locales/en/asset.json";
+import enProcurement from "@/i18n/locales/en/procurement.json";
 import enSpending from "@/i18n/locales/en/spending.json";
 import enUi from "@/i18n/locales/en/ui.json";
 import enAi from "@/i18n/locales/en/ai.json";
@@ -46,6 +47,7 @@ if (!i18n.isInitialized) {
       "insights",
       "asset",
       "spending",
+      "procurement",
       "ui",
       "ai",
       "allocation",
@@ -70,6 +72,7 @@ if (!i18n.isInitialized) {
         insights: enInsights,
         asset: enAsset,
         spending: enSpending,
+        procurement: enProcurement,
         ui: enUi,
         ai: enAi,
         allocation: enAllocation,
