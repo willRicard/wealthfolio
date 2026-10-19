@@ -44,12 +44,15 @@
   "purchases": "구매 항목",
   "item": "항목",
   "quantity": "수량",
-  "unitPrice": "단가",
+  "subtotal": "소계",
   "addPurchase": "항목 추가",
   "pickItem": "항목 선택",
   "searchItems": "항목 검색…",
   "noItems": "항목을 찾을 수 없습니다.",
   "moveUp": "위로 이동",
   "moveDown": "아래로 이동",
-  "purchaseIncomplete": "각 항목에 수량과 가격을 입력하세요."
+  "purchaseIncomplete": "각 항목에 수량과 소계를 입력하세요.",
+  "unit": "단위",
+  "invalidUnit": "목록에서 단위를 선택하세요.",
+  "unitSheetTitle": "단위 선택"
 }

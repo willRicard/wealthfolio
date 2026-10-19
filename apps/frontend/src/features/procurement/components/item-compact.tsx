@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { AmountDisplay, Icons, useDateFormatting } from "@wealthfolio/ui";
+import { Icons, useDateFormatting } from "@wealthfolio/ui";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { ProcurementItemWithStats } from "../types";
+import { UnitPrice } from "./unit-price";
 
 interface ItemCompactProps {
   item: ProcurementItemWithStats;
@@ -23,15 +24,12 @@ export function ItemCompact({ item, category, actions, onView }: ItemCompactProp
           {item.name}
         </button>
         <span className="shrink-0 font-medium">
-          {item.latestPrice === null ? (
-            "—"
-          ) : (
-            <AmountDisplay
-              value={Number(item.latestPrice)}
-              currency={item.baseCurrency}
-              isHidden={isBalanceHidden}
-            />
-          )}
+          <UnitPrice
+            value={item.latestPrice}
+            currency={item.baseCurrency}
+            unit={item.unit}
+            isHidden={isBalanceHidden}
+          />
         </span>
         {actions}
       </div>

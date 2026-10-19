@@ -1,13 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
-import {
-  Button,
-  AmountDisplay,
-  StarRatingDisplay,
-  useDateFormatting,
-  useAmountFormatting,
-} from "@wealthfolio/ui";
+import { Button, StarRatingDisplay, useDateFormatting, useAmountFormatting } from "@wealthfolio/ui";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +16,7 @@ import { QueryKeys } from "@/lib/query-keys";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { ItemPhoto } from "./item-photo";
+import { UnitPrice } from "./unit-price";
 import type { ProcurementItemWithStats } from "../types";
 
 export function ItemView({
@@ -81,15 +76,12 @@ export function ItemView({
             <div key={key} className="rounded-md border p-3">
               <dt className="text-muted-foreground text-xs">{t(key)}</dt>
               <dd className="mt-1 font-medium">
-                {stats[key] === null ? (
-                  "—"
-                ) : (
-                  <AmountDisplay
-                    value={Number(stats[key])}
-                    currency={stats.baseCurrency}
-                    isHidden={isBalanceHidden}
-                  />
-                )}
+                <UnitPrice
+                  value={stats[key]}
+                  currency={stats.baseCurrency}
+                  unit={item.unit}
+                  isHidden={isBalanceHidden}
+                />
               </dd>
             </div>
           ))}
@@ -131,13 +123,18 @@ export function ItemView({
                       <p>{formatDate(point.date)}</p>
                       <p>{point.shop}</p>
                       <p>
-                        <AmountDisplay value={Number(point.unitPrice)} currency={point.currency} />
+                        <UnitPrice
+                          value={point.unitPrice}
+                          currency={point.currency}
+                          unit={item.unit}
+                        />
                       </p>
                       {point.unitPriceBase !== null && point.currency !== point.baseCurrency && (
                         <p className="text-muted-foreground">
-                          <AmountDisplay
-                            value={Number(point.unitPriceBase)}
+                          <UnitPrice
+                            value={point.unitPriceBase}
                             currency={point.baseCurrency}
+                            unit={item.unit}
                           />
                         </p>
                       )}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@/test/render";
 import { afterEach, expect, it, vi } from "vitest";
 import { ItemForm } from "./item-form";
+import type { ProcurementItem } from "../types";
 
 const mocks = vi.hoisted(() => ({ upload: vi.fn(), discard: vi.fn() }));
 vi.mock("@/adapters", () => ({
@@ -70,6 +71,35 @@ it("discards a replacement photo that finishes while Cancel is discarding the ol
   });
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(mocks.discard).toHaveBeenCalledWith("new-draft");
+});
+
+it("defaults a new item to 個 and keeps a saved unit when editing", () => {
+  const { unmount } = render(<ItemForm onClose={vi.fn()} onSaved={vi.fn()} />);
+  expect(screen.getByRole("combobox", { name: "unit" })).toHaveTextContent("個");
+  unmount();
+  render(
+    <ItemForm
+      item={
+        {
+          id: "coffee",
+          name: "Coffee",
+          brand: null,
+          memo: null,
+          categoryId: "cat_groceries",
+          subcategoryId: null,
+          rating: null,
+          unit: "kg",
+          aliases: [],
+          photo: null,
+          createdAt: "2026-10-01",
+          updatedAt: "2026-10-01",
+        } as ProcurementItem
+      }
+      onClose={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("combobox", { name: "unit" })).toHaveTextContent("kg");
 });
 
 it("uploads a dropped photo immediately and shows a spinner until the upload finishes", async () => {

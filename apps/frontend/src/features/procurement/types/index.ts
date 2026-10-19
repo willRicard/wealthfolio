@@ -14,6 +14,7 @@ export interface ProcurementItem {
   categoryId: string;
   subcategoryId: string | null;
   rating: number | null;
+  unit: string;
   aliases: string[];
   photo: ItemPhoto | null;
   createdAt: string;
@@ -26,6 +27,7 @@ export interface SaveProcurementItem {
   categoryId: string;
   subcategoryId: string | null;
   rating: number | null;
+  unit: string;
   aliases: string[];
   draftId?: string | null;
 }
@@ -57,8 +59,9 @@ export interface ProcurementItemPrices {
 export interface SaveProcurementPurchase {
   itemId: string;
   activityId: string;
+  /** Expressed in the item's unit. */
   quantity: string;
-  unitPrice: string;
+  subtotal: string;
 }
 export interface ProcurementPurchase extends SaveProcurementPurchase {
   createdAt: string;

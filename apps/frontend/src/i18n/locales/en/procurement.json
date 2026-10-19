@@ -45,12 +45,15 @@
   "purchases": "Items purchased",
   "item": "Item",
   "quantity": "Qty",
-  "unitPrice": "Unit price",
+  "subtotal": "Subtotal",
   "addPurchase": "Add item",
   "pickItem": "Pick an item",
   "searchItems": "Search items…",
   "noItems": "No items found.",
   "moveUp": "Move up",
   "moveDown": "Move down",
-  "purchaseIncomplete": "Each item needs a quantity and a price."
+  "purchaseIncomplete": "Each item needs a quantity and a subtotal.",
+  "unit": "Unit",
+  "invalidUnit": "Choose a unit from the list.",
+  "unitSheetTitle": "Select a unit"
 }

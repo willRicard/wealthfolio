@@ -28,7 +28,7 @@ export interface ActivityPurchaseRow {
   key: string;
   itemId: string;
   quantity?: number;
-  unitPrice?: number;
+  subtotal?: number;
 }
 
 let rowSequence = 0;
@@ -41,14 +41,14 @@ export const purchaseRowsFrom = (purchases: ProcurementPurchase[]): ActivityPurc
     key: nextKey(),
     itemId: purchase.itemId,
     quantity: Number(purchase.quantity),
-    unitPrice: Number(purchase.unitPrice),
+    subtotal: Number(purchase.subtotal),
   }));
 
 export const hasIncompletePurchaseRow = (rows: ActivityPurchaseRow[]): boolean =>
   rows.some(
     (row) =>
       !!row.itemId &&
-      (row.quantity === undefined || row.quantity <= 0 || row.unitPrice === undefined),
+      (row.quantity === undefined || row.quantity <= 0 || row.subtotal === undefined),
   );
 
 export const purchaseRowsToSave = (
@@ -61,7 +61,7 @@ export const purchaseRowsToSave = (
       itemId: row.itemId,
       activityId,
       quantity: String(row.quantity ?? 0),
-      unitPrice: String(row.unitPrice ?? 0),
+      subtotal: String(row.subtotal ?? 0),
     }));
 
 interface ActivityPurchasesProps {
@@ -114,7 +114,8 @@ export function ActivityPurchases({
           <tr className="text-left text-xs">
             <th className="font-normal">{t("item")}</th>
             <th className="w-16 px-1 text-right font-normal">{t("quantity")}</th>
-            <th className="w-24 px-1 text-right font-normal">{t("unitPrice")}</th>
+            <th className="w-6 px-1" />
+            <th className="w-20 px-1 text-right font-normal">{t("subtotal")}</th>
             <th className="w-[4.5rem]" />
           </tr>
         </thead>
@@ -143,16 +144,19 @@ export function ActivityPurchases({
                   onValueChange={(quantity) => update(index, { quantity })}
                 />
               </td>
+              <td className="text-muted-foreground px-1 py-1 text-xs">
+                {itemsById.get(row.itemId)?.unit ?? ""}
+              </td>
               <td className="px-1 py-1">
                 <MoneyInput
-                  aria-label={`${t("unitPrice")} ${index + 1}`}
+                  aria-label={`${t("subtotal")} ${index + 1}`}
                   className="h-8 px-2"
-                  value={row.unitPrice ?? ""}
+                  value={row.subtotal ?? ""}
                   disabled={disabled}
                   aria-invalid={
-                    (!!showErrors && !!row.itemId && row.unitPrice === undefined) || undefined
+                    (!!showErrors && !!row.itemId && row.subtotal === undefined) || undefined
                   }
-                  onValueChange={(unitPrice) => update(index, { unitPrice })}
+                  onValueChange={(subtotal) => update(index, { subtotal })}
                 />
               </td>
               <td>
@@ -183,7 +187,7 @@ export function ActivityPurchases({
             </tr>
           ))}
           <tr>
-            <td colSpan={4} className="pt-2">
+            <td colSpan={5} className="pt-2">
               <Button
                 type="button"
                 variant="ghost"
@@ -254,13 +258,12 @@ function ItemPicker({
   const [search, setSearch] = useState("");
   const taken = useMemo(() => new Set(takenIds.filter(Boolean)), [takenIds]);
   const options = useMemo(() => {
-    const available = items.filter((item) => !taken.has(item.id) || item.id === selected?.id);
-    if (search.trim() || !categoryId) return available;
-    const inCategory = available.filter(
+    if (search.trim() || !categoryId) return items;
+    const inCategory = items.filter(
       (item) => item.categoryId === categoryId || item.subcategoryId === categoryId,
     );
-    return inCategory.length ? inCategory : available;
-  }, [items, taken, selected?.id, search, categoryId]);
+    return inCategory.length ? inCategory : items;
+  }, [items, search, categoryId]);
 
   return (
     <Popover
@@ -293,6 +296,7 @@ function ItemPicker({
                 <CommandItem
                   key={item.id}
                   value={`${item.name} ${item.aliases.join(" ")} ${item.id}`}
+                  disabled={taken.has(item.id) && item.id !== selected?.id}
                   onSelect={() => {
                     onSelect(item.id);
                     setOpen(false);

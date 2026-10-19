@@ -97,13 +97,41 @@ impl PurchasesService {
 }
 
 pub fn validate_amounts(input: &SavePurchase) -> Result<()> {
-    if input.quantity <= rust_decimal::Decimal::ZERO
-        || input.unit_price < rust_decimal::Decimal::ZERO
+    if input.quantity <= rust_decimal::Decimal::ZERO || input.subtotal < rust_decimal::Decimal::ZERO
     {
         return Err(ProcurementError::InvalidInput(
-            "Quantity must be positive and unit price nonnegative".into(),
+            "Quantity must be positive and subtotal nonnegative".into(),
         )
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    fn amounts(quantity: Decimal, subtotal: Decimal) -> SavePurchase {
+        SavePurchase {
+            item_id: "item".into(),
+            activity_id: "activity".into(),
+            quantity,
+            subtotal,
+        }
+    }
+
+    #[test]
+    fn accepts_fractional_quantities_and_free_lines() {
+        assert!(validate_amounts(&amounts(Decimal::new(5, 1), Decimal::from(200))).is_ok());
+        assert!(validate_amounts(&amounts(Decimal::ONE, Decimal::ZERO)).is_ok());
+    }
+
+    #[test]
+    fn rejects_nonpositive_quantity_and_negative_subtotal() {
+        for quantity in [Decimal::ZERO, -Decimal::ONE] {
+            assert!(validate_amounts(&amounts(quantity, Decimal::from(200))).is_err());
+        }
+        assert!(validate_amounts(&amounts(Decimal::ONE, -Decimal::ONE)).is_err());
+    }
 }

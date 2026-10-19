@@ -44,12 +44,15 @@
   "purchases": "購買的商品",
   "item": "商品",
   "quantity": "數量",
-  "unitPrice": "單價",
+  "subtotal": "小計",
   "addPurchase": "新增商品",
   "pickItem": "選擇商品",
   "searchItems": "搜尋商品…",
   "noItems": "找不到商品。",
   "moveUp": "上移",
   "moveDown": "下移",
-  "purchaseIncomplete": "每個商品都需要數量和價格。"
+  "purchaseIncomplete": "每個商品都需要數量和小計。",
+  "unit": "單位",
+  "invalidUnit": "請從清單中選擇單位。",
+  "unitSheetTitle": "選擇單位"
 }

@@ -422,7 +422,7 @@ describe("CashActivityForm purchases", () => {
     itemId: "item-1",
     activityId: "act-1",
     quantity: "2",
-    unitPrice: "3.50",
+    subtotal: "3.50",
     createdAt: "2026-10-01",
     updatedAt: "2026-10-01",
   };
@@ -512,7 +512,7 @@ describe("CashActivityForm purchases", () => {
     await user.click(screen.getByRole("button", { name: /update/i }));
     await waitFor(() =>
       expect(setProcurementActivityPurchases).toHaveBeenCalledWith("act-1", [
-        { activityId: "act-1", itemId: "item-1", quantity: "4", unitPrice: "3.5" },
+        { activityId: "act-1", itemId: "item-1", quantity: "4", subtotal: "3.5" },
       ]),
     );
   });
@@ -539,7 +539,7 @@ describe("CashActivityForm purchases", () => {
     await user.click(screen.getByRole("button", { name: /update/i }));
     await waitFor(() =>
       expect(setProcurementActivityPurchases).toHaveBeenCalledWith("act-1", [
-        { activityId: "act-1", itemId: "item-1", quantity: "4", unitPrice: "3.5" },
+        { activityId: "act-1", itemId: "item-1", quantity: "4", subtotal: "3.5" },
       ]),
     );
   });
@@ -555,7 +555,7 @@ describe("CashActivityForm purchases", () => {
   it("blocks incomplete rows and retains edits after a failed replacement", async () => {
     const user = userEvent.setup();
     const { onOpenChange } = cachedForm();
-    const price = await screen.findByLabelText("Unit price 1");
+    const price = await screen.findByLabelText("Subtotal 1");
     await user.clear(price);
     await user.click(screen.getByRole("button", { name: /update/i }));
     expect(updateActivity).not.toHaveBeenCalled();

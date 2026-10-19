@@ -45,12 +45,15 @@
   "purchases": "Gekaufte Artikel",
   "item": "Artikel",
   "quantity": "Menge",
-  "unitPrice": "Stückpreis",
+  "subtotal": "Zwischensumme",
   "addPurchase": "Artikel hinzufügen",
   "pickItem": "Artikel auswählen",
   "searchItems": "Artikel suchen…",
   "noItems": "Keine Artikel gefunden.",
   "moveUp": "Nach oben verschieben",
   "moveDown": "Nach unten verschieben",
-  "purchaseIncomplete": "Jeder Artikel braucht eine Menge und einen Preis."
+  "purchaseIncomplete": "Jeder Artikel braucht eine Menge und eine Zwischensumme.",
+  "unit": "Einheit",
+  "invalidUnit": "Eine Einheit aus der Liste wählen.",
+  "unitSheetTitle": "Einheit wählen"
 }

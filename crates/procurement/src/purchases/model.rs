@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 pub struct SavePurchase {
     pub item_id: String,
     pub activity_id: String,
+    /// Expressed in the item's unit.
     #[serde(with = "rust_decimal::serde::str")]
     pub quantity: Decimal,
     #[serde(with = "rust_decimal::serde::str")]
-    pub unit_price: Decimal,
+    pub subtotal: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -44,12 +44,15 @@
   "purchases": "購入した商品",
   "item": "商品",
   "quantity": "数量",
-  "unitPrice": "単価",
+  "subtotal": "小計",
   "addPurchase": "商品を追加",
   "pickItem": "商品を選択",
   "searchItems": "商品を検索…",
   "noItems": "商品が見つかりません。",
   "moveUp": "上へ移動",
   "moveDown": "下へ移動",
-  "purchaseIncomplete": "各商品に数量と価格を入力してください。"
+  "purchaseIncomplete": "各商品に数量と小計を入力してください。",
+  "unit": "単位",
+  "invalidUnit": "一覧から単位を選んでください。",
+  "unitSheetTitle": "単位を選択"
 }

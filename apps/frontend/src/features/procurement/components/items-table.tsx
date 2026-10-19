@@ -11,14 +11,7 @@ import {
   getFacetedUniqueValues,
   useReactTable,
 } from "@tanstack/react-table";
-import {
-  Checkbox,
-  Button,
-  Icons,
-  AmountDisplay,
-  StarRatingDisplay,
-  useDateFormatting,
-} from "@wealthfolio/ui";
+import { Checkbox, Button, Icons, StarRatingDisplay, useDateFormatting } from "@wealthfolio/ui";
 import {
   Table,
   TableBody,
@@ -42,6 +35,7 @@ import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { ItemCompact } from "./item-compact";
 import { ItemActions } from "./item-actions";
+import { UnitPrice } from "./unit-price";
 import type { ProcurementItemWithStats } from "../types";
 
 const PAGE_SIZE = 50;
@@ -76,16 +70,14 @@ export function ItemsTable(props: ItemsTableProps) {
   const categories = taxonomy?.categories;
   const categoryById = useMemo(() => new Map(categories?.map((c) => [c.id, c])), [categories]);
   const categoryName = (id: string | null) => (id ? (categoryById.get(id)?.name ?? id) : "—");
-  const price = (value: string | null, item: ProcurementItemWithStats) =>
-    value === null ? (
-      "—"
-    ) : (
-      <AmountDisplay
-        value={Number(value)}
-        currency={item.baseCurrency}
-        isHidden={isBalanceHidden}
-      />
-    );
+  const price = (value: string | null, item: ProcurementItemWithStats) => (
+    <UnitPrice
+      value={value}
+      currency={item.baseCurrency}
+      unit={item.unit}
+      isHidden={isBalanceHidden}
+    />
+  );
   const date = (value: string | null) => (value ? formatDate(value) : "—");
   const category = (item: ProcurementItemWithStats) => {
     const entry = categoryById.get(item.subcategoryId ?? item.categoryId);

@@ -53,6 +53,7 @@ fn item() -> SaveItem {
         category_id: "cat_groceries".into(),
         subcategory_id: None,
         rating: Some(3.0),
+        unit: "個".into(),
         aliases: vec!["Alias".into()],
         draft_id: None,
     }
@@ -62,7 +63,7 @@ fn purchase(item_id: &str) -> SavePurchase {
         item_id: item_id.into(),
         activity_id: "activity".into(),
         quantity: Decimal::ONE,
-        unit_price: Decimal::from(100),
+        subtotal: Decimal::from(100),
     }
 }
 #[tokio::test]
@@ -139,7 +140,7 @@ async fn procurement_category_hierarchy_and_decimal_validation() {
         .await
         .is_err());
     let mut p = purchase(&i.id);
-    p.unit_price = -Decimal::ONE;
+    p.subtotal = -Decimal::ONE;
     assert!(f
         .purchases
         .set_for_activity("activity", vec![p])
@@ -395,6 +396,41 @@ async fn procurement_migration_rolls_back_with_foreign_keys_disabled() {
 }
 
 #[tokio::test]
+async fn procurement_derives_unit_price_from_stored_subtotal() {
+    let f = fixture().await;
+    let saved = f.items.create(item()).await.unwrap();
+    let mut half_a_kilo = purchase(&saved.id);
+    half_a_kilo.quantity = Decimal::new(5, 1);
+    half_a_kilo.subtotal = Decimal::from(200);
+    f.purchases
+        .set_for_activity("activity", vec![half_a_kilo])
+        .await
+        .unwrap();
+
+    let prices = f.purchases.list(Some(&saved.id)).unwrap();
+    assert_eq!(prices[0].quantity, Decimal::new(5, 1));
+    assert_eq!(prices[0].unit_price, Decimal::from(400));
+    let rows = f.purchases.list_for_activity("activity").unwrap();
+    assert_eq!(rows[0].input.subtotal, Decimal::from(200));
+
+    let mut thirds = purchase(&saved.id);
+    thirds.quantity = Decimal::from(3);
+    thirds.subtotal = Decimal::from(100);
+    f.purchases
+        .set_for_activity("activity", vec![thirds])
+        .await
+        .unwrap();
+    let prices = f.purchases.list(Some(&saved.id)).unwrap();
+    assert_eq!(prices[0].unit_price.round_dp(4), Decimal::new(333333, 4));
+    assert_eq!(
+        f.purchases.list_for_activity("activity").unwrap()[0]
+            .input
+            .subtotal,
+        Decimal::from(100)
+    );
+}
+
+#[tokio::test]
 async fn procurement_activity_date_edit_changes_latest_price() {
     use wealthfolio_procurement::purchases::stats::fold_prices;
     let f = fixture().await;
@@ -407,7 +443,7 @@ async fn procurement_activity_date_edit_changes_latest_price() {
     diesel::sql_query("INSERT INTO activities(id,account_id,activity_type,activity_date,currency,created_at,updated_at) VALUES('later','account','WITHDRAWAL','2026-10-10T00:00:00Z','JPY','2026-10-10T00:00:00Z','2026-10-10T00:00:00Z')").execute(&mut conn).unwrap();
     let mut next = purchase(&saved.id);
     next.activity_id = "later".into();
-    next.unit_price = Decimal::from(200);
+    next.subtotal = Decimal::from(200);
     f.purchases
         .set_for_activity("later", vec![next])
         .await
@@ -466,7 +502,7 @@ async fn procurement_replace_purchases_updates_removes_and_clears() {
     assert_eq!(f.purchases.list_for_activity("activity").unwrap().len(), 2);
     let mut updated = purchase(&first.id);
     updated.quantity = Decimal::from(3);
-    updated.unit_price = Decimal::ZERO;
+    updated.subtotal = Decimal::ZERO;
     let saved = f
         .purchases
         .set_for_activity("activity", vec![updated])
@@ -475,7 +511,7 @@ async fn procurement_replace_purchases_updates_removes_and_clears() {
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].created_at, initial[0].created_at);
     assert_eq!(saved[0].input.quantity, Decimal::from(3));
-    assert_eq!(saved[0].input.unit_price, Decimal::ZERO);
+    assert_eq!(saved[0].input.subtotal, Decimal::ZERO);
     assert!(f.purchases.list(Some(&second.id)).unwrap().is_empty());
     f.purchases
         .set_for_activity("activity", vec![])
@@ -546,7 +582,7 @@ async fn procurement_service_validates_replacement_before_writing() {
     let mut zero_quantity = purchase(&saved.id);
     zero_quantity.quantity = Decimal::ZERO;
     let mut negative_price = purchase(&saved.id);
-    negative_price.unit_price = -Decimal::ONE;
+    negative_price.subtotal = -Decimal::ONE;
     for invalid in [
         vec![mismatch],
         vec![purchase(&saved.id), purchase(&saved.id)],

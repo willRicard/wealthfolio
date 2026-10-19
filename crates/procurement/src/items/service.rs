@@ -105,6 +105,7 @@ impl ItemsService {
             category_id: item.category_id,
             subcategory_id: item.subcategory_id,
             rating: item.rating,
+            unit: item.unit,
             aliases: item.aliases,
             draft_id: None,
         })
@@ -130,6 +131,14 @@ pub fn validate(mut input: SaveItem) -> Result<SaveItem> {
         return Err(ProcurementError::InvalidInput(
             "Rating must be between 0 and 5 in whole-star steps".into(),
         )
+        .into());
+    }
+    input.unit = input.unit.trim().to_string();
+    if !super::is_known_unit(&input.unit) {
+        return Err(ProcurementError::InvalidInput(format!(
+            "Unit must be one of {}",
+            super::UNITS.join(", ")
+        ))
         .into());
     }
     input.brand = input
@@ -162,6 +171,7 @@ mod tests {
             category_id: "cat_groceries".into(),
             subcategory_id: None,
             rating,
+            unit: " kg ".into(),
             aliases: vec![" alias ".into(), "alias".into(), " ".into()],
             draft_id: None,
         }
@@ -182,5 +192,19 @@ mod tests {
         let mut value = input(None);
         value.name = " ".into();
         assert!(validate(value).is_err());
+    }
+    #[test]
+    fn trims_the_unit_and_rejects_one_off_the_list() {
+        assert_eq!(validate(input(None)).unwrap().unit, "kg");
+        for unit in ["oz", "KG", "", " ", "kilogram"] {
+            let mut value = input(None);
+            value.unit = unit.into();
+            assert!(validate(value).is_err(), "{unit} must be rejected");
+        }
+        for unit in crate::items::UNITS {
+            let mut value = input(None);
+            value.unit = (*unit).into();
+            assert_eq!(validate(value).unwrap().unit, *unit);
+        }
     }
 }

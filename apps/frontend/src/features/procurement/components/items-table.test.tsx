@@ -26,6 +26,7 @@ function item(index: number): ProcurementItemWithStats {
     categoryId: "category",
     subcategoryId: null,
     rating: 3,
+    unit: "kg",
     aliases: [],
     photo: null,
     createdAt: "2026-10-01",
@@ -105,6 +106,17 @@ it("keeps selection attached to the item after rows change and deletes only that
   await waitFor(() =>
     expect(screen.getByRole("checkbox", { name: "selectItem Item 2" })).not.toBeChecked(),
   );
+});
+
+it("renders every price per unit and keeps an unpriced item as a dash", () => {
+  const priced = item(1);
+  const unpriced = { ...item(2), minPrice: null, avgPrice: null, latestPrice: null };
+  render(<ItemsTable {...actions} items={[priced, unpriced]} onDeleteMany={vi.fn()} />);
+  const row = screen.getByRole("row", { name: /Item 1/ });
+  for (const amount of ["$1.00", "$2.00", "$3.00"]) {
+    expect(within(row).getByText(amount).parentElement).toHaveTextContent(`${amount}/kg`);
+  }
+  expect(within(screen.getByRole("row", { name: /Item 2/ })).queryByText("/kg")).toBeNull();
 });
 
 it("shows selection on a separate line and clears it without deleting items", () => {

@@ -18,7 +18,7 @@ struct PurchaseDB {
     item_id: String,
     activity_id: String,
     quantity: String,
-    unit_price: String,
+    subtotal: String,
     created_at: String,
     updated_at: String,
 }
@@ -29,7 +29,7 @@ impl PurchaseDB {
                 item_id: self.item_id,
                 activity_id: self.activity_id,
                 quantity: Decimal::from_str(&self.quantity)?,
-                unit_price: Decimal::from_str(&self.unit_price)?,
+                subtotal: Decimal::from_str(&self.subtotal)?,
             },
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -66,6 +66,11 @@ impl PurchasesRepositoryTrait for PurchasesRepository {
         rows.into_iter()
             .map(|(row, date, shop, currency)| {
                 let purchase = row.into_model()?;
+                let unit_price = purchase
+                    .input
+                    .subtotal
+                    .checked_div(purchase.input.quantity)
+                    .context("Procurement purchase has a zero quantity")?;
                 Ok(PurchasePrice {
                     item_id: purchase.input.item_id,
                     activity_id: purchase.input.activity_id,
@@ -73,7 +78,7 @@ impl PurchasesRepositoryTrait for PurchasesRepository {
                         .context("Invalid procurement activity date")?,
                     shop,
                     quantity: purchase.input.quantity,
-                    unit_price: purchase.input.unit_price,
+                    unit_price,
                     currency,
                     unit_price_base: None,
                     base_currency: String::new(),
@@ -108,7 +113,7 @@ impl PurchasesRepositoryTrait for PurchasesRepository {
                 item_id: input.item_id,
                 activity_id: activity_id.clone(),
                 quantity: input.quantity.normalize().to_string(),
-                unit_price: input.unit_price.normalize().to_string(),
+                subtotal: input.subtotal.normalize().to_string(),
                 created_at: now.clone(),
                 updated_at: now.clone(),
             })

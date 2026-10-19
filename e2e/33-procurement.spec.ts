@@ -208,6 +208,7 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
       categoryId: "cat_groceries",
       subcategoryId: null,
       rating: null,
+      unit: "kg",
       aliases: [],
     },
   });
@@ -245,7 +246,7 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
         itemId: item.id,
         activityId: activity.id,
         quantity: "2",
-        unitPrice: "12.50",
+        subtotal: "25.00",
       },
     ],
   });
@@ -255,7 +256,7 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
     activityId: activity.id,
     itemId: item.id,
     quantity: "3",
-    unitPrice: "12.50",
+    subtotal: "37.50",
   };
   const purchaseUpdate = await page.request.put(purchasePath, { data: [purchaseInput] });
   expect(purchaseUpdate.ok()).toBeTruthy();
@@ -264,6 +265,7 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
       activityId: activity.id,
       itemId: item.id,
       quantity: "3",
+      subtotal: "37.5",
     },
   ]);
   const mismatchedPurchase = await page.request.put(purchasePath, {
@@ -274,7 +276,7 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
   let row = page
     .getByRole("row")
     .filter({ has: page.getByRole("button", { name: "Price history item", exact: true }) });
-  await expect(row).toContainText("12.50");
+  await expect(row).toContainText("12.50/kg");
   await row.getByRole("button", { name: "Price history item", exact: true }).click();
   await expect(page.getByRole("dialog").locator(".recharts-area-dot")).toHaveCount(1);
   await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
@@ -349,6 +351,7 @@ for (const compact of [false, true]) {
         categoryId: "cat_groceries",
         subcategoryId: null,
         rating: null,
+        unit: "個",
         aliases: [`Alias ${suffix}`],
       },
     });
@@ -376,9 +379,9 @@ for (const compact of [false, true]) {
       .getByRole("button", { name: compact ? "Create Transaction" : "Create", exact: true })
       .click();
     await expect(dialog.getByRole("alert")).toContainText(
-      "Each item needs a quantity and a price.",
+      "Each item needs a quantity and a subtotal.",
     );
-    await dialog.getByLabel("Unit price 1", { exact: true }).fill("12.50");
+    await dialog.getByLabel("Subtotal 1", { exact: true }).fill("25.00");
     await dialog
       .getByRole("button", { name: compact ? "Create Transaction" : "Create", exact: true })
       .click();
@@ -396,6 +399,7 @@ for (const compact of [false, true]) {
     await expect(dialog).not.toBeVisible();
     await openEdit();
     await dialog.getByLabel("Qty 1", { exact: true }).fill("3");
+    await dialog.getByLabel("Subtotal 1", { exact: true }).fill("37.50");
     await dialog
       .getByRole("button", { name: compact ? "Update Transaction" : "Update", exact: true })
       .click();

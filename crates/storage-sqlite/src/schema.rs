@@ -17,6 +17,7 @@ diesel::table! {
         photo_size_bytes -> Nullable<BigInt>,
         created_at -> Text,
         updated_at -> Text,
+        unit -> Text,
     }
 }
 
@@ -34,7 +35,7 @@ diesel::table! {
         item_id -> Text,
         activity_id -> Text,
         quantity -> Text,
-        unit_price -> Text,
+        subtotal -> Text,
         created_at -> Text,
         updated_at -> Text,
     }

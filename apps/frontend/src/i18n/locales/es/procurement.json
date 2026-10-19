@@ -46,12 +46,15 @@
   "purchases": "Artículos comprados",
   "item": "Artículo",
   "quantity": "Cant.",
-  "unitPrice": "Precio unitario",
+  "subtotal": "Subtotal",
   "addPurchase": "Añadir artículo",
   "pickItem": "Elegir un artículo",
   "searchItems": "Buscar artículos…",
   "noItems": "No se encontraron artículos.",
   "moveUp": "Mover arriba",
   "moveDown": "Mover abajo",
-  "purchaseIncomplete": "Cada artículo necesita una cantidad y un precio."
+  "purchaseIncomplete": "Cada artículo necesita una cantidad y un subtotal.",
+  "unit": "Unidad",
+  "invalidUnit": "Elige una unidad de la lista.",
+  "unitSheetTitle": "Seleccionar unidad"
 }

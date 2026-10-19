@@ -10,7 +10,7 @@ import {
   discardProcurementPhotoDraft,
 } from "@/adapters";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
-import { Button, Input, StarRating, Icons } from "@wealthfolio/ui";
+import { Button, Input, StarRating, Icons, ResponsiveSelect } from "@wealthfolio/ui";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,9 @@ import { AdvancedOptionsSection } from "@/pages/activity/components/forms/fields
 import { QuickCategorizePopover } from "@/features/spending/components/quick-categorize-popover";
 import { ItemPhoto } from "./item-photo";
 import type { ProcurementItem } from "../types";
+import { DEFAULT_PROCUREMENT_UNIT, PROCUREMENT_UNITS } from "../units";
+
+const unitOptions = PROCUREMENT_UNITS.map((unit) => ({ value: unit, label: unit }));
 
 interface ItemFormProps {
   item?: ProcurementItem;
@@ -47,6 +50,12 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
     categoryId: z.string().min(1, t("required")),
     subcategoryId: z.string(),
     rating: z.number().min(0).max(5).int(t("invalidRating")).nullable(),
+    unit: z
+      .string()
+      .refine(
+        (value) => (PROCUREMENT_UNITS as readonly string[]).includes(value),
+        t("invalidUnit"),
+      ),
     aliases: z.array(z.string()),
   });
   const form = useForm<z.infer<typeof schema>>({
@@ -58,6 +67,7 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
       categoryId: item?.categoryId ?? "",
       subcategoryId: item?.subcategoryId ?? "",
       rating: item?.rating ?? null,
+      unit: item?.unit ?? DEFAULT_PROCUREMENT_UNIT,
       aliases: item?.aliases ?? [],
     },
   });
@@ -241,19 +251,40 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
                   {photoError}
                 </p>
               )}
-              <FormField
-                control={form.control}
-                name="brand"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("brand")}</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-[minmax(0,1fr)_5rem] items-start gap-3">
+                <FormField
+                  control={form.control}
+                  name="brand"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t("brand")}</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="unit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t("unit")}</FormLabel>
+                      <FormControl>
+                        <ResponsiveSelect
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          options={unitOptions}
+                          placeholder={t("unit")}
+                          sheetTitle={t("unitSheetTitle")}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
               <FormField
                 control={form.control}
                 name="categoryId"

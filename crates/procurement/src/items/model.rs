@@ -22,6 +22,7 @@ pub struct Item {
     pub category_id: String,
     pub subcategory_id: Option<String>,
     pub rating: Option<f64>,
+    pub unit: String,
     pub aliases: Vec<String>,
     pub photo: Option<ItemPhoto>,
     pub created_at: String,
@@ -38,6 +39,7 @@ pub struct SaveItem {
     pub category_id: String,
     pub subcategory_id: Option<String>,
     pub rating: Option<f64>,
+    pub unit: String,
     #[serde(default)]
     pub aliases: Vec<String>,
     pub draft_id: Option<String>,
