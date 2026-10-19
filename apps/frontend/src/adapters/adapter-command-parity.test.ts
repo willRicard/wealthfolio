@@ -659,10 +659,14 @@ describe("procurement transport", () => {
   ])("%s sends the unwrapped form", async (command, method, path) => {
     const mock = stubFetch(null);
     const input = {
-      activityId,
-      itemId,
-      quantity: "0.5",
-      unitPrice: "123.456",
+      name: "Coffee beans",
+      brand: null,
+      memo: null,
+      categoryId: "category-id",
+      subcategoryId: null,
+      rating: null,
+      unit: "kg",
+      aliases: [],
       draftId: null,
     };
     await invoke(command, { id: itemId, input });
@@ -681,7 +685,7 @@ describe("procurement transport", () => {
   });
   it.each([
     { purchases: [] },
-    { purchases: [{ activityId, itemId, quantity: "0.5", unitPrice: "123.456" }] },
+    { purchases: [{ activityId, itemId, quantity: "0.5", subtotal: "123.456" }] },
   ])("replaces purchases with an unwrapped array (%j)", async ({ purchases }) => {
     const mock = stubFetch([]);
     await invoke("set_procurement_activity_purchases", { activityId, purchases });
