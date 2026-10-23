@@ -55,5 +55,12 @@
   "purchaseIncomplete": "Each item needs a quantity and a subtotal.",
   "unit": "Unit",
   "invalidUnit": "Choose a unit from the list.",
-  "unitSheetTitle": "Select a unit"
+  "unitSheetTitle": "Select a unit",
+  "taxType": "Tax type",
+  "taxTypeSheetTitle": "Select tax type",
+  "invalidTaxType": "Select a valid tax type",
+  "taxIncluded": "Tax-included",
+  "taxExcluded8": "Tax-excluded 8%",
+  "taxExcluded10": "Tax-excluded 10%",
+  "taxExempt": "Tax-exempt"
 }

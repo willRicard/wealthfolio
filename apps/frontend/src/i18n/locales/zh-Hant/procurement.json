@@ -54,5 +54,12 @@
   "purchaseIncomplete": "每個商品都需要數量和小計。",
   "unit": "單位",
   "invalidUnit": "請從清單中選擇單位。",
-  "unitSheetTitle": "選擇單位"
+  "unitSheetTitle": "選擇單位",
+  "taxType": "稅務類型",
+  "taxTypeSheetTitle": "選擇稅務類型",
+  "invalidTaxType": "請選擇有效的稅務類型",
+  "taxIncluded": "含稅",
+  "taxExcluded8": "未稅（8%）",
+  "taxExcluded10": "未稅（10%）",
+  "taxExempt": "免稅"
 }

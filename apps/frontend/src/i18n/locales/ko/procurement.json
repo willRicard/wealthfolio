@@ -54,5 +54,12 @@
   "purchaseIncomplete": "각 항목에 수량과 소계를 입력하세요.",
   "unit": "단위",
   "invalidUnit": "목록에서 단위를 선택하세요.",
-  "unitSheetTitle": "단위 선택"
+  "unitSheetTitle": "단위 선택",
+  "taxType": "세금 구분",
+  "taxTypeSheetTitle": "세금 구분 선택",
+  "invalidTaxType": "올바른 세금 구분을 선택하세요",
+  "taxIncluded": "세금 포함",
+  "taxExcluded8": "세금 별도 8%",
+  "taxExcluded10": "세금 별도 10%",
+  "taxExempt": "면세"
 }

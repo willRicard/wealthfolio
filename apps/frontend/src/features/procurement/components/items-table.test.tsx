@@ -27,6 +27,7 @@ function item(index: number): ProcurementItemWithStats {
     subcategoryId: null,
     rating: 3,
     unit: "kg",
+    taxType: "INCLUDED",
     aliases: [],
     photo: null,
     createdAt: "2026-10-01",

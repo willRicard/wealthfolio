@@ -106,6 +106,7 @@ impl ItemsService {
             subcategory_id: item.subcategory_id,
             rating: item.rating,
             unit: item.unit,
+            tax_type: item.tax_type,
             aliases: item.aliases,
             draft_id: None,
         })
@@ -141,6 +142,14 @@ pub fn validate(mut input: SaveItem) -> Result<SaveItem> {
         ))
         .into());
     }
+    input.tax_type = input.tax_type.trim().to_string();
+    if !super::is_known_tax_type(&input.tax_type) {
+        return Err(ProcurementError::InvalidInput(format!(
+            "Tax type must be one of {}",
+            super::TAX_TYPES.join(", ")
+        ))
+        .into());
+    }
     input.brand = input
         .brand
         .map(|s| s.trim().to_string())
@@ -172,6 +181,7 @@ mod tests {
             subcategory_id: None,
             rating,
             unit: " kg ".into(),
+            tax_type: " INCLUDED ".into(),
             aliases: vec![" alias ".into(), "alias".into(), " ".into()],
             draft_id: None,
         }
@@ -187,6 +197,21 @@ mod tests {
             assert!(validate(input(Some(rating))).is_err());
         }
     }
+    #[test]
+    fn trims_the_tax_type_and_rejects_one_off_the_list() {
+        assert_eq!(validate(input(None)).unwrap().tax_type, "INCLUDED");
+        for tax_type in ["", " ", "included", "EXCLUDED_5"] {
+            let mut value = input(None);
+            value.tax_type = tax_type.into();
+            assert!(validate(value).is_err());
+        }
+        for tax_type in crate::items::TAX_TYPES {
+            let mut value = input(None);
+            value.tax_type = (*tax_type).into();
+            assert_eq!(validate(value).unwrap().tax_type, *tax_type);
+        }
+    }
+
     #[test]
     fn rejects_blank_name() {
         let mut value = input(None);

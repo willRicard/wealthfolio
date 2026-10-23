@@ -33,6 +33,11 @@ import { QuickCategorizePopover } from "@/features/spending/components/quick-cat
 import { ItemPhoto } from "./item-photo";
 import type { ProcurementItem } from "../types";
 import { DEFAULT_PROCUREMENT_UNIT, PROCUREMENT_UNITS } from "../units";
+import {
+  DEFAULT_PROCUREMENT_TAX_TYPE,
+  PROCUREMENT_TAX_TYPES,
+  PROCUREMENT_TAX_TYPE_LABELS,
+} from "../tax-types";
 
 const unitOptions = PROCUREMENT_UNITS.map((unit) => ({ value: unit, label: unit }));
 
@@ -56,6 +61,12 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
         (value) => (PROCUREMENT_UNITS as readonly string[]).includes(value),
         t("invalidUnit"),
       ),
+    taxType: z
+      .string()
+      .refine(
+        (value) => (PROCUREMENT_TAX_TYPES as readonly string[]).includes(value),
+        t("invalidTaxType"),
+      ),
     aliases: z.array(z.string()),
   });
   const form = useForm<z.infer<typeof schema>>({
@@ -68,6 +79,7 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
       subcategoryId: item?.subcategoryId ?? "",
       rating: item?.rating ?? null,
       unit: item?.unit ?? DEFAULT_PROCUREMENT_UNIT,
+      taxType: item?.taxType ?? DEFAULT_PROCUREMENT_TAX_TYPE,
       aliases: item?.aliases ?? [],
     },
   });
@@ -285,6 +297,28 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
                   )}
                 />
               </div>
+              <FormField
+                control={form.control}
+                name="taxType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t("taxType")}</FormLabel>
+                    <FormControl>
+                      <ResponsiveSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        options={PROCUREMENT_TAX_TYPES.map((value) => ({
+                          value,
+                          label: t(PROCUREMENT_TAX_TYPE_LABELS[value]),
+                        }))}
+                        placeholder={t("taxType")}
+                        sheetTitle={t("taxTypeSheetTitle")}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="categoryId"

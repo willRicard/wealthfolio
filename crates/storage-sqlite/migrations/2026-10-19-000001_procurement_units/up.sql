@@ -1,4 +1,5 @@
 ALTER TABLE procurement_items ADD COLUMN unit TEXT NOT NULL DEFAULT '個';
+ALTER TABLE procurement_items ADD COLUMN tax_type TEXT NOT NULL DEFAULT 'INCLUDED';
 
 CREATE TABLE procurement_purchases_new (
     item_id TEXT NOT NULL REFERENCES procurement_items(id) ON DELETE CASCADE,

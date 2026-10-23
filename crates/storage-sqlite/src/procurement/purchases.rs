@@ -1,7 +1,7 @@
 use crate::{
     db::{get_connection, DbPool, WriteHandle},
     errors::StorageError,
-    schema::{activities, procurement_purchases as purchases},
+    schema::{activities, procurement_items as items, procurement_purchases as purchases},
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -52,23 +52,28 @@ impl PurchasesRepositoryTrait for PurchasesRepository {
         let mut conn = get_connection(&self.pool)?;
         let mut query = purchases::table
             .inner_join(activities::table)
+            .inner_join(items::table)
             .select((
                 PurchaseDB::as_select(),
                 activities::activity_date,
                 activities::notes,
                 activities::currency,
+                items::tax_type,
             ))
             .into_boxed();
         if let Some(id) = item_id {
             query = query.filter(purchases::item_id.eq(id));
         }
-        let rows = query.load::<(PurchaseDB, String, Option<String>, String)>(&mut conn)?;
+        let rows = query.load::<(PurchaseDB, String, Option<String>, String, String)>(&mut conn)?;
         rows.into_iter()
-            .map(|(row, date, shop, currency)| {
+            .map(|(row, date, shop, currency, tax_type)| {
                 let purchase = row.into_model()?;
-                let unit_price = purchase
+                let gross = purchase
                     .input
                     .subtotal
+                    .checked_mul(wealthfolio_procurement::items::tax_multiplier(&tax_type))
+                    .context("Procurement purchase subtotal overflow")?;
+                let unit_price = gross
                     .checked_div(purchase.input.quantity)
                     .context("Procurement purchase has a zero quantity")?;
                 Ok(PurchasePrice {

@@ -15,6 +15,7 @@ export interface ProcurementItem {
   subcategoryId: string | null;
   rating: number | null;
   unit: string;
+  taxType: string;
   aliases: string[];
   photo: ItemPhoto | null;
   createdAt: string;
@@ -28,6 +29,7 @@ export interface SaveProcurementItem {
   subcategoryId: string | null;
   rating: number | null;
   unit: string;
+  taxType: string;
   aliases: string[];
   draftId?: string | null;
 }

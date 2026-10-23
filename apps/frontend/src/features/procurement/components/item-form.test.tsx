@@ -76,6 +76,7 @@ it("discards a replacement photo that finishes while Cancel is discarding the ol
 it("defaults a new item to 個 and keeps a saved unit when editing", () => {
   const { unmount } = render(<ItemForm onClose={vi.fn()} onSaved={vi.fn()} />);
   expect(screen.getByRole("combobox", { name: "unit" })).toHaveTextContent("個");
+  expect(screen.getByRole("combobox", { name: "taxType" })).toHaveTextContent("taxIncluded");
   unmount();
   render(
     <ItemForm
@@ -89,6 +90,7 @@ it("defaults a new item to 個 and keeps a saved unit when editing", () => {
           subcategoryId: null,
           rating: null,
           unit: "kg",
+          taxType: "EXCLUDED_10",
           aliases: [],
           photo: null,
           createdAt: "2026-10-01",
@@ -100,6 +102,7 @@ it("defaults a new item to 個 and keeps a saved unit when editing", () => {
     />,
   );
   expect(screen.getByRole("combobox", { name: "unit" })).toHaveTextContent("kg");
+  expect(screen.getByRole("combobox", { name: "taxType" })).toHaveTextContent("taxExcluded10");
 });
 
 it("uploads a dropped photo immediately and shows a spinner until the upload finishes", async () => {

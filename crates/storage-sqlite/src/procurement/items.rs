@@ -36,6 +36,7 @@ struct ItemDB {
     created_at: String,
     updated_at: String,
     unit: String,
+    tax_type: String,
 }
 impl ItemDB {
     fn into_model(self, aliases: Vec<String>) -> Result<Item> {
@@ -62,6 +63,7 @@ impl ItemDB {
             subcategory_id: self.subcategory_id,
             rating: self.rating,
             unit: self.unit,
+            tax_type: self.tax_type,
             aliases,
             photo,
             created_at: self.created_at,
@@ -140,6 +142,7 @@ impl ItemsRepository {
                         created_at: now.clone(),
                         updated_at: now.clone(),
                         unit: String::new(),
+                        tax_type: String::new(),
                     }
                 };
                 let previous_photo = if input.draft_id.is_some() {
@@ -180,6 +183,7 @@ impl ItemsRepository {
                 row.subcategory_id = input.subcategory_id;
                 row.rating = input.rating;
                 row.unit = input.unit;
+                row.tax_type = input.tax_type;
                 row.updated_at = now;
                 if updating {
                     diesel::update(items::table.find(&id))

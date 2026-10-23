@@ -56,5 +56,12 @@
   "purchaseIncomplete": "Cada artículo necesita una cantidad y un subtotal.",
   "unit": "Unidad",
   "invalidUnit": "Elige una unidad de la lista.",
-  "unitSheetTitle": "Seleccionar unidad"
+  "unitSheetTitle": "Seleccionar unidad",
+  "taxType": "Tipo de impuesto",
+  "taxTypeSheetTitle": "Seleccionar tipo de impuesto",
+  "invalidTaxType": "Selecciona un tipo de impuesto válido",
+  "taxIncluded": "Impuestos incluidos",
+  "taxExcluded8": "Sin impuestos (8 %)",
+  "taxExcluded10": "Sin impuestos (10 %)",
+  "taxExempt": "Exento de impuestos"
 }

@@ -54,5 +54,12 @@
   "purchaseIncomplete": "各商品に数量と小計を入力してください。",
   "unit": "単位",
   "invalidUnit": "一覧から単位を選んでください。",
-  "unitSheetTitle": "単位を選択"
+  "unitSheetTitle": "単位を選択",
+  "taxType": "税区分",
+  "taxTypeSheetTitle": "税区分を選択",
+  "invalidTaxType": "有効な税区分を選択してください",
+  "taxIncluded": "税込",
+  "taxExcluded8": "税抜8%",
+  "taxExcluded10": "税抜10%",
+  "taxExempt": "非課税"
 }

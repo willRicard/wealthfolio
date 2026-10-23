@@ -54,6 +54,7 @@ fn item() -> SaveItem {
         subcategory_id: None,
         rating: Some(3.0),
         unit: "個".into(),
+        tax_type: "INCLUDED".into(),
         aliases: vec!["Alias".into()],
         draft_id: None,
     }
@@ -237,6 +238,7 @@ async fn procurement_photo_claim_replace_clone_and_delete() {
     let first = upload(&photos).await;
     let mut input = item();
     input.draft_id = Some(first.id);
+    input.tax_type = "EXCLUDED_10".into();
     let saved = service.create(input.clone()).await.unwrap();
     assert_eq!(draft_count(&f), 0);
     assert!(photos
@@ -246,6 +248,7 @@ async fn procurement_photo_claim_replace_clone_and_delete() {
     let cloned = service.clone_item(&saved.id).await.unwrap();
     assert!(cloned.photo.is_none());
     assert_eq!(cloned.aliases, saved.aliases);
+    assert_eq!(cloned.tax_type, "EXCLUDED_10");
     let second = upload(&photos).await;
     input.draft_id = Some(second.id);
     let updated = service.update(&saved.id, input).await.unwrap();
@@ -595,4 +598,98 @@ async fn procurement_service_validates_replacement_before_writing() {
     }
     service.set_for_activity("activity", vec![]).await.unwrap();
     assert!(service.list_for_activity("activity").unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn procurement_tax_type_edits_reinterpret_existing_purchases() {
+    use wealthfolio_procurement::purchases::stats::fold_prices;
+    let f = fixture().await;
+    let saved = f.items.create(item()).await.unwrap();
+    let mut input = purchase(&saved.id);
+    input.quantity = Decimal::from(2);
+    input.subtotal = Decimal::from(1000);
+    f.purchases
+        .set_for_activity("activity", vec![input])
+        .await
+        .unwrap();
+    for (tax_type, expected) in [
+        ("INCLUDED", 500),
+        ("EXCLUDED_10", 550),
+        ("EXCLUDED_8", 540),
+        ("EXEMPT", 500),
+    ] {
+        let mut updated = item();
+        updated.tax_type = tax_type.into();
+        let (updated, _) = f.items.update(&saved.id, updated).await.unwrap();
+        assert_eq!(updated.tax_type, tax_type);
+        let prices = f.purchases.list(Some(&saved.id)).unwrap();
+        assert_eq!(prices[0].unit_price, Decimal::from(expected));
+        assert_eq!(
+            f.purchases.list(None).unwrap()[0].unit_price,
+            Decimal::from(expected)
+        );
+        let (_, stats) = fold_prices(prices, "JPY", |_, _, _| None).unwrap();
+        assert_eq!(stats.min_price, Some(Decimal::from(expected)));
+        assert_eq!(stats.avg_price, Some(Decimal::from(expected)));
+        assert_eq!(stats.latest_price, Some(Decimal::from(expected)));
+        let raw = f.purchases.list_for_activity("activity").unwrap();
+        assert_eq!(raw[0].input.subtotal, Decimal::from(1000));
+        assert_eq!(raw[0].input.quantity, Decimal::from(2));
+    }
+}
+
+#[tokio::test]
+async fn procurement_tax_migration_defaults_existing_items_to_included() {
+    let f = fixture().await;
+    let saved = f.items.create(item()).await.unwrap();
+    let mut conn = db::get_connection(&f.pool).unwrap();
+    diesel::sql_query(include_str!(
+        "../migrations/2026-10-20-000001_procurement_tax_type/down.sql"
+    ))
+    .execute(&mut conn)
+    .unwrap();
+    diesel::sql_query(include_str!(
+        "../migrations/2026-10-20-000001_procurement_tax_type/up.sql"
+    ))
+    .execute(&mut conn)
+    .unwrap();
+    assert_eq!(
+        f.items.get(&saved.id).unwrap().unwrap().tax_type,
+        "INCLUDED"
+    );
+}
+
+#[tokio::test]
+async fn procurement_tax_prices_preserve_precision_and_reject_overflow() {
+    let f = fixture().await;
+    let mut input = item();
+    input.tax_type = "EXCLUDED_8".into();
+    let saved = f.items.create(input).await.unwrap();
+    let mut line = purchase(&saved.id);
+    line.subtotal = Decimal::new(1, 2);
+    f.purchases
+        .set_for_activity("activity", vec![line.clone()])
+        .await
+        .unwrap();
+    assert_eq!(
+        f.purchases.list(Some(&saved.id)).unwrap()[0].unit_price,
+        Decimal::new(108, 4)
+    );
+    line.subtotal = Decimal::MAX;
+    f.purchases
+        .set_for_activity("activity", vec![line])
+        .await
+        .unwrap();
+    assert!(f
+        .purchases
+        .list(Some(&saved.id))
+        .unwrap_err()
+        .to_string()
+        .contains("subtotal overflow"));
+    assert_eq!(
+        f.purchases.list_for_activity("activity").unwrap()[0]
+            .input
+            .subtotal,
+        Decimal::MAX
+    );
 }

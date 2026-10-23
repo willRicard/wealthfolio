@@ -54,5 +54,12 @@
   "purchaseIncomplete": "每个商品都需要数量和小计。",
   "unit": "单位",
   "invalidUnit": "请从列表中选择单位。",
-  "unitSheetTitle": "选择单位"
+  "unitSheetTitle": "选择单位",
+  "taxType": "税务类型",
+  "taxTypeSheetTitle": "选择税务类型",
+  "invalidTaxType": "请选择有效的税务类型",
+  "taxIncluded": "含税",
+  "taxExcluded8": "未税（8%）",
+  "taxExcluded10": "未税（10%）",
+  "taxExempt": "免税"
 }

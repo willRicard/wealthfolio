@@ -23,4 +23,5 @@ ALTER TABLE procurement_purchases_old RENAME TO procurement_purchases;
 
 CREATE INDEX ix_procurement_purchases_item ON procurement_purchases(item_id);
 
+ALTER TABLE procurement_items DROP COLUMN tax_type;
 ALTER TABLE procurement_items DROP COLUMN unit;

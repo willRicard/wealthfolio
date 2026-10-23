@@ -55,5 +55,12 @@
   "purchaseIncomplete": "Jeder Artikel braucht eine Menge und eine Zwischensumme.",
   "unit": "Einheit",
   "invalidUnit": "Eine Einheit aus der Liste wählen.",
-  "unitSheetTitle": "Einheit wählen"
+  "unitSheetTitle": "Einheit wählen",
+  "taxType": "Steuerart",
+  "taxTypeSheetTitle": "Steuerart auswählen",
+  "invalidTaxType": "Bitte eine gültige Steuerart auswählen",
+  "taxIncluded": "Inklusive Steuer",
+  "taxExcluded8": "Zuzüglich 8 % Steuer",
+  "taxExcluded10": "Zuzüglich 10 % Steuer",
+  "taxExempt": "Steuerbefreit"
 }

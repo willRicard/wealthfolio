@@ -209,6 +209,7 @@ test("Procurement prices follow source activity edits and deletion", async ({ pa
       subcategoryId: null,
       rating: null,
       unit: "kg",
+      taxType: "INCLUDED",
       aliases: [],
     },
   });
@@ -323,11 +324,14 @@ for (const compact of [false, true]) {
     const api = `${BASE_URL}/api/v1`;
     const suffix = compact ? "mobile" : "desktop";
     const name = `Activity purchase ${suffix}`;
+    const baseSettings = await page.request.get(`${api}/settings`);
+    expect(baseSettings.ok()).toBeTruthy();
+    const { baseCurrency: currency } = (await baseSettings.json()) as { baseCurrency: string };
     const accountResponse = await page.request.post(`${api}/accounts`, {
       data: {
         name: `Purchases ${suffix}`,
         accountType: "CASH",
-        currency: "USD",
+        currency,
         isDefault: false,
         isActive: true,
       },
@@ -352,6 +356,7 @@ for (const compact of [false, true]) {
         subcategoryId: null,
         rating: null,
         unit: "個",
+        taxType: "INCLUDED",
         aliases: [`Alias ${suffix}`],
       },
     });
@@ -366,7 +371,9 @@ for (const compact of [false, true]) {
     }
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("combobox", { name: "Account", exact: true }).click();
-    await page.getByRole("option", { name: `Purchases ${suffix} (USD)`, exact: true }).click();
+    await page
+      .getByRole("option", { name: `Purchases ${suffix} (${currency})`, exact: true })
+      .click();
     if (compact) await dialog.getByRole("button", { name: "Next", exact: true }).click();
     await dialog.getByLabel("Amount", { exact: true }).fill("25");
     await dialog.getByLabel("Notes / Payee", { exact: true }).fill(name);
@@ -394,10 +401,41 @@ for (const compact of [false, true]) {
       await page.getByRole(compact ? "button" : "menuitem", { name: "Edit", exact: true }).click();
       await expect(dialog.getByLabel("Qty 1", { exact: true })).toHaveValue(quantity);
     };
+    const taxUpdate = await page.request.put(`${api}/procurement/items/${itemId}`, {
+      data: {
+        name,
+        brand: null,
+        memo: null,
+        categoryId: "cat_groceries",
+        subcategoryId: null,
+        rating: null,
+        unit: "個",
+        taxType: "EXCLUDED_10",
+        aliases: [`Alias ${suffix}`],
+      },
+    });
+    expect(taxUpdate.ok()).toBeTruthy();
     await openEdit();
+    await dialog.getByLabel("Qty 1", { exact: true }).fill("1");
+    await dialog.getByLabel("Subtotal 1", { exact: true }).fill("1000");
+    await dialog
+      .getByRole("button", { name: compact ? "Update Transaction" : "Update", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    await openEdit("1");
+    await expect(dialog.getByLabel("Subtotal 1", { exact: true })).toHaveValue("1000");
     await dialog.getByRole("button", { name: compact ? "Close" : "Cancel", exact: true }).click();
     await expect(dialog).not.toBeVisible();
-    await openEdit();
+    await gotoAppPath(page, "/procurement");
+    const taxRow = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("button", { name, exact: true }) });
+    await expect(taxRow).toContainText("1,100.00");
+    const grossPrices = await page.request.get(`${api}/procurement/items/${itemId}/prices`);
+    expect(grossPrices.ok()).toBeTruthy();
+    expect(Number((await grossPrices.json()).prices[0].unitPrice)).toBe(1100);
+    await gotoAppPath(page, "/activities?tab=spending");
+    await openEdit("1");
     await dialog.getByLabel("Qty 1", { exact: true }).fill("3");
     await dialog.getByLabel("Subtotal 1", { exact: true }).fill("37.50");
     await dialog
@@ -408,7 +446,8 @@ for (const compact of [false, true]) {
     expect(pricesResponse.ok()).toBeTruthy();
     const { prices } = await pricesResponse.json();
     expect(prices).toHaveLength(1);
-    expect(prices[0]).toMatchObject({ itemId, quantity: "3", unitPrice: "12.5" });
+    expect(prices[0]).toMatchObject({ itemId, quantity: "3" });
+    expect(Number(prices[0].unitPrice)).toBe(13.75);
     const purchasePath = `${api}/procurement/activities/${prices[0].activityId}/purchases`;
     await openEdit("3");
     await dialog.getByRole("button", { name: "Delete 1", exact: true }).click();
