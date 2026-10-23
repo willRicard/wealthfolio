@@ -58,15 +58,13 @@ export function ItemView({
           <ItemPhoto item={item} />
           <DialogHeader className="min-w-0 flex-1 text-left">
             <DialogTitle>{item.name}</DialogTitle>
-            <DialogDescription asChild>
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 truncate">
-                  {[item.brand, category?.name].filter(Boolean).join(" · ") || t("title")}
-                </span>
-                {item.rating !== null && (
-                  <StarRatingDisplay rating={item.rating} showText={false} className="shrink-0" />
-                )}
-              </div>
+            <DialogDescription className="flex items-center gap-2">
+              <span className="min-w-0 truncate">
+                {[item.brand, category?.name].filter(Boolean).join(" · ") || t("title")}
+              </span>
+              {item.rating !== null && (
+                <StarRatingDisplay rating={item.rating} showText={false} className="shrink-0" />
+              )}
             </DialogDescription>
           </DialogHeader>
         </div>

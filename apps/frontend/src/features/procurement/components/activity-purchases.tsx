@@ -273,19 +273,21 @@ function ItemPicker({
         if (!next) setSearch("");
       }}
     >
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          aria-invalid={invalid || undefined}
-          className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 aria-[invalid]:border-destructive flex h-8 w-full items-center justify-between gap-1 rounded-md border px-2 text-left text-sm disabled:opacity-50"
-        >
-          <span className={selected ? "truncate" : "text-muted-foreground truncate"}>
-            {selected?.name ?? t("pickItem")}
-          </span>
-          <Icons.ChevronDown className="size-3.5 shrink-0 opacity-50" aria-hidden />
-        </button>
-      </PopoverTrigger>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            disabled={disabled}
+            aria-invalid={invalid || undefined}
+            className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 aria-[invalid]:border-destructive flex h-8 w-full items-center justify-between gap-1 rounded-md border px-2 text-left text-sm disabled:opacity-50"
+          >
+            <span className={selected ? "truncate" : "text-muted-foreground truncate"}>
+              {selected?.name ?? t("pickItem")}
+            </span>
+            <Icons.ChevronDown className="size-3.5 shrink-0 opacity-50" aria-hidden />
+          </button>
+        }
+      />
       <PopoverContent className="w-70 p-0" align="start">
         <Command>
           <CommandInput placeholder={t("searchItems")} value={search} onValueChange={setSearch} />

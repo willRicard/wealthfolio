@@ -78,7 +78,7 @@ export function ItemActions({
     <ActionPalette open={open} onOpenChange={setOpen} groups={groups} trigger={trigger} />
   ) : (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent align="end">
         {groups.map((group, index) => (
           <Fragment key={index}>

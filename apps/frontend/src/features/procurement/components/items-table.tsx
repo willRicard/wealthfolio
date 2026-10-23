@@ -108,7 +108,8 @@ export function ItemsTable(props: ItemsTableProps) {
         return (
           <Checkbox
             aria-label={t("selectAll")}
-            checked={allSelected || (someSelected && "indeterminate")}
+            checked={allSelected}
+            indeterminate={someSelected && !allSelected}
             onCheckedChange={(checked) =>
               setSelectedIds((previous) => {
                 const next = new Set(previous);

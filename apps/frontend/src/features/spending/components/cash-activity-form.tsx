@@ -62,6 +62,7 @@ import {
   SheetHeader,
   SheetTitle,
   Textarea,
+  Spinner,
 } from "@wealthfolio/ui";
 
 import {
@@ -551,7 +552,7 @@ export function CashActivityForm({
   return (
     <Sheet open={open} onOpenChange={closeForm}>
       <SheetContent
-        side={isMobile ? "bottom" : "right"}
+        side={isMobile ? "bottom" : "inline-end"}
         className={cn(
           isMobile
             ? "rounded-t-4xl mx-1 flex h-[90vh] flex-col p-0"
@@ -612,7 +613,14 @@ export function CashActivityForm({
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>{t("common:account")}</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
+                          <Select
+                            items={spendingAccounts.map((acc) => ({
+                              value: acc.id,
+                              label: `${acc.name} (${acc.currency})`,
+                            }))}
+                            onValueChange={field.onChange}
+                            value={field.value}
+                          >
                             <FormControl>
                               <SelectTrigger>
                                 <SelectValue placeholder={t("spending:cashForm.selectAccount")} />
@@ -637,7 +645,7 @@ export function CashActivityForm({
                         name="activityType"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-lg font-semibold">
+                            <FormLabel className="text-lg font-semibold leading-none">
                               {t("spending:cashForm.selectType")}
                             </FormLabel>
                             <FormControl>
@@ -655,7 +663,7 @@ export function CashActivityForm({
                                         className={cn(
                                           "flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-all",
                                           "hover:bg-muted/50",
-                                          "peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5",
+                                          "peer-data-checked:border-primary peer-data-checked:bg-primary/5",
                                           "active:scale-[0.98]",
                                         )}
                                       >
@@ -688,7 +696,14 @@ export function CashActivityForm({
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>{t("common:type")}</FormLabel>
-                              <Select onValueChange={field.onChange} value={field.value}>
+                              <Select
+                                items={mobileTypeOptions.map(({ type, label }) => ({
+                                  value: type,
+                                  label,
+                                }))}
+                                onValueChange={field.onChange}
+                                value={field.value}
+                              >
                                 <FormControl>
                                   <SelectTrigger>
                                     <SelectValue />
@@ -742,7 +757,7 @@ export function CashActivityForm({
                       <button
                         type="button"
                         className={cn(
-                          "flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-all",
+                          "flex w-full items-start gap-3 rounded-lg border p-4 text-start transition-all",
                           "hover:bg-muted/50 active:scale-[0.98]",
                           "disabled:cursor-not-allowed disabled:opacity-50",
                         )}
@@ -862,7 +877,7 @@ export function CashActivityForm({
                                         </span>
                                       )}
                                       <Icons.ChevronDown
-                                        className="ml-2 h-4 w-4 shrink-0 opacity-50"
+                                        className="ms-2 h-4 w-4 shrink-0 opacity-50"
                                         aria-hidden="true"
                                       />
                                     </button>
@@ -919,7 +934,7 @@ export function CashActivityForm({
                               );
                             })()}
                             <Icons.ChevronDown
-                              className="ml-2 h-4 w-4 shrink-0 opacity-50"
+                              className="ms-2 h-4 w-4 shrink-0 opacity-50"
                               aria-hidden="true"
                             />
                           </button>
@@ -1044,31 +1059,35 @@ export function CashActivityForm({
                       className="flex-1"
                       disabled={saveMutation.isPending}
                     >
-                      <Icons.ArrowLeft className="mr-2 h-4 w-4" />
+                      <Icons.ArrowLeft className="me-2 h-4 w-4 rtl:rotate-180" />
                       {t("common:back")}
                     </Button>
                   )}
 
+                  {/* Separate keys: reusing one element would turn the pressed Next into a
+                      submit button before the click's default action runs, which submits. */}
                   {currentStep < 2 && !isEditing ? (
                     <Button
+                      key="next"
                       type="button"
                       onClick={handleMobileNext}
                       className="flex-1 font-medium"
                       disabled={!watchAccountId}
                     >
                       {t("common:next")}
-                      <Icons.ArrowRight className="ml-2 h-4 w-4" />
+                      <Icons.ArrowRight className="ms-2 h-4 w-4 rtl:rotate-180" />
                     </Button>
                   ) : (
                     <Button
+                      key="submit"
                       type="submit"
                       className="flex-1 font-medium"
                       disabled={saveMutation.isPending}
                     >
                       {saveMutation.isPending ? (
-                        <Icons.Spinner className="mr-2 h-4 w-4 animate-spin" />
+                        <Spinner className="me-2 h-4 w-4" />
                       ) : (
-                        <Icons.Check className="mr-2 h-4 w-4" />
+                        <Icons.Check className="me-2 h-4 w-4" />
                       )}
                       {isEditing
                         ? t("spending:cashForm.updateTransaction")
@@ -1090,7 +1109,7 @@ export function CashActivityForm({
                 <Button type="submit" disabled={saveMutation.isPending}>
                   {saveMutation.isPending ? (
                     <>
-                      <Icons.Spinner className="mr-2 h-4 w-4 animate-spin" />
+                      <Spinner className="me-2 h-4 w-4" />
                       {t("spending:common.saving")}
                     </>
                   ) : isEditing ? (

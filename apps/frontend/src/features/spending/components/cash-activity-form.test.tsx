@@ -30,6 +30,11 @@ beforeAll(() => {
   );
 });
 
+async function chooseAccount(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  await user.click(screen.getByRole("combobox", { name: "Account" }));
+  await user.click(await screen.findByRole("option", { name }));
+}
+
 vi.mock("@/adapters", () => ({
   createActivity: vi.fn(),
   getProcurementItems: vi.fn(() =>
@@ -184,14 +189,7 @@ describe("CashActivityForm currency", () => {
     const user = userEvent.setup();
     render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
 
-    // Radix Select cannot be opened under jsdom, but it mirrors its value into a
-    // hidden native select for form compatibility; driving that is equivalent to
-    // picking the option.
-    const accountSelect = [...document.querySelectorAll("select")].find((element) =>
-      [...element.options].some((option) => option.value === "euro"),
-    );
-    if (!accountSelect) throw new Error("account select not found");
-    fireEvent.change(accountSelect, { target: { value: "euro" } });
+    await chooseAccount(user, /Spending Euro/);
     await user.click(screen.getByRole("button", { name: /update/i }));
 
     await waitFor(() => expect(updateActivity).toHaveBeenCalled());
@@ -207,11 +205,7 @@ describe("CashActivityForm currency", () => {
     const user = userEvent.setup();
     render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
 
-    const accountSelect = [...document.querySelectorAll("select")].find((element) =>
-      [...element.options].some((option) => option.value === "chequing"),
-    );
-    if (!accountSelect) throw new Error("account select not found");
-    fireEvent.change(accountSelect, { target: { value: "chequing" } });
+    await chooseAccount(user, /WS Chequing/);
     await user.click(screen.getByRole("button", { name: /update/i }));
 
     await waitFor(() => expect(updateActivity).toHaveBeenCalled());
