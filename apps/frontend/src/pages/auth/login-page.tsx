@@ -1,4 +1,5 @@
 import { SSO_REDIRECT_GUARD_STORAGE_KEY, useAuth } from "@/context/auth-context";
+import { cancelPasskeyCeremony, supportsPasskeyAutofill } from "@/features/passkeys/api";
 import {
   ApplicationShell,
   Button,
@@ -8,6 +9,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  Icons,
   Input,
 } from "@wealthfolio/ui";
 import { FormEvent, useEffect, useState } from "react";
@@ -37,14 +39,35 @@ export function LoginPage() {
   const { t } = useTranslation();
   const {
     login,
+    loginWithPasskey,
     loginLoading,
     loginError,
     clearError,
     requiresPassword,
     oidcEnabled,
+    passkeyEnabled,
     statusLoading,
   } = useAuth();
   const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (!passkeyEnabled) return;
+    let cancelled = false;
+
+    void (async () => {
+      if (!(await supportsPasskeyAutofill()) || cancelled) return;
+      try {
+        await loginWithPasskey({ autofill: true });
+      } catch {
+        // Nothing to show: the button and the password field both still work.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      cancelPasskeyCeremony();
+    };
+  }, [passkeyEnabled, loginWithPasskey]);
 
   useEffect(() => {
     if (statusLoading || !oidcEnabled || requiresPassword) return;
@@ -65,6 +88,14 @@ export function LoginPage() {
       setPassword("");
     } catch (error) {
       console.error("Login failed", error);
+    }
+  };
+
+  const handlePasskey = async () => {
+    try {
+      await loginWithPasskey();
+    } catch (error) {
+      console.error("Passkey sign-in failed", error);
     }
   };
 
@@ -95,7 +126,9 @@ export function LoginPage() {
                       id="password"
                       type="password"
                       value={password}
-                      autoComplete="current-password"
+                      autoComplete={
+                        passkeyEnabled ? "current-password webauthn" : "current-password"
+                      }
                       onChange={(event) => {
                         if (loginError) {
                           clearError();
@@ -125,12 +158,26 @@ export function LoginPage() {
                 </form>
               ) : null}
 
-              {requiresPassword && oidcEnabled ? (
+              {requiresPassword && (passkeyEnabled || oidcEnabled) ? (
                 <div className="flex items-center gap-3">
                   <span className="bg-border h-px flex-1" />
                   <span className="text-muted-foreground text-xs">{t("auth:login.or")}</span>
                   <span className="bg-border h-px flex-1" />
                 </div>
+              ) : null}
+
+              {passkeyEnabled ? (
+                <Button
+                  data-testid="login-passkey-button"
+                  type="button"
+                  variant={requiresPassword ? "outline" : "default"}
+                  className="w-full"
+                  disabled={loginLoading}
+                  onClick={handlePasskey}
+                >
+                  <Icons.ShieldCheck className="me-2 h-4 w-4" />
+                  {t("auth:login.signInWithPasskey")}
+                </Button>
               ) : null}
 
               {oidcEnabled ? (

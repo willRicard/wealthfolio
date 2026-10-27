@@ -176,6 +176,9 @@ export const QueryKeys = {
     tool ?? "all",
   ],
 
+  // Passkeys (WebAuthn sign-in credentials)
+  PASSKEYS: "passkeys",
+
   // Health Center
   HEALTH_STATUS: "healthStatus",
   HEALTH_CONFIG: "healthConfig",

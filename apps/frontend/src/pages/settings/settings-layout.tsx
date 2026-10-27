@@ -117,6 +117,16 @@ export default function SettingsLayout() {
                 },
               ]
             : []),
+          ...(isTauri
+            ? []
+            : [
+                {
+                  title: t("settings:nav.items.passkeys"),
+                  href: "passkeys",
+                  subtitle: t("settings:nav.subtitles.passkeys"),
+                  icon: <Icons.ShieldCheck className="size-5" />,
+                },
+              ]),
         ],
       },
       {
@@ -142,7 +152,7 @@ export default function SettingsLayout() {
         ],
       },
     ],
-    [t, hasMcpServer],
+    [t, hasMcpServer, isTauri],
   );
 
   // Check if we're on the main settings page (mobile) or a specific setting page

@@ -3,6 +3,11 @@ import { isWeb } from "@/adapters";
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { reloadApplication } from "@/lib/reload-application";
 import { setUnauthorizedHandler, type AuthFailure } from "@/lib/auth-token";
+import {
+  cancelPasskeyCeremony,
+  PasskeyCancelled,
+  signInWithPasskey,
+} from "@/features/passkeys/api";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
@@ -22,12 +27,14 @@ interface AuthContextValue {
   requiresAuth: boolean;
   requiresPassword: boolean;
   oidcEnabled: boolean;
+  passkeyEnabled: boolean;
   isAuthenticated: boolean;
   statusLoading: boolean;
   statusError: boolean;
   loginLoading: boolean;
   loginError: string | null;
   login: (password: string) => Promise<void>;
+  loginWithPasskey: (options?: { autofill?: boolean }) => Promise<void>;
   logout: () => void;
   clearError: () => void;
 }
@@ -84,6 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [queries]);
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [oidcEnabled, setOidcEnabled] = useState(false);
+  const [passkeyEnabled, setPasskeyEnabled] = useState(false);
   const [statusLoading, setStatusLoading] = useState(isWeb);
   const [statusError, setStatusError] = useState(false);
   const [cookieSession, setCookieSession] = useState(false);
@@ -125,6 +133,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setRequiresPassword(data.requiresPassword);
         setOidcEnabled(data.oidcEnabled);
+        setPasskeyEnabled(
+          "passkeyEnabled" in data && data.passkeyEnabled === true,
+        );
 
         if (data.requiresPassword || data.oidcEnabled) {
           const meRes = await fetch("/api/v1/auth/me", {
@@ -234,7 +245,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [t],
   );
 
+  const loginWithPasskey = useCallback(
+    async ({ autofill = false } = {}) => {
+      if (!autofill) {
+        setLoginLoading(true);
+        setLoginError(null);
+      }
+      try {
+        await signInWithPasskey({ autofill });
+        setCookieSession(true);
+        setLoginError(null);
+        clearSsoRedirectGuard();
+      } catch (error) {
+        setCookieSession(false);
+        if (error instanceof PasskeyCancelled) return;
+        setLoginError(error instanceof Error ? error.message : t("auth:context.loginFailed"));
+        throw error;
+      } finally {
+        if (!autofill) setLoginLoading(false);
+      }
+    },
+    [t],
+  );
+
   const logout = useCallback(() => {
+    cancelPasskeyCeremony();
     invalidateSession();
     if (isWeb) {
       try {
@@ -267,12 +302,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requiresAuth,
       requiresPassword,
       oidcEnabled,
+      passkeyEnabled,
       isAuthenticated: !statusLoading && !statusError && (!requiresAuth || cookieSession),
       statusLoading,
       statusError,
       loginLoading,
       loginError,
       login,
+      loginWithPasskey,
       logout,
       clearError,
     }),
@@ -280,12 +317,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requiresAuth,
       requiresPassword,
       oidcEnabled,
+      passkeyEnabled,
       cookieSession,
       statusLoading,
       statusError,
       loginLoading,
       loginError,
       login,
+      loginWithPasskey,
       logout,
       clearError,
     ],

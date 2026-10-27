@@ -22,12 +22,14 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::main_lib::AppState;
+use crate::passkeys::{self, PasskeyError, PasskeyManager};
 
 /// Authentication survives database service replacement and holds no database handles.
 #[derive(Clone)]
 pub struct AuthState {
     pub auth: Option<Arc<AuthManager>>,
     pub oidc: Option<Arc<crate::oidc::OidcManager>>,
+    pub passkeys: Option<Arc<PasskeyManager>>,
 }
 
 impl AuthState {
@@ -44,7 +46,23 @@ impl AuthState {
             )),
             None => None,
         };
-        Ok(Self { auth, oidc })
+        let passkeys = config
+            .webauthn
+            .as_ref()
+            .map(|webauthn| {
+                PasskeyManager::new(
+                    webauthn,
+                    crate::passkeys::passkey_file_path(&config.db_path),
+                    config.secrets_encryption_key,
+                )
+                .map(Arc::new)
+            })
+            .transpose()?;
+        Ok(Self {
+            auth,
+            oidc,
+            passkeys,
+        })
     }
 }
 
@@ -71,8 +89,29 @@ pub(crate) fn router<S: Clone + Send + Sync + 'static>(state: AuthState) -> axum
         .finish()
         .expect("valid governor config");
 
+    let passkey_start_governor = GovernorConfigBuilder::default()
+        .per_second(2)
+        .burst_size(10)
+        .finish()
+        .expect("valid governor config");
+    let passkey_finish_governor = GovernorConfigBuilder::default()
+        .per_second(2)
+        .burst_size(10)
+        .finish()
+        .expect("valid governor config");
+
     axum::Router::new()
         .route("/auth/status", get(auth_status))
+        .route(
+            "/auth/passkey/start",
+            axum::routing::post(passkey_login_start)
+                .layer(GovernorLayer::new(passkey_start_governor)),
+        )
+        .route(
+            "/auth/passkey/finish",
+            axum::routing::post(passkey_login_finish)
+                .layer(GovernorLayer::new(passkey_finish_governor)),
+        )
         .route(
             "/auth/login",
             axum::routing::post(login).layer(GovernorLayer::new(login_governor)),
@@ -137,7 +176,22 @@ pub enum AuthError {
     Unauthorized,
     InvalidCredentials,
     NotConfigured,
+    BadRequest(String),
+    Rejected(String),
     Internal(String),
+}
+
+impl From<PasskeyError> for AuthError {
+    fn from(error: PasskeyError) -> Self {
+        match error {
+            PasskeyError::NotConfigured => Self::NotConfigured,
+            PasskeyError::Invalid(message) => Self::BadRequest(message),
+            PasskeyError::NotFound | PasskeyError::Rejected => {
+                Self::Rejected(PasskeyError::Rejected.to_string())
+            }
+            PasskeyError::Internal(message) => Self::Internal(message),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -176,6 +230,7 @@ pub struct LoginResponse {
 pub struct AuthStatusResponse {
     pub requires_password: bool,
     pub oidc_enabled: bool,
+    pub passkey_enabled: bool,
 }
 
 impl AuthManager {
@@ -309,6 +364,8 @@ impl IntoResponse for AuthError {
                 StatusCode::NOT_FOUND,
                 "Authentication is not configured for this server".to_string(),
             ),
+            AuthError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            AuthError::Rejected(message) => (StatusCode::UNAUTHORIZED, message),
             AuthError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
         };
         let body = Json(AuthErrorBody {
@@ -421,6 +478,80 @@ pub async fn login(
     Ok(response)
 }
 
+pub async fn passkey_login_start(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> Result<Response, AuthError> {
+    let passkeys = state
+        .passkeys
+        .as_ref()
+        .ok_or(AuthError::NotConfigured)?
+        .clone();
+    let (options, sealed) = passkeys.start_login()?;
+
+    let secure = state
+        .auth
+        .as_ref()
+        .is_some_and(|auth| auth.should_secure_cookie(&headers));
+    let cookie = passkeys::build_tx_cookie(
+        passkeys::LOGIN_TX_COOKIE,
+        passkeys::LOGIN_TX_PATH,
+        &sealed,
+        secure,
+    );
+
+    let mut response = Json(options).into_response();
+    response.headers_mut().insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&cookie)
+            .map_err(|e| AuthError::Internal(format!("Failed to set cookie: {e}")))?,
+    );
+    Ok(response)
+}
+
+pub async fn passkey_login_finish(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(credential): Json<webauthn_rs::prelude::PublicKeyCredential>,
+) -> Result<Response, AuthError> {
+    let auth = state.auth.as_ref().ok_or(AuthError::NotConfigured)?.clone();
+    let passkeys = state
+        .passkeys
+        .as_ref()
+        .ok_or(AuthError::NotConfigured)?
+        .clone();
+
+    let sealed = passkeys::read_cookie(&headers, passkeys::LOGIN_TX_COOKIE).ok_or_else(|| {
+        AuthError::BadRequest("This sign-in attempt expired. Please try again.".into())
+    })?;
+
+    let clear = passkeys::clear_tx_cookie(passkeys::LOGIN_TX_COOKIE, passkeys::LOGIN_TX_PATH);
+    let finish = passkeys.finish_login(&credential, &sealed);
+
+    let mut response = match finish {
+        Ok(()) => {
+            let (cookie_value, ttl_secs) = auth.issue_session_cookie(&headers)?;
+            let mut response = Json(LoginResponse {
+                authenticated: true,
+                expires_in: ttl_secs,
+            })
+            .into_response();
+            response.headers_mut().append(
+                SET_COOKIE,
+                HeaderValue::from_str(&cookie_value)
+                    .map_err(|e| AuthError::Internal(format!("Failed to set cookie: {e}")))?,
+            );
+            response
+        }
+        Err(error) => AuthError::from(error).into_response(),
+    };
+
+    if let Ok(value) = HeaderValue::from_str(&clear) {
+        response.headers_mut().append(SET_COOKIE, value);
+    }
+    Ok(response)
+}
+
 pub async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response {
     let secure = state
         .auth
@@ -452,6 +583,10 @@ pub async fn auth_status(
     Json(AuthStatusResponse {
         requires_password: state.auth.as_ref().is_some_and(|auth| auth.has_password()),
         oidc_enabled: state.oidc.is_some(),
+        passkey_enabled: state
+            .passkeys
+            .as_ref()
+            .is_some_and(|passkeys| passkeys.has_credentials()),
     })
 }
 

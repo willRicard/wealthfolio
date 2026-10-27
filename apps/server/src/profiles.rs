@@ -78,6 +78,7 @@ pub struct WebProfiles {
     deletion: Mutex<()>,
     auth: Option<Arc<crate::auth::AuthManager>>,
     pub(crate) oidc: Option<Arc<crate::oidc::OidcManager>>,
+    passkeys: Option<Arc<crate::passkeys::PasskeyManager>>,
     runtimes: Mutex<HashMap<Uuid, Arc<AppState>>>,
     // Keep slow startup serialized without blocking cached runtime lookups.
     initialization: Mutex<()>,
@@ -147,6 +148,7 @@ impl WebProfiles {
             config: config.clone(),
             auth: auth.auth,
             oidc: auth.oidc,
+            passkeys: auth.passkeys,
             deletion: Mutex::new(()),
             runtimes: Mutex::new(HashMap::new()),
             initialization: Mutex::new(()),
@@ -251,6 +253,18 @@ impl WebProfiles {
         let default_id = registry.default_id()?;
         let auth = default.auth.clone();
         let oidc = default.oidc.clone();
+        let passkeys = config
+            .webauthn
+            .as_ref()
+            .map(|webauthn| {
+                crate::passkeys::PasskeyManager::new(
+                    webauthn,
+                    crate::passkeys::passkey_file_path(&config.db_path),
+                    config.secrets_encryption_key,
+                )
+                .map(Arc::new)
+            })
+            .transpose()?;
         let _ = default.profile_binding.set((registry.clone(), default_id));
         crate::scheduler::start_background_workers(default.clone());
         let mut runtimes = HashMap::new();
@@ -259,6 +273,7 @@ impl WebProfiles {
             registry,
             auth,
             oidc,
+            passkeys,
             config: config.clone(),
             deletion: Mutex::new(()),
             runtimes: Mutex::new(runtimes),
@@ -295,6 +310,7 @@ impl WebProfiles {
         crate::auth::AuthState {
             auth: self.auth.clone(),
             oidc: self.oidc.clone(),
+            passkeys: self.passkeys.clone(),
         }
     }
 

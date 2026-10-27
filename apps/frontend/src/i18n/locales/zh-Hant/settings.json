@@ -569,6 +569,7 @@
       "market_data": "市場資料",
       "ai_providers": "AI 服務供應商",
       "agent_access": "AI 代理程式存取",
+      "passkeys": "通行金鑰",
       "addons": "擴充功能",
       "about": "關於"
     },
@@ -586,6 +587,7 @@
       "market_data": "資料來源、同步與匯入",
       "ai_providers": "為投資組合分析設定 AI",
       "agent_access": "MCP 伺服器與代理程式權杖",
+      "passkeys": "指紋與 Face ID 登入",
       "addons": "擴充 Wealthfolio 功能",
       "about": "應用程式資訊"
     }
@@ -1743,5 +1745,36 @@
   "cloud_backup_hint_running": "儲存加密雲端備份期間，你可以繼續使用 Wealthfolio。",
   "cloud_backup_hint_failed": "未能完成備份。我們會自動重試，你也可以立即重試。",
   "cloud_backup_retry_label": "下次重試",
-  "cloud_backup_retry_now": "重新嘗試備份"
+  "cloud_backup_retry_now": "重新嘗試備份",
+  "passkeys": {
+    "page_heading": "通行金鑰",
+    "page_text": "用指紋、臉部或安全金鑰登入，不必再輸入密碼。",
+    "title": "已註冊的通行金鑰",
+    "description": "每個通行金鑰對應一台裝置。刪除後該裝置將無法登入。",
+    "unconfigured": "此伺服器尚未啟用通行金鑰。請在環境變數中設定網域後重新啟動。",
+    "empty": "還沒有通行金鑰。新增一個即可免密碼登入。",
+    "add": "新增通行金鑰",
+    "adding": "正在等待裝置…",
+    "add_title": "新增通行金鑰",
+    "add_description": "裝置會要求你確認。為它取個名字，方便日後辨認。",
+    "add_success": "已新增通行金鑰",
+    "add_failed": "無法新增通行金鑰",
+    "name_label": "名稱",
+    "name_placeholder": "iPhone",
+    "rename": "重新命名",
+    "rename_title": "重新命名通行金鑰",
+    "rename_failed": "無法重新命名通行金鑰",
+    "remove": "刪除",
+    "remove_title": "刪除此通行金鑰？",
+    "remove_desc": "「{{name}}」將無法再登入。",
+    "remove_last_warning": "這是最後一個通行金鑰，刪除後將只能使用密碼登入。",
+    "remove_success": "已刪除通行金鑰",
+    "remove_failed": "無法刪除通行金鑰",
+    "added": "新增於 {{date}}",
+    "last_used": "上次使用 {{time}}",
+    "never_used": "從未使用",
+    "unsupported": "此瀏覽器無法建立通行金鑰。",
+    "desktop_unavailable_title": "桌面版無需設定",
+    "desktop_unavailable_description": "桌面應用程式直接開啟你的資料，從不登入伺服器，因此這裡沒有需要管理的項目。"
+  }
 }

@@ -571,6 +571,7 @@
       "market_data": "Dati di mercato",
       "ai_providers": "Provider IA",
       "agent_access": "Accesso agenti IA",
+      "passkeys": "Passkey",
       "addons": "Add-on",
       "about": "Informazioni"
     },
@@ -588,6 +589,7 @@
       "market_data": "Provider, sincronizzazione e importazioni",
       "ai_providers": "Configura l'IA per le analisi del portafoglio",
       "agent_access": "Server MCP e token degli agenti",
+      "passkeys": "Accesso con impronta e Face ID",
       "addons": "Estendi Wealthfolio con nuove funzionalità",
       "about": "Informazioni sull'applicazione"
     }
@@ -1793,5 +1795,36 @@
   "cloud_backup_hint_running": "Puoi continuare a usare Wealthfolio mentre salviamo il tuo backup crittografato nel cloud.",
   "cloud_backup_hint_failed": "Non siamo riusciti a completare il backup. Riproveremo automaticamente, oppure puoi riprovare ora.",
   "cloud_backup_retry_label": "Prossimo tentativo",
-  "cloud_backup_retry_now": "Riprova il backup"
+  "cloud_backup_retry_now": "Riprova il backup",
+  "passkeys": {
+    "page_heading": "Passkey",
+    "page_text": "Accedi con impronta, volto o una chiave di sicurezza invece di digitare la password.",
+    "title": "Passkey registrate",
+    "description": "Ogni passkey appartiene a un dispositivo. Rimuovila per impedirle di accedere.",
+    "unconfigured": "Le passkey non sono abilitate su questo server. Imposta il dominio nell'ambiente e riavvia.",
+    "empty": "Ancora nessuna passkey. Aggiungine una per accedere senza password.",
+    "add": "Aggiungi passkey",
+    "adding": "In attesa del dispositivo…",
+    "add_title": "Aggiungi una passkey",
+    "add_description": "Il dispositivo ti chiederà conferma. Dai un nome alla passkey per riconoscerla in seguito.",
+    "add_success": "Passkey aggiunta",
+    "add_failed": "Impossibile aggiungere la passkey",
+    "name_label": "Nome",
+    "name_placeholder": "iPhone",
+    "rename": "Rinomina",
+    "rename_title": "Rinomina passkey",
+    "rename_failed": "Impossibile rinominare la passkey",
+    "remove": "Rimuovi",
+    "remove_title": "Rimuovere questa passkey?",
+    "remove_desc": "«{{name}}» non potrà più accedere.",
+    "remove_last_warning": "È la tua ultima passkey: l'accesso tornerà a funzionare solo con la password.",
+    "remove_success": "Passkey rimossa",
+    "remove_failed": "Impossibile rimuovere la passkey",
+    "added": "Aggiunta il {{date}}",
+    "last_used": "ultimo utilizzo {{time}}",
+    "never_used": "mai usata",
+    "unsupported": "Questo browser non può creare passkey.",
+    "desktop_unavailable_title": "Non serve sul desktop",
+    "desktop_unavailable_description": "L'app desktop apre i tuoi dati direttamente e non accede mai a un server, quindi qui non c'è nulla da gestire."
+  }
 }

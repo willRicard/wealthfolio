@@ -569,6 +569,7 @@
       "market_data": "市場データ",
       "ai_providers": "AIプロバイダー",
       "agent_access": "AIエージェントアクセス",
+      "passkeys": "パスキー",
       "addons": "アドオン",
       "about": "このアプリについて"
     },
@@ -586,6 +587,7 @@
       "market_data": "プロバイダー、同期、インポート",
       "ai_providers": "ポートフォリオ分析向けAIの設定",
       "agent_access": "MCPサーバーとエージェントトークン",
+      "passkeys": "指紋・Face ID でのサインイン",
       "addons": "Wealthfolioの機能を拡張",
       "about": "アプリケーション情報"
     }
@@ -1719,5 +1721,36 @@
   "cloud_backup_hint_running": "暗号化されたクラウドバックアップを保存している間も、Wealthfolioを引き続き使用できます。",
   "cloud_backup_hint_failed": "バックアップを完了できませんでした。自動的に再試行します。今すぐ再試行することもできます。",
   "cloud_backup_retry_label": "次の再試行",
-  "cloud_backup_retry_now": "バックアップを再試行"
+  "cloud_backup_retry_now": "バックアップを再試行",
+  "passkeys": {
+    "page_heading": "パスキー",
+    "page_text": "パスワードを入力する代わりに、指紋・顔認証・セキュリティキーでサインインできます。",
+    "title": "登録済みのパスキー",
+    "description": "パスキーは 1 台のデバイスに対応します。削除するとそのデバイスではサインインできなくなります。",
+    "unconfigured": "このサーバーではパスキーが有効になっていません。環境変数にドメインを設定して再起動してください。",
+    "empty": "パスキーはまだありません。追加するとパスワードなしでサインインできます。",
+    "add": "パスキーを追加",
+    "adding": "デバイスの応答を待っています…",
+    "add_title": "パスキーを追加",
+    "add_description": "デバイスで確認を求められます。あとで見分けられるように名前を付けてください。",
+    "add_success": "パスキーを追加しました",
+    "add_failed": "パスキーを追加できませんでした",
+    "name_label": "名前",
+    "name_placeholder": "iPhone",
+    "rename": "名前を変更",
+    "rename_title": "パスキーの名前を変更",
+    "rename_failed": "名前を変更できませんでした",
+    "remove": "削除",
+    "remove_title": "このパスキーを削除しますか？",
+    "remove_desc": "「{{name}}」ではサインインできなくなります。",
+    "remove_last_warning": "これが最後のパスキーです。削除するとパスワードのみでのサインインに戻ります。",
+    "remove_success": "パスキーを削除しました",
+    "remove_failed": "パスキーを削除できませんでした",
+    "added": "{{date}} に追加",
+    "last_used": "最終使用 {{time}}",
+    "never_used": "未使用",
+    "unsupported": "このブラウザーはパスキーを作成できません。",
+    "desktop_unavailable_title": "デスクトップでは不要です",
+    "desktop_unavailable_description": "デスクトップアプリはデータを直接開き、サーバーにサインインすることはないため、ここで管理する項目はありません。"
+  }
 }

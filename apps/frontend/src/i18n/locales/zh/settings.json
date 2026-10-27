@@ -569,6 +569,7 @@
       "market_data": "市场数据",
       "ai_providers": "AI 提供商",
       "agent_access": "AI 代理访问",
+      "passkeys": "通行密钥",
       "addons": "插件",
       "about": "关于"
     },
@@ -586,6 +587,7 @@
       "market_data": "提供商、同步和导入",
       "ai_providers": "为投资组合洞察配置 AI",
       "agent_access": "MCP 服务器和代理令牌",
+      "passkeys": "指纹与面容 ID 登录",
       "addons": "为 Wealthfolio 扩展功能",
       "about": "应用信息"
     }
@@ -1719,5 +1721,36 @@
   "cloud_backup_hint_running": "保存加密云备份期间，你可以继续使用 Wealthfolio。",
   "cloud_backup_hint_failed": "未能完成备份。我们会自动重试，你也可以立即重试。",
   "cloud_backup_retry_label": "下次重试",
-  "cloud_backup_retry_now": "重新尝试备份"
+  "cloud_backup_retry_now": "重新尝试备份",
+  "passkeys": {
+    "page_heading": "通行密钥",
+    "page_text": "用指纹、面容或安全密钥登录，不必再输入密码。",
+    "title": "已注册的通行密钥",
+    "description": "每个通行密钥对应一台设备。删除后该设备将无法登录。",
+    "unconfigured": "此服务器尚未启用通行密钥。请在环境变量中设置域名后重启。",
+    "empty": "还没有通行密钥。添加一个即可免密码登录。",
+    "add": "添加通行密钥",
+    "adding": "正在等待设备…",
+    "add_title": "添加通行密钥",
+    "add_description": "设备会要求你确认。为它取个名字，方便以后辨认。",
+    "add_success": "已添加通行密钥",
+    "add_failed": "无法添加通行密钥",
+    "name_label": "名称",
+    "name_placeholder": "iPhone",
+    "rename": "重命名",
+    "rename_title": "重命名通行密钥",
+    "rename_failed": "无法重命名通行密钥",
+    "remove": "删除",
+    "remove_title": "删除此通行密钥？",
+    "remove_desc": "“{{name}}”将无法再登录。",
+    "remove_last_warning": "这是最后一个通行密钥，删除后将只能使用密码登录。",
+    "remove_success": "已删除通行密钥",
+    "remove_failed": "无法删除通行密钥",
+    "added": "添加于 {{date}}",
+    "last_used": "上次使用 {{time}}",
+    "never_used": "从未使用",
+    "unsupported": "此浏览器无法创建通行密钥。",
+    "desktop_unavailable_title": "桌面端无需设置",
+    "desktop_unavailable_description": "桌面应用直接打开你的数据，从不登录服务器，因此这里没有需要管理的内容。"
+  }
 }

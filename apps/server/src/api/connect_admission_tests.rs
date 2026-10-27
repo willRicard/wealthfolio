@@ -39,6 +39,7 @@ async fn connect_test_app() -> (
         db_encryption_required: false,
         auth: None,
         oidc: None,
+        webauthn: None,
         mcp_enabled: false,
         mcp_audit_enabled: false,
         mcp_allowed_hosts: None,

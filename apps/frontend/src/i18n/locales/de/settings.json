@@ -456,6 +456,7 @@
       "market_data": "Marktdaten",
       "ai_providers": "KI-Anbieter",
       "agent_access": "KI-Agentenzugriff",
+      "passkeys": "Passkeys",
       "addons": "Erweiterungen",
       "about": "Info"
     },
@@ -473,6 +474,7 @@
       "market_data": "Anbieter, Synchronisation und Importe",
       "ai_providers": "KI für Portfolio-Einblicke konfigurieren",
       "agent_access": "MCP-Server und Agent-Tokens",
+      "passkeys": "Anmeldung per Fingerabdruck und Face ID",
       "addons": "Wealthfolio um Funktionen erweitern",
       "about": "Anwendungsinformationen"
     }
@@ -1743,5 +1745,36 @@
   "cloud_backup_hint_running": "Du kannst Wealthfolio weiter nutzen, während wir dein verschlüsseltes Cloud-Backup speichern.",
   "cloud_backup_hint_failed": "Das Backup konnte nicht abgeschlossen werden. Wir versuchen es automatisch erneut, oder du kannst es jetzt versuchen.",
   "cloud_backup_retry_label": "Nächster Versuch",
-  "cloud_backup_retry_now": "Backup erneut versuchen"
+  "cloud_backup_retry_now": "Backup erneut versuchen",
+  "passkeys": {
+    "page_heading": "Passkeys",
+    "page_text": "Melde dich mit Fingerabdruck, Gesicht oder Sicherheitsschlüssel an, statt dein Passwort einzugeben.",
+    "title": "Registrierte Passkeys",
+    "description": "Jeder Passkey gehört zu einem Gerät. Entferne einen, um die Anmeldung damit zu sperren.",
+    "unconfigured": "Passkeys sind auf diesem Server nicht aktiviert. Lege die Domain in der Umgebung fest und starte neu.",
+    "empty": "Noch keine Passkeys. Füge einen hinzu, um dich ohne Passwort anzumelden.",
+    "add": "Passkey hinzufügen",
+    "adding": "Warte auf dein Gerät…",
+    "add_title": "Passkey hinzufügen",
+    "add_description": "Dein Gerät fragt nach einer Bestätigung. Gib dem Passkey einen Namen, damit du ihn später wiedererkennst.",
+    "add_success": "Passkey hinzugefügt",
+    "add_failed": "Passkey konnte nicht hinzugefügt werden",
+    "name_label": "Name",
+    "name_placeholder": "iPhone",
+    "rename": "Umbenennen",
+    "rename_title": "Passkey umbenennen",
+    "rename_failed": "Passkey konnte nicht umbenannt werden",
+    "remove": "Entfernen",
+    "remove_title": "Diesen Passkey entfernen?",
+    "remove_desc": "„{{name}}“ kann sich dann nicht mehr anmelden.",
+    "remove_last_warning": "Das ist dein letzter Passkey – die Anmeldung erfolgt danach nur noch per Passwort.",
+    "remove_success": "Passkey entfernt",
+    "remove_failed": "Passkey konnte nicht entfernt werden",
+    "added": "Hinzugefügt am {{date}}",
+    "last_used": "zuletzt verwendet {{time}}",
+    "never_used": "nie verwendet",
+    "unsupported": "Dieser Browser kann keine Passkeys erstellen.",
+    "desktop_unavailable_title": "Auf dem Desktop nicht nötig",
+    "desktop_unavailable_description": "Die Desktop-App öffnet deine Daten direkt und meldet sich nie an einem Server an. Hier gibt es daher nichts zu verwalten."
+  }
 }

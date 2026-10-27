@@ -125,6 +125,7 @@ async fn fresh_health_reads_history_off_the_async_worker_and_populates_its_cache
         db_encryption_required: false,
         auth: None,
         oidc: None,
+        webauthn: None,
         mcp_enabled: false,
         mcp_audit_enabled: true,
         mcp_allowed_hosts: None,

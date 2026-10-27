@@ -571,6 +571,7 @@
       "market_data": "Datos de mercado",
       "ai_providers": "Proveedores de IA",
       "agent_access": "Acceso de agentes de IA",
+      "passkeys": "Claves de acceso",
       "addons": "Complementos",
       "about": "Acerca de"
     },
@@ -588,6 +589,7 @@
       "market_data": "Proveedores, sincronización e importaciones",
       "ai_providers": "Configurar la IA para análisis de la cartera",
       "agent_access": "Servidor MCP y tokens de agente",
+      "passkeys": "Inicio de sesión con huella y Face ID",
       "addons": "Amplía Wealthfolio con funciones",
       "about": "Información de la aplicación"
     }
@@ -1793,5 +1795,36 @@
   "cloud_backup_hint_running": "Puedes seguir usando Wealthfolio mientras guardamos tu copia cifrada en la nube.",
   "cloud_backup_hint_failed": "No pudimos completar la copia. Lo intentaremos de nuevo automáticamente, o puedes intentarlo ahora.",
   "cloud_backup_retry_label": "Próximo intento",
-  "cloud_backup_retry_now": "Reintentar copia"
+  "cloud_backup_retry_now": "Reintentar copia",
+  "passkeys": {
+    "page_heading": "Claves de acceso",
+    "page_text": "Inicia sesión con tu huella, tu cara o una llave de seguridad en lugar de escribir la contraseña.",
+    "title": "Claves de acceso registradas",
+    "description": "Cada clave de acceso pertenece a un dispositivo. Elimina una para impedir que inicie sesión.",
+    "unconfigured": "Las claves de acceso no están habilitadas en este servidor. Define el dominio en el entorno y reinicia.",
+    "empty": "Todavía no hay claves de acceso. Añade una para entrar sin contraseña.",
+    "add": "Añadir clave de acceso",
+    "adding": "Esperando a tu dispositivo…",
+    "add_title": "Añadir una clave de acceso",
+    "add_description": "Tu dispositivo te pedirá confirmación. Ponle un nombre para reconocerla más adelante.",
+    "add_success": "Clave de acceso añadida",
+    "add_failed": "No se pudo añadir la clave de acceso",
+    "name_label": "Nombre",
+    "name_placeholder": "iPhone",
+    "rename": "Cambiar nombre",
+    "rename_title": "Cambiar el nombre de la clave de acceso",
+    "rename_failed": "No se pudo cambiar el nombre",
+    "remove": "Eliminar",
+    "remove_title": "¿Eliminar esta clave de acceso?",
+    "remove_desc": "«{{name}}» ya no podrá iniciar sesión.",
+    "remove_last_warning": "Es tu última clave de acceso, así que volverás a entrar solo con la contraseña.",
+    "remove_success": "Clave de acceso eliminada",
+    "remove_failed": "No se pudo eliminar la clave de acceso",
+    "added": "Añadida el {{date}}",
+    "last_used": "usada por última vez {{time}}",
+    "never_used": "nunca usada",
+    "unsupported": "Este navegador no puede crear claves de acceso.",
+    "desktop_unavailable_title": "No hace falta en el escritorio",
+    "desktop_unavailable_description": "La aplicación de escritorio abre tus datos directamente y nunca inicia sesión en un servidor, así que aquí no hay nada que gestionar."
+  }
 }

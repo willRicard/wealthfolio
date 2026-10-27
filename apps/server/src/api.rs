@@ -54,6 +54,7 @@ mod holdings;
 mod limits;
 mod market_data;
 mod net_worth;
+mod passkeys;
 mod performance;
 pub(crate) mod portable_backups;
 mod portfolio;
@@ -168,14 +169,8 @@ pub(crate) fn cors_layer(config: &Config) -> anyhow::Result<CorsLayer> {
 #[allow(deprecated)]
 pub fn app_router(state: Arc<AppState>, config: &Config) -> anyhow::Result<Router> {
     let profiles = crate::profiles::WebProfiles::new(state.clone(), config)?;
-    app_router_with_profiles(
-        profiles,
-        auth::AuthState {
-            auth: state.auth.clone(),
-            oidc: state.oidc.clone(),
-        },
-        config,
-    )
+    let auth_state = profiles.auth_state();
+    app_router_with_profiles(profiles, auth_state, config)
 }
 
 pub async fn app_router_from_config(config: &Config) -> anyhow::Result<Router> {
@@ -255,6 +250,7 @@ fn app_router_with_profiles(
             crate::profiles::admit,
         ))
         .merge(crate::profiles::router(profiles.clone()))
+        .merge(passkeys::router(auth_state.clone()))
         .layer(middleware::from_fn_with_state(
             auth_state.auth.clone(),
             auth::require_backup_session,

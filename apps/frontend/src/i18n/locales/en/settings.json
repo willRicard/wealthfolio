@@ -526,6 +526,7 @@
       "market_data": "Market Data",
       "ai_providers": "AI Providers",
       "agent_access": "AI Agent Access",
+      "passkeys": "Passkeys",
       "addons": "Add-ons",
       "about": "About"
     },
@@ -543,6 +544,7 @@
       "market_data": "Providers, sync, and imports",
       "ai_providers": "Configure AI for portfolio insights",
       "agent_access": "MCP server and agent tokens",
+      "passkeys": "Fingerprint and Face ID sign-in",
       "addons": "Extend Wealthfolio with features",
       "about": "Application information"
     }
@@ -1743,5 +1745,36 @@
   "cloud_backup_hint_running": "You can keep using Wealthfolio while we save your encrypted cloud backup.",
   "cloud_backup_hint_failed": "We couldn’t finish the backup. We’ll try again automatically, or you can try now.",
   "cloud_backup_retry_label": "Next retry",
-  "cloud_backup_retry_now": "Try backup again"
+  "cloud_backup_retry_now": "Try backup again",
+  "passkeys": {
+    "page_heading": "Passkeys",
+    "page_text": "Sign in with your fingerprint, face or a security key instead of typing your password.",
+    "title": "Registered passkeys",
+    "description": "Each passkey belongs to one device. Remove one to stop it signing in.",
+    "unconfigured": "Passkeys are not enabled on this server. Set the relying party domain in your environment and restart.",
+    "empty": "No passkeys yet. Add one to sign in without your password.",
+    "add": "Add passkey",
+    "adding": "Waiting for your device…",
+    "add_title": "Add a passkey",
+    "add_description": "Your device will ask you to confirm. Give this passkey a name so you can recognise it later.",
+    "add_success": "Passkey added",
+    "add_failed": "Could not add the passkey",
+    "name_label": "Name",
+    "name_placeholder": "iPhone",
+    "rename": "Rename",
+    "rename_title": "Rename passkey",
+    "rename_failed": "Could not rename the passkey",
+    "remove": "Remove",
+    "remove_title": "Remove this passkey?",
+    "remove_desc": "“{{name}}” will no longer be able to sign in.",
+    "remove_last_warning": "This is your last passkey, so sign-in goes back to your password only.",
+    "remove_success": "Passkey removed",
+    "remove_failed": "Could not remove the passkey",
+    "added": "Added {{date}}",
+    "last_used": "last used {{time}}",
+    "never_used": "never used",
+    "unsupported": "This browser cannot create passkeys.",
+    "desktop_unavailable_title": "Not needed on desktop",
+    "desktop_unavailable_description": "The desktop app opens your data directly and never signs in to a server, so there is nothing to manage here."
+  }
 }

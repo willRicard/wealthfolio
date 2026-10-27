@@ -573,6 +573,7 @@
       "market_data": "Données de marché",
       "ai_providers": "Fournisseurs IA",
       "agent_access": "Accès agent IA",
+      "passkeys": "Clés d'accès",
       "addons": "Extensions",
       "about": "À propos"
     },
@@ -590,6 +591,7 @@
       "market_data": "Fournisseurs, synchronisation et imports",
       "ai_providers": "Configurer l'IA pour les analyses de portefeuille",
       "agent_access": "Serveur MCP et jetons d'agent",
+      "passkeys": "Connexion par empreinte et Face ID",
       "addons": "Étendez Wealthfolio avec des fonctionnalités",
       "about": "Informations sur l'application"
     }
@@ -1793,5 +1795,36 @@
   "cloud_backup_hint_running": "Vous pouvez continuer à utiliser Wealthfolio pendant l’enregistrement de votre sauvegarde chiffrée dans le cloud.",
   "cloud_backup_hint_failed": "Nous n’avons pas pu terminer la sauvegarde. Nous réessaierons automatiquement, ou vous pouvez réessayer maintenant.",
   "cloud_backup_retry_label": "Prochain essai",
-  "cloud_backup_retry_now": "Réessayer la sauvegarde"
+  "cloud_backup_retry_now": "Réessayer la sauvegarde",
+  "passkeys": {
+    "page_heading": "Clés d'accès",
+    "page_text": "Connectez-vous avec votre empreinte, votre visage ou une clé de sécurité au lieu de saisir votre mot de passe.",
+    "title": "Clés d'accès enregistrées",
+    "description": "Chaque clé d'accès appartient à un appareil. Supprimez-en une pour l'empêcher de se connecter.",
+    "unconfigured": "Les clés d'accès ne sont pas activées sur ce serveur. Définissez le domaine dans l'environnement puis redémarrez.",
+    "empty": "Aucune clé d'accès pour l'instant. Ajoutez-en une pour vous connecter sans mot de passe.",
+    "add": "Ajouter une clé d'accès",
+    "adding": "En attente de votre appareil…",
+    "add_title": "Ajouter une clé d'accès",
+    "add_description": "Votre appareil vous demandera de confirmer. Donnez un nom à cette clé pour la reconnaître plus tard.",
+    "add_success": "Clé d'accès ajoutée",
+    "add_failed": "Impossible d'ajouter la clé d'accès",
+    "name_label": "Nom",
+    "name_placeholder": "iPhone",
+    "rename": "Renommer",
+    "rename_title": "Renommer la clé d'accès",
+    "rename_failed": "Impossible de renommer la clé d'accès",
+    "remove": "Supprimer",
+    "remove_title": "Supprimer cette clé d'accès ?",
+    "remove_desc": "« {{name}} » ne pourra plus se connecter.",
+    "remove_last_warning": "C'est votre dernière clé d'accès : la connexion se fera de nouveau uniquement par mot de passe.",
+    "remove_success": "Clé d'accès supprimée",
+    "remove_failed": "Impossible de supprimer la clé d'accès",
+    "added": "Ajoutée le {{date}}",
+    "last_used": "dernière utilisation {{time}}",
+    "never_used": "jamais utilisée",
+    "unsupported": "Ce navigateur ne peut pas créer de clés d'accès.",
+    "desktop_unavailable_title": "Inutile sur ordinateur",
+    "desktop_unavailable_description": "L'application de bureau ouvre vos données directement et ne se connecte jamais à un serveur : il n'y a donc rien à gérer ici."
+  }
 }

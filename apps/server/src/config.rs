@@ -6,6 +6,7 @@ use crate::auth::{
     decode_secret_key, derive_database_key, derive_keys, AuthConfig, CookieSecurePolicy,
 };
 use crate::oidc::OidcConfig;
+use crate::passkeys::WebauthnConfig;
 
 #[derive(Clone)]
 pub struct Config {
@@ -34,6 +35,8 @@ pub struct Config {
     pub auth: Option<AuthConfig>,
     /// OIDC SSO config. Present when `WF_OIDC_ISSUER_URL` + `WF_OIDC_CLIENT_ID` are set.
     pub oidc: Option<OidcConfig>,
+    /// Passkey (WebAuthn) config. Present when `WF_WEBAUTHN_RP_ID` is set.
+    pub webauthn: Option<WebauthnConfig>,
     /// Expose the `/mcp` endpoint (WF_MCP_ENABLED, default false).
     pub mcp_enabled: bool,
     /// Write agent tool calls to the audit log (WF_MCP_AUDIT_ENABLED,
@@ -93,6 +96,7 @@ impl Config {
             .filter(|hash| !hash.is_empty());
 
         let oidc = OidcConfig::from_env()?;
+        let webauthn = WebauthnConfig::from_env()?;
 
         // The session signer is needed whenever ANY auth method is enabled.
         let auth = if password_hash.is_some() || oidc.is_some() {
@@ -142,6 +146,14 @@ impl Config {
             anyhow::bail!(
                 "WF_CORS_ALLOW_ORIGINS cannot be \"*\" when authentication is enabled. \
                  Set explicit origins, e.g. WF_CORS_ALLOW_ORIGINS=https://my.domain.com"
+            );
+        }
+
+        if webauthn.is_some() && auth.is_none() {
+            anyhow::bail!(
+                "WF_WEBAUTHN_RP_ID is set but no authentication is configured. \
+                 Passkeys are registered from inside an authenticated session, so set \
+                 WF_AUTH_PASSWORD_HASH first, then add passkeys from Settings."
             );
         }
 
@@ -198,6 +210,7 @@ impl Config {
             secrets_encryption_key,
             auth,
             oidc,
+            webauthn,
             mcp_enabled,
             mcp_audit_enabled,
             mcp_allowed_hosts,

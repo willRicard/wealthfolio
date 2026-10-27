@@ -571,6 +571,7 @@
       "market_data": "Dados de mercado",
       "ai_providers": "Provedores de IA",
       "agent_access": "Acesso de agentes de IA",
+      "passkeys": "Chaves de acesso",
       "addons": "Extensões",
       "about": "Sobre"
     },
@@ -588,6 +589,7 @@
       "market_data": "Provedores, sincronização e importações",
       "ai_providers": "Configurar a IA para análise da carteira",
       "agent_access": "Servidor MCP e tokens de agente",
+      "passkeys": "Início de sessão com impressão digital e Face ID",
       "addons": "Amplie o Wealthfolio com funções",
       "about": "Informações do aplicativo"
     }
@@ -1793,5 +1795,36 @@
   "cloud_backup_hint_running": "Você pode continuar usando o Wealthfolio enquanto salvamos seu backup criptografado na nuvem.",
   "cloud_backup_hint_failed": "Não conseguimos concluir o backup. Tentaremos novamente de forma automática, ou você pode tentar agora.",
   "cloud_backup_retry_label": "Próxima tentativa",
-  "cloud_backup_retry_now": "Tentar o backup novamente"
+  "cloud_backup_retry_now": "Tentar o backup novamente",
+  "passkeys": {
+    "page_heading": "Chaves de acesso",
+    "page_text": "Inicie sessão com a impressão digital, o rosto ou uma chave de segurança em vez de escrever a palavra-passe.",
+    "title": "Chaves de acesso registadas",
+    "description": "Cada chave de acesso pertence a um dispositivo. Remova uma para impedir que inicie sessão.",
+    "unconfigured": "As chaves de acesso não estão ativadas neste servidor. Defina o domínio no ambiente e reinicie.",
+    "empty": "Ainda não há chaves de acesso. Adicione uma para entrar sem palavra-passe.",
+    "add": "Adicionar chave de acesso",
+    "adding": "A aguardar o seu dispositivo…",
+    "add_title": "Adicionar uma chave de acesso",
+    "add_description": "O seu dispositivo vai pedir confirmação. Dê um nome a esta chave para a reconhecer mais tarde.",
+    "add_success": "Chave de acesso adicionada",
+    "add_failed": "Não foi possível adicionar a chave de acesso",
+    "name_label": "Nome",
+    "name_placeholder": "iPhone",
+    "rename": "Mudar o nome",
+    "rename_title": "Mudar o nome da chave de acesso",
+    "rename_failed": "Não foi possível mudar o nome",
+    "remove": "Remover",
+    "remove_title": "Remover esta chave de acesso?",
+    "remove_desc": "«{{name}}» deixará de conseguir iniciar sessão.",
+    "remove_last_warning": "Esta é a sua última chave de acesso, por isso o início de sessão volta a ser apenas com palavra-passe.",
+    "remove_success": "Chave de acesso removida",
+    "remove_failed": "Não foi possível remover a chave de acesso",
+    "added": "Adicionada a {{date}}",
+    "last_used": "última utilização {{time}}",
+    "never_used": "nunca utilizada",
+    "unsupported": "Este navegador não consegue criar chaves de acesso.",
+    "desktop_unavailable_title": "Desnecessário no computador",
+    "desktop_unavailable_description": "A aplicação para computador abre os seus dados diretamente e nunca inicia sessão num servidor, por isso não há nada a gerir aqui."
+  }
 }
