@@ -138,24 +138,27 @@ test.describe("Dashboard spending deep links", () => {
     await expect(page.getByText("123.45").first()).toBeVisible({ timeout: 15000 });
   });
 
-  test("5. Month selection links carry that month's range", async () => {
-    const today = new Date();
-    const monthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
-    await gotoAppPath(
-      page,
-      `/dashboard?tab=spending&spendingInterval=YTD&spendingMonth=${monthKey}`,
-    );
+  for (const direction of ["ltr", "rtl"]) {
+    test(`5. Month selection links carry that month's range (${direction})`, async () => {
+      const today = new Date();
+      const monthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+      await gotoAppPath(
+        page,
+        `/dashboard?tab=spending&spendingInterval=YTD&spendingMonth=${monthKey}&dir=${direction}`,
+      );
+      await expect(page.locator("html")).toHaveAttribute("dir", direction);
 
-    const row = page.locator('a[href*="status=uncategorized"]').first();
-    await expect(row).toBeVisible({ timeout: 30000 });
+      const row = page.locator('a[href*="status=uncategorized"]').first();
+      await expect(row).toBeVisible({ timeout: 30000 });
 
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
-    const href = await row.getAttribute("href");
-    expect(href).not.toBeNull();
-    const params = new URLSearchParams(href!.split("?")[1]);
-    expect(params.get("from")).toBe(toLocalISO(monthStart));
-    expect(params.get("to")).toBe(toLocalISO(monthEnd));
-  });
+      const href = await row.getAttribute("href");
+      expect(href).not.toBeNull();
+      const params = new URLSearchParams(href!.split("?")[1]);
+      expect(params.get("from")).toBe(toLocalISO(monthStart));
+      expect(params.get("to")).toBe(toLocalISO(monthEnd));
+    });
+  }
 });

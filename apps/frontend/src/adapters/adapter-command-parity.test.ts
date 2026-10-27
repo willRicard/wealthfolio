@@ -639,6 +639,17 @@ describe("scope-based routing — performance filters", () => {
   });
 });
 
+describe("agent token permission editing", () => {
+  it("uses PATCH with encoded ID and a scope-only request body", async () => {
+    const mock = stubFetch({ id: "key/1", scopes: ["holdings:read"] });
+    await invoke("update_agent_access_token_scopes", { id: "key/1", scopes: ["holdings:read"] });
+    const { url, method, body } = lastCall(mock);
+    expect(url).toBe("/api/v1/agent-access/tokens/key%2F1");
+    expect(method).toBe("PATCH");
+    expect(JSON.parse(body as string)).toEqual({ scopes: ["holdings:read"] });
+  });
+});
+
 describe("procurement transport", () => {
   const itemId = "917d3182-80d0-4cd1-b03c-05fa8d997227";
   const activityId = "e3166bb8-24fa-4719-bc8e-41e677b56d73";

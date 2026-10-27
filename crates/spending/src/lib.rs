@@ -46,3 +46,4 @@ pub use error::SpendingError;
 
 #[cfg(feature = "attachments")]
 pub mod transaction_attachment_files;
+pub use fx::CalculationQuality;

@@ -364,6 +364,14 @@ export const ALLOWED_API_METHODS = new Set([
   "exchangeRates.add",
   "exchangeRates.getRatesForDates",
   "spending.isEnabled",
+  "spending.getContext",
+  "spending.getBudget",
+  "spending.getEvents",
+  "spending.getEventTypes",
+  "spending.assignCategory",
+  "spending.unassignCategory",
+  "spending.setEvent",
+  "spending.upsertBudgetTarget",
   "spending.searchCashActivities",
   "spending.getReport",
   "spending.getCategories",
@@ -1229,7 +1237,7 @@ export class AddonIframeManager {
 
     this.themeObserver = new MutationObserver(this.scheduleThemeBroadcast);
     this.themeObserver.observe(document.documentElement, {
-      attributeFilter: ["class", "style"],
+      attributeFilter: ["class", "style", "data-theme"],
       attributes: true,
     });
     this.themeObserver.observe(document.body, {

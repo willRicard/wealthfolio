@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
+import { isActivityEditCancelled, useActivitySplitReview } from "./activity-split-review-provider";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,6 +8,7 @@ import * as z from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { useEffectOnChange } from "@/hooks/use-effect-on-change";
 import {
   claimTransactionAttachmentDrafts,
   createActivity,
@@ -36,6 +38,7 @@ import { QueryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { invalidateSpendingCaches } from "../lib/invalidation";
 import type { Account, Activity, ActivityCreate, ActivityUpdate } from "@/lib/types";
+import { invalidTypeError, requiredError } from "@/lib/zod-errors";
 
 import {
   Button,
@@ -83,7 +86,7 @@ import { AdvancedOptionsSection } from "@/pages/activity/components/forms/fields
 import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
-import type { CashFlowBucket } from "../types/cash-activity";
+import type { ActivitySplit, CashFlowBucket } from "../types/cash-activity";
 import {
   cashActivityFlowMetadata,
   resolveCashActivitySubtype,
@@ -107,7 +110,7 @@ function buildFormSchema(t: TFunction) {
       "INTEREST",
       "CREDIT",
     ]),
-    activityDate: z.date({ required_error: t("spending:cashForm.pickDate") }),
+    activityDate: z.date({ error: requiredError(t("spending:cashForm.pickDate")) }),
     amount: z.coerce.number().min(0, { message: t("spending:cashForm.amountNonNegative") }),
     notes: z.string().optional(),
     detailedNotes: z.string().max(20000).optional(),
@@ -115,7 +118,7 @@ function buildFormSchema(t: TFunction) {
     // never sees these; a foreign charge on a domestic card needs both.
     currency: z.string().optional(),
     fxRate: z.coerce
-      .number({ invalid_type_error: t("activity:form.err_fxrate_number") })
+      .number({ error: invalidTypeError(t("activity:form.err_fxrate_number")) })
       .positive({ message: t("activity:form.err_fxrate_positive") })
       .optional(),
     /** "<taxonomyId>:<categoryId>" or "" */
@@ -189,6 +192,7 @@ interface CashActivityFormProps {
   onOpenChange: (open: boolean) => void;
   activity?: Activity & {
     cashFlowBucket?: CashFlowBucket;
+    splits?: ActivitySplit[];
     categoryAssignmentId?: string;
     categoryTaxonomyId?: string;
     categoryId?: string;
@@ -204,6 +208,7 @@ export function CashActivityForm({
   onTransferClick,
 }: CashActivityFormProps) {
   const { t } = useTranslation();
+  const reviewEdits = useActivitySplitReview();
   const formSchema = useMemo(() => buildFormSchema(t), [t]);
   const isEditing = !!activity?.id;
   const isMobile = useIsMobileViewport();
@@ -295,7 +300,7 @@ export function CashActivityForm({
   const [eventId, setEventId] = useState<string | null>(activity?.eventId ?? null);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: {
       accountId: activity?.accountId ?? "",
       activityType: (activity?.activityType as FormValues["activityType"]) ?? "WITHDRAWAL",
@@ -312,7 +317,7 @@ export function CashActivityForm({
     },
   });
 
-  useEffect(() => {
+  useEffectOnChange(() => {
     if (open) {
       form.reset({
         accountId: activity?.accountId ?? spendingAccounts[0]?.id ?? "",
@@ -452,7 +457,8 @@ export function CashActivityForm({
           detailedNotes: values.detailedNotes ?? "",
           metadata: cashActivityFlowMetadata(values.activityType, subtype, activity?.metadata),
         };
-        saved = await updateActivity(update);
+        const [reviewed] = await reviewEdits([update]);
+        saved = await updateActivity(reviewed);
       } else {
         const create: ActivityCreate = {
           accountId: values.accountId,
@@ -525,8 +531,8 @@ export function CashActivityForm({
       closeForm(false);
     },
     onError: (e: unknown) => {
-      invalidateSpendingCaches(qc);
       qc.invalidateQueries({ queryKey: [QueryKeys.TRANSACTION_ATTACHMENTS, targetKey] });
+      if (isActivityEditCancelled(e)) return;
       toast.error(t("spending:cashForm.saveFailed", { message: (e as Error).message ?? e }));
     },
   });
@@ -645,7 +651,7 @@ export function CashActivityForm({
                         name="activityType"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-lg font-semibold leading-none">
+                            <FormLabel className="text-lg leading-none font-semibold">
                               {t("spending:cashForm.selectType")}
                             </FormLabel>
                             <FormControl>
@@ -834,7 +840,11 @@ export function CashActivityForm({
                             <FormLabel>
                               {isNeutralBucket ? t("spending:filters.category") : categoryLabel}
                             </FormLabel>
-                            {isNeutralBucket ? (
+                            {(activity?.splits?.length ?? 0) > 0 ? (
+                              <p className="text-muted-foreground rounded-md border px-3 py-2 text-sm">
+                                {t("spending:split.categoryProtected")}
+                              </p>
+                            ) : isNeutralBucket ? (
                               <div className="border-input bg-muted/40 text-muted-foreground h-input-height flex items-center rounded-md border px-3 py-2 text-sm">
                                 {t("spending:cashForm.neutralTransfer")}
                               </div>
@@ -848,7 +858,7 @@ export function CashActivityForm({
                                   <FormControl>
                                     <button
                                       type="button"
-                                      className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+                                      className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none"
                                       aria-label={
                                         currentCat
                                           ? t("spending:transactions.changeCategory", {
@@ -901,7 +911,7 @@ export function CashActivityForm({
                         trigger={
                           <button
                             type="button"
-                            className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+                            className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none"
                             aria-label={
                               eventId && eventsById.get(eventId)
                                 ? t("spending:transactions.changeEvent", {

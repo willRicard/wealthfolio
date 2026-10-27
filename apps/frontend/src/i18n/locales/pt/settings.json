@@ -9,7 +9,6 @@
   "language_auto": "Automático (detectar do sistema)",
   "language_updated": "Idioma atualizado com sucesso",
   "language_update_failed": "Não foi possível atualizar o idioma",
-  "theme": "Tema",
   "theme_light": "Claro",
   "theme_dark": "Escuro",
   "theme_system": "Sistema",
@@ -104,7 +103,15 @@
   "appearance_font_title": "Tipo de fonte",
   "appearance_font_description": "Escolha o tipo de fonte utilizado em toda a interface.",
   "appearance_theme_title": "Tema",
-  "appearance_theme_description": "Selecione seu tema preferido para o aplicativo.",
+  "appearance_theme_description": "Escolha uma paleta cuidadosamente selecionada. Cada tema inclui uma aparência clara e uma escura.",
+  "appearance_mode_title": "Modo de aparência",
+  "appearance_mode_description": "Claro, escuro ou igual ao sistema.",
+  "appearance_theme_designed_for_dark": "{{theme}} foi criado para o modo escuro.",
+  "appearance_theme_designed_for_light": "{{theme}} foi criado para o modo claro.",
+  "appearance_switch_to_dark": "Mudar para escuro",
+  "appearance_switch_to_light": "Mudar para claro",
+  "appearance_theme_suggests": "{{theme}} sugere {{value}}",
+  "appearance_use_theme_defaults": "Usar padrões do tema",
   "appearance_menu_bar": "Mostrar barra de menu",
   "appearance_menu_bar_description": "Ative para exibir a barra de menu do aplicativo.",
   "appearance_theme_required": "Selecione um tema.",
@@ -197,11 +204,15 @@
   "limits_form_group_name_label": "Nome do grupo",
   "limits_form_group_name_placeholder": "ex., TFSA, 401(k), RRSP",
   "limits_form_group_name_description": "Nome do grupo de limite de aporte",
+  "limits_form_group_name_required": "O nome do grupo é obrigatório",
   "limits_form_limit_amount_label": "Valor do limite",
   "limits_form_limit_amount_placeholder": "ex., 6.000,00",
   "limits_form_limit_amount_description": "Valor máximo de aporte permitido",
+  "limits_form_limit_amount_number": "O valor do limite deve ser um número positivo.",
+  "limits_form_limit_amount_non_negative": "O valor do limite não pode ser negativo.",
   "limits_form_year_label": "Ano",
   "limits_form_year_placeholder": "ex., 2024",
+  "limits_form_year_invalid": "Ano inválido",
   "limits_form_start_date_label": "Data de início",
   "limits_form_end_date_label": "Data de fim",
   "limits_form_date_description": "As datas são definidas por padrão de 1º de janeiro a 31 de dezembro do ano selecionado",
@@ -873,6 +884,7 @@
     "validation_code_required": "O código é obrigatório",
     "validation_code_format": "Somente letras minúsculas alfanuméricas e hífens",
     "validation_enable_one_source": "Ative pelo menos uma fonte de preços",
+    "validation_priority_min": "A prioridade deve ser um número inteiro maior ou igual a 1",
     "validation_url_required": "A URL é obrigatória",
     "validation_url_format": "A URL deve começar com http:// ou https://",
     "validation_price_path_required": "O caminho do preço é obrigatório",
@@ -1243,6 +1255,7 @@
       "update_error": "Não foi possível atualizar a categoria.",
       "created": "Categoria criada.",
       "create_error": "Não foi possível criar a categoria.",
+      "duplicate_error": "Outra categoria já usa esta chave. Tente outro nome.",
       "tab_expense_one": "Gasto ({{count}})",
       "tab_expense_other": "Gasto ({{count}})",
       "tab_expense_many": "Gasto ({{count}})",
@@ -1502,7 +1515,7 @@
         "description": "Ler a saúde da carteira e as verificações de diagnóstico."
       },
       "classification_read": {
-        "label": "Classificação (leitura)",
+        "label": "Classificação de ativos (leitura)",
         "description": "Ler as classificações e taxonomias de instrumentos."
       },
       "activities_draft": {
@@ -1514,29 +1527,51 @@
         "description": "Confirmar atividades, atualizar as existentes e vincular ou desvincular transferências. Requer o escopo de rascunho."
       },
       "classification_suggest": {
-        "label": "Classificação: sugerir",
+        "label": "Classificação de ativos — Classificação: sugerir",
         "description": "Sugerir classificações de instrumentos para revisão."
       },
       "classification_write": {
-        "label": "Classificação: aplicar/gravar",
+        "label": "Classificação de ativos — Classificação: aplicar/gravar",
         "description": "Aplicar rascunhos de classificação revisados. Requer o escopo de sugestão."
       },
       "market_data_write": {
         "label": "Dados de mercado: gravar",
         "description": "Salvar preços (cotações) revisados de ativos existentes. Requer o escopo de posições (leitura)."
+      },
+      "spending_read": {
+        "label": "Ver despesas",
+        "description": "Ler transações de contas de despesas, categorias, divisões, regras, eventos, relatórios e orçamentos."
+      },
+      "spending_write": {
+        "label": "Organizar despesas",
+        "description": "Gerir categorias, atribuições, divisões, regras e eventos. Requer Ver despesas."
+      },
+      "budget_write": {
+        "label": "Gerir orçamentos",
+        "description": "Alterar orçamentos predefinidos e mensais, grupos, reservas e saldos transitados. Requer Ver despesas."
       }
     },
     "preset": {
       "read_only": "Somente leitura",
       "read_activity_draft": "Leitura + rascunho",
       "read_activity_write": "Leitura + escrita",
-      "read_activity_write_classification_suggest": "Leitura + escrita + classificar"
+      "read_activity_write_classification_suggest": "Leitura + escrita de transações + classificação de ativos",
+      "spending_view": "Despesas — consulta",
+      "spending_organize": "Despesas — organização",
+      "spending_budgets": "Despesas — orçamentos"
     },
     "copied_generic": "{{label}} copiado para a área de transferência.",
     "hero_aria": "Status do acesso de agentes de IA",
     "pat_scope_custom_one": "Personalizado · {{count}} escopo",
     "pat_scope_custom_other": "Personalizado · {{count}} escopos",
-    "pat_scope_custom_many": "Personalizado · {{count}} escopos"
+    "pat_scope_custom_many": "Personalizado · {{count}} escopos",
+    "scope_locked_spending_title": "Necessário para Organizar despesas ou Gerir orçamentos",
+    "dialog_presets": "Predefinições de acesso",
+    "edit_permissions": "Editar permissões",
+    "edit_title": "Permissões de {{name}}",
+    "edit_description": "A chave permanece igual. As permissões valem para as próximas solicitações. Atualize as ferramentas ou reconecte o cliente para descobrir as novas ferramentas autorizadas.",
+    "edit_success": "Permissões atualizadas",
+    "edit_failed": "Falha ao atualizar permissões"
   },
   "tax_add_category": "Adicionar categoria",
   "tax_export": "Exportar",

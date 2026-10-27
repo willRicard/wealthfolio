@@ -127,6 +127,23 @@ describe("CashActivityForm currency", () => {
     platformMock.isMobileViewport = false;
   });
 
+  it("directs split category changes to the explicit split editor", () => {
+    render(
+      <CashActivityForm
+        open
+        onOpenChange={vi.fn()}
+        activity={{ ...foreignCharge, splits: [{ id: "split-1" } as never] }}
+      />,
+      { wrapper },
+    );
+    expect(
+      screen.getByText(
+        "Split allocations are protected. Edit or explicitly replace them in the split editor.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pick a category" })).not.toBeInTheDocument();
+  });
+
   /**
    * The currency used to be recomputed from the account on every save. Saving
    * an untouched foreign charge therefore rewrote it to the account's own
@@ -240,6 +257,11 @@ describe("CashActivityForm currency", () => {
     });
   });
 });
+
+vi.mock("@/features/spending/components/activity-split-review-provider", () => ({
+  useActivitySplitReview: () => async (updates: unknown[]) => updates,
+  isActivityEditCancelled: () => false,
+}));
 
 describe("CashActivityForm mobile steps", () => {
   beforeEach(() => {

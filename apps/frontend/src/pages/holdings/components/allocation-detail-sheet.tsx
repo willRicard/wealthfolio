@@ -7,9 +7,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@wealthfolio/ui/components/ui/sheet";
-import { AmountDisplay, Skeleton } from "@wealthfolio/ui";
+import { AmountDisplay, chartSliceColor, Skeleton } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import { getHoldingsByAllocation } from "@/adapters";
 import { namedChild, namedChildren } from "@/lib/allocation-children";
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
+import { useEffectOnChange } from "@/hooks/use-effect-on-change";
 import { HoldingType } from "@/lib/constants";
 import type {
   AccountScope,
@@ -54,7 +55,6 @@ export function AllocationDetailSheet({
   const { isBalanceHidden } = useBalancePrivacy();
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedCategoryName, setSelectedCategoryName] = useState<string | null>(null);
-  const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   const residualName = useCallback(
@@ -63,7 +63,7 @@ export function AllocationDetailSheet({
   );
 
   // Set initial category when sheet opens
-  useEffect(() => {
+  useEffectOnChange(() => {
     if (isOpen && allocation?.categories?.length) {
       const categoryId = initialCategoryId ?? allocation.categories[0]?.categoryId ?? null;
       // Try direct match on top-level
@@ -88,11 +88,9 @@ export function AllocationDetailSheet({
           setExpandedParents(new Set([category.categoryId]));
           setSelectedCategoryId(childMatch.categoryId);
           setSelectedCategoryName(childMatch.categoryName);
-          setSelectedColor(childMatch.color);
         } else {
           setSelectedCategoryId(category.categoryId);
           setSelectedCategoryName(category.categoryName);
-          setSelectedColor(category.color);
           // Auto-expand if it has children
           if (category.children?.length) {
             setExpandedParents(new Set([category.categoryId]));
@@ -136,15 +134,10 @@ export function AllocationDetailSheet({
     holdingsLoading ||
     (hasRequestedCategory && !holdingsError && !!allocationHoldings && !holdingsMatchSelection);
 
-  const handleSegmentClick = useCallback(
-    (categoryId: string, categoryName: string) => {
-      const category = allocation?.categories?.find((c) => c.categoryId === categoryId);
-      setSelectedCategoryId(categoryId);
-      setSelectedCategoryName(categoryName);
-      setSelectedColor(category?.color ?? null);
-    },
-    [allocation?.categories],
-  );
+  const handleSegmentClick = useCallback((categoryId: string, categoryName: string) => {
+    setSelectedCategoryId(categoryId);
+    setSelectedCategoryName(categoryName);
+  }, []);
 
   const handleParentClick = useCallback((category: CategoryAllocation) => {
     const hasChildren = category.children && category.children.length > 0;
@@ -165,13 +158,11 @@ export function AllocationDetailSheet({
     // Always select the parent
     setSelectedCategoryId(category.categoryId);
     setSelectedCategoryName(category.categoryName);
-    setSelectedColor(category.color);
   }, []);
 
   const handleChildClick = useCallback((child: CategoryAllocation) => {
     setSelectedCategoryId(child.categoryId);
     setSelectedCategoryName(child.categoryName);
-    setSelectedColor(child.color);
   }, []);
 
   const handleHoldingClick = useCallback(
@@ -186,7 +177,6 @@ export function AllocationDetailSheet({
   const handleClearSelection = useCallback(() => {
     setSelectedCategoryId(null);
     setSelectedCategoryName(null);
-    setSelectedColor(null);
   }, []);
 
   // Reset state when sheet closes
@@ -195,7 +185,6 @@ export function AllocationDetailSheet({
       if (!open) {
         setSelectedCategoryId(null);
         setSelectedCategoryName(null);
-        setSelectedColor(null);
         setExpandedParents(new Set());
       }
       onOpenChange(open);
@@ -205,6 +194,16 @@ export function AllocationDetailSheet({
 
   const categories = allocation?.categories ?? [];
   const hasData = categories.length > 0;
+  // The list uses the chart colours by position, as the bar above it and the Insights
+  // donut do; a child takes its parent's colour.
+  const selectedIndex = categories.findIndex(
+    (category) =>
+      category.categoryId === selectedCategoryId ||
+      namedChildren(category, residualName).some(
+        (child) => child.categoryId === selectedCategoryId,
+      ),
+  );
+  const selectedColor = selectedIndex >= 0 ? chartSliceColor(selectedIndex) : undefined;
 
   return (
     <Sheet open={isOpen} onOpenChange={handleOpenChange}>
@@ -267,7 +266,7 @@ export function AllocationDetailSheet({
                       {/* Color dot + name */}
                       <div
                         className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: category.color }}
+                        style={{ backgroundColor: chartSliceColor(idx) }}
                       />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">
                         {category.categoryName}
@@ -302,7 +301,7 @@ export function AllocationDetailSheet({
                               return (
                                 <div
                                   key={child.categoryId}
-                                  className={`flex cursor-pointer items-center gap-3 py-2.5 pe-4 ps-11 transition-colors ${
+                                  className={`flex cursor-pointer items-center gap-3 py-2.5 ps-11 pe-4 transition-colors ${
                                     isChildSelected ? "bg-muted" : "hover:bg-muted/50"
                                   } ${childIdx > 0 ? "border-t border-dashed" : ""}`}
                                   onClick={(e) => {
@@ -312,7 +311,7 @@ export function AllocationDetailSheet({
                                 >
                                   <div
                                     className="h-2 w-2 shrink-0 rounded-full"
-                                    style={{ backgroundColor: child.color }}
+                                    style={{ backgroundColor: chartSliceColor(idx) }}
                                   />
                                   <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
                                     {child.categoryName}
@@ -348,7 +347,7 @@ export function AllocationDetailSheet({
                     i18nKey="holdings:holdings_in_category"
                     values={{ category: selectedCategoryName }}
                     components={{
-                      1: <span style={{ color: selectedColor ?? undefined }} />,
+                      1: <span style={{ color: selectedColor }} />,
                     }}
                   />
                 </h3>
@@ -415,35 +414,39 @@ export function AllocationDetailSheet({
                         ].join(":")
                       : `${categoryId}:${holding.id}`;
                     return (
-                      <div
-                        key={rowKey}
-                        className={cn(
-                          "flex items-center gap-3 py-3 transition-colors",
-                          canNavigate ? "hover:bg-muted/30 cursor-pointer" : "cursor-default",
-                        )}
-                        onClick={() => handleHoldingClick(holding)}
-                      >
-                        <TickerAvatar
-                          symbol={avatarSymbol}
-                          assetId={holding.id}
-                          exchangeMic={holding.exchangeMic}
-                          instrumentType={holding.instrumentType}
-                          className="h-9 w-9"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold">{primaryLabel}</p>
-                          <p className="text-muted-foreground truncate text-xs">{secondaryLabel}</p>
-                        </div>
-                        <div className="text-end">
-                          <AmountDisplay
-                            value={holding.marketValue}
-                            currency={baseCurrency}
-                            isHidden={isBalanceHidden}
-                            className="text-sm font-medium"
+                      // The list's divider sits on the wrapper so the row's hover can reach past its content.
+                      <div key={rowKey}>
+                        <div
+                          className={cn(
+                            "-mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors",
+                            canNavigate ? "hover:bg-muted/30 cursor-pointer" : "cursor-default",
+                          )}
+                          onClick={() => handleHoldingClick(holding)}
+                        >
+                          <TickerAvatar
+                            symbol={avatarSymbol}
+                            assetId={holding.id}
+                            exchangeMic={holding.exchangeMic}
+                            instrumentType={holding.instrumentType}
+                            className="h-9 w-9"
                           />
-                          <p className="text-muted-foreground text-xs">
-                            {holding.weightInCategory.toFixed(1)}%
-                          </p>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold">{primaryLabel}</p>
+                            <p className="text-muted-foreground truncate text-xs">
+                              {secondaryLabel}
+                            </p>
+                          </div>
+                          <div className="text-end">
+                            <AmountDisplay
+                              value={holding.marketValue}
+                              currency={baseCurrency}
+                              isHidden={isBalanceHidden}
+                              className="text-sm font-medium"
+                            />
+                            <p className="text-muted-foreground text-xs">
+                              {holding.weightInCategory.toFixed(1)}%
+                            </p>
+                          </div>
                         </div>
                       </div>
                     );

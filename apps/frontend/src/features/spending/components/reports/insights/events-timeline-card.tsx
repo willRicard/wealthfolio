@@ -29,6 +29,7 @@ import type { EventSpendingSummary } from "../../../types/event";
 import { useEventDialog } from "../../event-dialog-provider";
 import { getEventColors } from "./event-colors";
 import { CARD_CLASS, LABEL_CLASS } from "./insights-shared";
+import { Card } from "@wealthfolio/ui/components/ui/card";
 
 export interface EventsTimelineCardProps {
   events: EventSpendingSummary[];
@@ -238,7 +239,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   }, [events]);
 
   return (
-    <div className={CARD_CLASS} ref={containerRef}>
+    <Card className={CARD_CLASS} ref={containerRef}>
       {/* HEADER */}
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -607,7 +608,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
       {/* Summary strip */}
       <div className="border-border/40 mt-3 grid grid-cols-2 gap-x-0 gap-y-3 border-t pt-3 md:grid-cols-4">
         <SummaryCell label={tr("spending:timeline.acrossEvents", { count: events.length })}>
-          <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-sm font-semibold tracking-tight tabular-nums">
             <PrivacyAmount value={computed.totalSpent} currency={currency} />
           </div>
           <div className="text-muted-foreground/80 text-2xs mt-0.5">
@@ -672,7 +673,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
           </SummaryCell>
         )}
       </div>
-    </div>
+    </Card>
   );
 };
 

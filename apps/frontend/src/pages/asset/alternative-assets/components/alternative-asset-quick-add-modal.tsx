@@ -5,6 +5,7 @@ import {
   type LoanSetupField,
 } from "./loan-error-text";
 import { useLoanSchedulePreview } from "../hooks/use-loan-calculation";
+import { useEffectOnChange } from "@/hooks/use-effect-on-change";
 import { parseLocalDate } from "@/lib/utils";
 import { LoanInterestMethodSelect } from "./loan-interest-method-select";
 import { useState, useMemo, useCallback, useEffect, useId } from "react";
@@ -217,7 +218,7 @@ export function AlternativeAssetQuickAddModal({
   const { createMutation } = useAlternativeAssetMutations();
 
   // Reset form when modal opens
-  useEffect(() => {
+  useEffectOnChange(() => {
     if (open) {
       // Skip step 1 if a defaultKind is provided
       setStep(defaultKind ? 2 : 1);
@@ -341,7 +342,9 @@ export function AlternativeAssetQuickAddModal({
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   // A refusal answers what was submitted, not the form as edited since.
-  useEffect(() => setSubmitError(null), [formData]);
+  useEffectOnChange(() => {
+    setSubmitError(null);
+  }, [formData]);
   const handleSubmit = async () => {
     if (!canProceed || refusedTerms || createMutation.isPending) return;
 
@@ -470,7 +473,7 @@ export function AlternativeAssetQuickAddModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-140 flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0"
+        className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-140"
         mobileClassName="flex h-[90vh] flex-col"
       >
         {/* Header with progress indicator */}
@@ -834,7 +837,7 @@ export function AlternativeAssetQuickAddModal({
                           aria-expanded={moreOptions}
                           aria-controls={moreOptionsId}
                           onClick={() => setMoreOptions((shown) => !shown)}
-                          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex items-center gap-1 rounded-sm text-sm focus-visible:outline-none focus-visible:ring-2"
+                          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex items-center gap-1 rounded-sm text-sm focus-visible:ring-2 focus-visible:outline-none"
                         >
                           <Icons.ChevronRight
                             className={cn(

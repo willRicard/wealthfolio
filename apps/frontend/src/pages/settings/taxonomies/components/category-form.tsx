@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -28,6 +28,7 @@ import {
 import type { TaxonomyCategory } from "@/lib/types";
 import { useCreateCategory, useUpdateCategory, useDeleteCategory } from "@/hooks/use-taxonomies";
 import { toast } from "sonner";
+import { useEffectOnChange } from "@/hooks/use-effect-on-change";
 
 interface CategoryFormValues {
   name: string;
@@ -94,7 +95,7 @@ export function CategoryForm({
   });
 
   // Reset form when category changes
-  useEffect(() => {
+  useEffectOnChange(() => {
     form.reset({
       name: category?.name ?? "",
       key: category?.key ?? "",
@@ -105,7 +106,7 @@ export function CategoryForm({
 
   // Auto-generate key from name in create mode
   const watchName = form.watch("name");
-  useEffect(() => {
+  useEffectOnChange(() => {
     if (isCreateMode && watchName) {
       form.setValue("key", generateKey(watchName), { shouldDirty: true });
     }

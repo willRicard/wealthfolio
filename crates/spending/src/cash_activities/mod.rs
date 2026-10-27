@@ -8,7 +8,7 @@ pub mod traits;
 
 pub use model::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
-    CashActivitySortField, CashActivityStatusFilter, SortDirection,
+    CashActivitySortField, CashActivityStatusFilter, SortDirection, SpendingContext,
 };
 pub use service::{populate_base_amounts, CashActivityService};
 pub use traits::CashActivityServiceTrait;

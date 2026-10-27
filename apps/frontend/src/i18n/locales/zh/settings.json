@@ -9,7 +9,6 @@
   "language_auto": "自动（根据系统检测）",
   "language_updated": "语言更新成功",
   "language_update_failed": "语言更新失败",
-  "theme": "主题",
   "theme_light": "浅色",
   "theme_dark": "深色",
   "theme_system": "系统",
@@ -104,7 +103,15 @@
   "appearance_font_title": "字体",
   "appearance_font_description": "选择整个界面所使用的字体。",
   "appearance_theme_title": "主题",
-  "appearance_theme_description": "为应用选择您偏好的主题。",
+  "appearance_theme_description": "选择精心设计的配色方案。每个主题均提供浅色和深色外观。",
+  "appearance_mode_title": "外观模式",
+  "appearance_mode_description": "浅色、深色或跟随系统。",
+  "appearance_theme_designed_for_dark": "{{theme}} 专为深色模式设计。",
+  "appearance_theme_designed_for_light": "{{theme}} 专为浅色模式设计。",
+  "appearance_switch_to_dark": "切换到深色",
+  "appearance_switch_to_light": "切换到浅色",
+  "appearance_theme_suggests": "{{theme}} 建议使用{{value}}",
+  "appearance_use_theme_defaults": "使用主题默认设置",
   "appearance_menu_bar": "显示菜单栏",
   "appearance_menu_bar_description": "切换以显示应用菜单栏。",
   "appearance_theme_required": "请选择一个主题。",
@@ -197,11 +204,15 @@
   "limits_form_group_name_label": "分组名称",
   "limits_form_group_name_placeholder": "例如 TFSA、401(k)、RRSP",
   "limits_form_group_name_description": "供款限额分组的名称",
+  "limits_form_group_name_required": "分组名称为必填项",
   "limits_form_limit_amount_label": "限额金额",
   "limits_form_limit_amount_placeholder": "例如 6,000.00",
   "limits_form_limit_amount_description": "允许的最大供款金额",
+  "limits_form_limit_amount_number": "限额金额必须为正数。",
+  "limits_form_limit_amount_non_negative": "限额金额不能为负数。",
   "limits_form_year_label": "年份",
   "limits_form_year_placeholder": "例如 2024",
+  "limits_form_year_invalid": "年份无效",
   "limits_form_start_date_label": "开始日期",
   "limits_form_end_date_label": "结束日期",
   "limits_form_date_description": "日期默认为所选年份的 1 月 1 日至 12 月 31 日",
@@ -858,6 +869,7 @@
     "validation_code_required": "代码为必填项",
     "validation_code_format": "仅限小写字母数字和连字符",
     "validation_enable_one_source": "请至少启用一个价格源",
+    "validation_priority_min": "优先级必须是大于或等于 1 的整数",
     "validation_url_required": "URL 为必填项",
     "validation_url_format": "URL 必须以 http:// 或 https:// 开头",
     "validation_price_path_required": "价格路径为必填项",
@@ -1195,6 +1207,7 @@
       "update_error": "更新类别失败。",
       "created": "类别已创建。",
       "create_error": "创建类别失败。",
+      "duplicate_error": "此类别键已被使用，请尝试其他名称。",
       "tab_expense_other": "支出（{{count}}）",
       "tab_income_other": "收入（{{count}}）",
       "tab_savings_other": "储蓄（{{count}}）"
@@ -1445,7 +1458,7 @@
         "description": "读取投资组合健康度和诊断检查。"
       },
       "classification_read": {
-        "label": "分类（读取）",
+        "label": "资产分类（读取）",
         "description": "读取金融工具分类和分类法。"
       },
       "activities_draft": {
@@ -1457,27 +1470,49 @@
         "description": "提交活动、更新现有活动，并关联或取消关联转账。需要草稿作用域。"
       },
       "classification_suggest": {
-        "label": "分类——建议",
+        "label": "资产分类 — 建议",
         "description": "为审核建议金融工具分类。"
       },
       "classification_write": {
-        "label": "分类——应用/写入",
+        "label": "资产分类 — 应用/写入",
         "description": "应用已审核的分类草稿。需要建议作用域。"
       },
       "market_data_write": {
         "label": "市场数据——写入",
         "description": "为现有资产保存已审核的价格（报价）。需要持仓与价值（读取）作用域。"
+      },
+      "spending_read": {
+        "label": "查看支出",
+        "description": "读取支出账户中的交易、类别、拆分、规则、事件、报告和预算。"
+      },
+      "spending_write": {
+        "label": "整理支出",
+        "description": "管理支出类别、分配、拆分、规则和事件。需要查看支出权限。"
+      },
+      "budget_write": {
+        "label": "管理预算",
+        "description": "更改默认和月度预算、分组、缓冲金额及结转。需要查看支出权限。"
       }
     },
     "preset": {
       "read_only": "仅读取",
       "read_activity_draft": "读取 + 草稿",
       "read_activity_write": "读取 + 写入",
-      "read_activity_write_classification_suggest": "读取 + 写入 + 分类"
+      "read_activity_write_classification_suggest": "读取 + 交易写入 + 资产分类",
+      "spending_view": "支出 — 查看",
+      "spending_organize": "支出 — 整理",
+      "spending_budgets": "支出 — 预算"
     },
     "copied_generic": "{{label}} 已复制到剪贴板。",
     "hero_aria": "AI 代理访问状态",
-    "pat_scope_custom_other": "自定义 · {{count}} 个作用域"
+    "pat_scope_custom_other": "自定义 · {{count}} 个作用域",
+    "scope_locked_spending_title": "整理支出或管理预算所必需",
+    "dialog_presets": "访问权限预设",
+    "edit_permissions": "编辑权限",
+    "edit_title": "{{name}} 的权限",
+    "edit_description": "Key 保持不变，新权限对后续请求生效。新增工具可能需要刷新工具列表或重新连接客户端。",
+    "edit_success": "权限已更新",
+    "edit_failed": "权限更新失败"
   },
   "tax_add_category": "添加类别",
   "tax_export": "导出",

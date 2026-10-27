@@ -131,39 +131,41 @@ npx playwright test && npx playwright show-report
 
 ## Test files
 
-| File                                   | What it tests                                                                                                                          |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `01-happy-path.spec.ts`                | Onboarding, accounts, deposits, trades                                                                                                 |
-| `02-activities.spec.ts`                | All activity types                                                                                                                     |
-| `03-fx-cash-balance.spec.ts`           | FX cash balances                                                                                                                       |
-| `04-csv-import.spec.ts`                | CSV activity import                                                                                                                    |
-| `05-form-validation.spec.ts`           | Form field validation errors                                                                                                           |
-| `06-activity-data-grid.spec.ts`        | Activity data grid interactions                                                                                                        |
-| `07-asset-creation.spec.ts`            | Manual asset creation and editing                                                                                                      |
-| `08-holdings-and-performance.spec.ts`  | Holdings and performance views                                                                                                         |
-| `09-bulk-holdings.spec.ts`             | Bulk holdings CSV import                                                                                                               |
-| `10-symbol-mapping-validation.spec.ts` | Symbol mapping real-time validation (Yahoo Finance, Börse Frankfurt)                                                                   |
-| `13-multi-exchange-import.spec.ts`     | Multi-exchange CSV import: XETRA/LSE/TSX/NASDAQ resolution, region & instrument-type classification (issue #855)                       |
-| `16-final-cash-policy.spec.ts`         | Final-cash writer policy through CSV import: persisted amounts + review flags per policy row, fixture-computed ledger total            |
-| `20-asset-exchange-edit.spec.ts`       | Asset exchange edits: unchanged keys, duplicate-identity errors, and ISO-only venues                                                   |
-| `21-bond-live.spec.ts`                 | Opt-in real-provider bond checks; requires `WF_BOND_LIVE_E2E=1` and a server started without fixture mode                              |
-| `22-bond-fixtures.spec.ts`             | UI bond creation/buy, CUSIP/ISIN reuse, provider terms, numerical Treasury prices, holdings valuation, and type filters                |
-| `23-loan-lifecycle.spec.ts`            | Shared loan fixture lifecycle, net-worth consistency, loan creation, and asset-type presentation                                       |
-| `24-loan-editing.spec.ts`              | Loan event management, form validation, interest conventions, balance edits, and recalculation                                         |
-| `25-loan-payments.spec.ts`             | Loan payments from a cash account: Paid from, linking from Spending and the loan, suggestions, extra repayments, unlinking             |
-| `26-cost-basis-transfer.spec.ts`       | A transfer between accounts on different cost basis methods; switching the sender's method recalculates the receiver                   |
-| `27-cost-basis-methods.spec.ts`        | Switching an account between FIFO, LIFO, HIFO and WAC in the account form, and the book cost each leaves                               |
-| `29-asset-mobile-scroll.spec.ts`       | Mobile asset section switching preserves page scroll while neighboring virtualized activity lists mount                                |
-| `30-activity-scroll.spec.ts`           | Desktop asset/account activity tabs preserve page scroll; Spending selection and mobile tab switching preserve scroll                  |
-| `30-activity-sticky-header.spec.ts`    | Activity tables pin their column header below the page header when they fit, and scroll sideways when they don't                       |
-| `31-manual-liability.spec.ts`          | Manual loan origination, balance correction/deletion, principal fallback, and net-worth consistency                                    |
-| `33-metric-tile-mobile-tap.spec.ts`    | On a phone, tapping a return tile's animated value opens its explanation                                                               |
-| `31-formatting-regions.spec.ts`        | Austria, Romania, and Bulgaria formatting selections persist after saving and reloading settings                                       |
-| `33-cash-balance-edit.spec.ts`         | Desktop/mobile cash adjustments persist the selected currency's native delta without changing other currencies                         |
+| File                                   | What it tests                                                                                                               |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `01-happy-path.spec.ts`                | Onboarding, accounts, deposits, trades                                                                                      |
+| `02-activities.spec.ts`                | All activity types                                                                                                          |
+| `03-fx-cash-balance.spec.ts`           | FX cash balances                                                                                                            |
+| `04-csv-import.spec.ts`                | CSV activity import                                                                                                         |
+| `05-form-validation.spec.ts`           | Form field validation errors                                                                                                |
+| `06-activity-data-grid.spec.ts`        | Activity data grid interactions                                                                                             |
+| `07-asset-creation.spec.ts`            | Manual asset creation and editing                                                                                           |
+| `08-holdings-and-performance.spec.ts`  | Holdings and performance views                                                                                              |
+| `09-bulk-holdings.spec.ts`             | Bulk holdings CSV import                                                                                                    |
+| `10-symbol-mapping-validation.spec.ts` | Symbol mapping real-time validation (Yahoo Finance, Börse Frankfurt)                                                        |
+| `13-multi-exchange-import.spec.ts`     | Multi-exchange CSV import: XETRA/LSE/TSX/NASDAQ resolution, region & instrument-type classification (issue #855)            |
+| `16-final-cash-policy.spec.ts`         | Final-cash writer policy through CSV import: persisted amounts + review flags per policy row, fixture-computed ledger total |
+| `20-asset-exchange-edit.spec.ts`       | Asset exchange edits: unchanged keys, duplicate-identity errors, and ISO-only venues                                        |
+| `21-bond-live.spec.ts`                 | Opt-in real-provider bond checks; requires `WF_BOND_LIVE_E2E=1` and a server started without fixture mode                   |
+| `22-bond-fixtures.spec.ts`             | UI bond creation/buy, CUSIP/ISIN reuse, provider terms, numerical Treasury prices, holdings valuation, and type filters     |
+| `23-loan-lifecycle.spec.ts`            | Shared loan fixture lifecycle, net-worth consistency, loan creation, and asset-type presentation                            |
+| `24-loan-editing.spec.ts`              | Loan event management, form validation, interest conventions, balance edits, and recalculation                              |
+| `25-loan-payments.spec.ts`             | Loan payments from a cash account: Paid from, linking from Spending and the loan, suggestions, extra repayments, unlinking  |
+| `26-cost-basis-transfer.spec.ts`       | A transfer between accounts on different cost basis methods; switching the sender's method recalculates the receiver        |
+| `27-cost-basis-methods.spec.ts`        | Switching an account between FIFO, LIFO, HIFO and WAC in the account form, and the book cost each leaves                    |
+| `29-asset-mobile-scroll.spec.ts`       | Mobile asset section switching preserves page scroll while neighboring virtualized activity lists mount                     |
+| `30-activity-scroll.spec.ts`           | Desktop asset/account activity tabs preserve page scroll; Spending selection and mobile tab switching preserve scroll       |
+| `30-activity-sticky-header.spec.ts`    | Activity tables pin their column header below the page header when they fit, and scroll sideways when they don't            |
+| `31-manual-liability.spec.ts`          | Manual loan origination, balance correction/deletion, principal fallback, and net-worth consistency                         |
+| `33-metric-tile-mobile-tap.spec.ts`    | On a phone, tapping a return tile's animated value opens its explanation                                                    |
+| `31-formatting-regions.spec.ts`        | Austria, Romania, and Bulgaria formatting selections persist after saving and reloading settings                            |
+| `33-cash-balance-edit.spec.ts`         | Desktop/mobile cash adjustments persist the selected currency's native delta without changing other currencies              |
 | `33-procurement.spec.ts`               | Procurement item/photo lifecycle and shared thumbnail cache; activity purchases create, edit, reopen, clear, and price-history updates |
-| `34-activity-column-widths.spec.ts`    | The activity table's column widths stay the same while scrolling brings rows with wider values into view                               |
-| `35-holdings-sticky-header.spec.ts`    | Holdings, account Holdings tab, Securities: header stays pinned as rows scroll, in short windows and on Shift+Tab (#2125)              |
-| `36-phone-taps-and-swipes.spec.ts`     | Phone: Spending's Next doesn't save, Performance's Plus stays on screen, swipes scroll period rows                                     |
+| `34-activity-column-widths.spec.ts`    | The activity table's column widths stay the same while scrolling brings rows with wider values into view                    |
+| `35-holdings-sticky-header.spec.ts`    | Holdings, account Holdings tab, Securities: header stays pinned as rows scroll, in short windows and on Shift+Tab (#2125)   |
+| `36-phone-taps-and-swipes.spec.ts`     | Phone: Spending's Next doesn't save, Performance's Plus stays on screen, swipes scroll period rows                          |
+| `38-account-section-scroll.spec.ts`    | Phone, in WebKit: switching an account between Holdings and Activities keeps the page's scroll position                     |
+| `34-import-mapping-sticky.spec.ts`     | CSV import Mapping step: the Activity Preview's header row and # column stay pinned as it scrolls (#2010)                   |
 
 ---
 

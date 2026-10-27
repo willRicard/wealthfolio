@@ -1,5 +1,5 @@
 import type { TaxonomyAllocation } from "@/lib/types";
-import { PrivacyAmount, useNumberFormatting } from "@wealthfolio/ui";
+import { chartSliceColor, PrivacyAmount, useNumberFormatting } from "@wealthfolio/ui";
 import { Card } from "@wealthfolio/ui/components/ui/card";
 import {
   Tooltip,
@@ -20,17 +20,6 @@ interface CompactAllocationStripProps {
   variant?: VariantType;
   onSegmentClick?: (categoryId: string, categoryName: string) => void;
 }
-
-// Theme colors for Security Types
-const THEME_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-  "var(--chart-6)",
-  "var(--chart-7)",
-];
 
 // Risk colors - muted Flexoki tones that don't attract attention
 const RISK_COLORS: Record<string, string> = {
@@ -109,7 +98,7 @@ export function CompactAllocationStrip({
     if (sorted.length <= maxCategories) {
       return sorted.map((c, i) => ({
         ...c,
-        color: THEME_COLORS[i % THEME_COLORS.length],
+        color: chartSliceColor(i),
       }));
     }
 
@@ -121,7 +110,7 @@ export function CompactAllocationStrip({
     return [
       ...top.map((c, i) => ({
         ...c,
-        color: THEME_COLORS[i % THEME_COLORS.length],
+        color: chartSliceColor(i),
       })),
       {
         id: "other",
@@ -129,7 +118,7 @@ export function CompactAllocationStrip({
         label: t("holdings:other"),
         value: otherValue,
         percent: otherPercent,
-        color: THEME_COLORS[THEME_COLORS.length - 1],
+        color: "var(--chart-stone)",
         isEmpty: false,
       },
     ];
@@ -151,7 +140,7 @@ export function CompactAllocationStrip({
   if (processedCategories.length === 0) {
     return (
       <Card className="p-3">
-        <p className="text-muted-foreground text-sm font-medium uppercase tracking-wider">
+        <p className="text-muted-foreground text-sm font-medium tracking-wider uppercase">
           {title}
         </p>
         <p className="text-muted-foreground mt-2 text-xs">{t("holdings:no_data")}</p>
@@ -163,7 +152,7 @@ export function CompactAllocationStrip({
     <Card className="p-3">
       <TooltipProvider>
         {/* Title */}
-        <p className="text-muted-foreground mb-2 text-sm font-medium uppercase tracking-wider">
+        <p className="text-muted-foreground mb-2 text-sm font-medium tracking-wider uppercase">
           {title}
         </p>
 
