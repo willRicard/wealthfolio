@@ -180,6 +180,85 @@ for (const compact of [false, true]) {
     await page.getByRole("checkbox", { name: `Select ${name} edited`, exact: true }).check();
     const selectionBar = page.getByRole("region", { name: "Bulk actions", exact: true });
     await expect(selectionBar).toContainText("2 selected");
+    await selectionBar.getByRole("button", { name: "Compare", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Compare items", exact: true });
+    await expect(dialog.getByText("No purchases yet.")).toBeVisible();
+    await dialog
+      .locator('[data-slot="dialog-footer"]')
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+
+    // Give both selected items two prices so the real chart draws two paths.
+    const api = `${BASE_URL}/api/v1`;
+    const settings = await page.request.get(`${api}/settings`);
+    expect(settings.ok()).toBeTruthy();
+    const { baseCurrency: currency } = await settings.json();
+    const itemsResponse = await page.request.get(`${api}/procurement/items`);
+    expect(itemsResponse.ok()).toBeTruthy();
+    const selectedItems = ((await itemsResponse.json()) as { id: string; name: string }[]).filter(
+      (item) => item.name === name || item.name === `${name} edited`,
+    );
+    expect(selectedItems).toHaveLength(2);
+    const accountResponse = await page.request.post(`${api}/accounts`, {
+      data: {
+        name: `Compare ${name}`,
+        accountType: "CASH",
+        currency,
+        isDefault: false,
+        isActive: true,
+        trackingMode: "TRANSACTIONS",
+      },
+    });
+    expect(accountResponse.ok()).toBeTruthy();
+    const account = await accountResponse.json();
+    for (const date of ["2026-01-02T12:00:00Z", "2026-03-02T12:00:00Z"]) {
+      const activityResponse = await page.request.post(`${api}/activities`, {
+        data: {
+          accountId: account.id,
+          activityType: "WITHDRAWAL",
+          activityDate: date,
+          currency,
+          amount: "50",
+          fee: "0",
+          needsReview: false,
+          notes: "Compare shop",
+        },
+      });
+      expect(activityResponse.ok()).toBeTruthy();
+      const activity = await activityResponse.json();
+      const purchases = await page.request.put(
+        `${api}/procurement/activities/${activity.id}/purchases`,
+        {
+          data: selectedItems.map((item, i) => ({
+            itemId: item.id,
+            activityId: activity.id,
+            quantity: "1",
+            subtotal: String(10 + i * 5 + (date.includes("03-02") ? 5 : 0)),
+          })),
+        },
+      );
+      expect(purchases.ok()).toBeTruthy();
+    }
+    for (const direction of ["ltr", "rtl"]) {
+      await gotoAppPath(page, `/procurement?dir=${direction}`);
+      await page.getByRole("checkbox", { name: `Select ${name}`, exact: true }).check();
+      await page.getByRole("checkbox", { name: `Select ${name} edited`, exact: true }).check();
+      await selectionBar.getByRole("button", { name: "Compare", exact: true }).click();
+      dialog = page.getByRole("dialog", { name: "Compare items", exact: true });
+      await expect(dialog.locator(".recharts-line-curve")).toHaveCount(2);
+      const legend = dialog.locator(".recharts-legend-wrapper");
+      for (const item of selectedItems)
+        await expect(
+          legend.getByText(`${item.name} (${currency}/個)`, { exact: true }),
+        ).toBeVisible();
+      await dialog.screenshot({
+        path: testInfo.outputPath(`procurement-compare-${direction}.png`),
+      });
+      await dialog
+        .locator('[data-slot="dialog-footer"]')
+        .getByRole("button", { name: "Close", exact: true })
+        .click();
+    }
     await selectionBar.getByRole("button", { name: "Clear", exact: true }).click();
     await expect(selectionBar).not.toBeVisible();
     await page.getByRole("checkbox", { name: `Select ${name}`, exact: true }).check();

@@ -63,5 +63,12 @@
   "taxIncluded": "Imposte incluse",
   "taxExcluded8": "Imposte escluse (8%)",
   "taxExcluded10": "Imposte escluse (10%)",
-  "taxExempt": "Esente da imposte"
+  "taxExempt": "Esente da imposte",
+  "compare": "Confronta",
+  "compareTitle": "Confronta articoli",
+  "compareDescription": "Prezzi unitari nel tempo nella valuta di base.",
+  "compareMinTwo": "Seleziona almeno due articoli da confrontare.",
+  "mixedUnits": "Questi articoli usano unità diverse. Confronta i prezzi unitari con attenzione.",
+  "change": "Variazione",
+  "noPricesInRange": "Nessun prezzo convertito in questo periodo."
 }

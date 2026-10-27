@@ -62,5 +62,12 @@
   "taxIncluded": "Inklusive Steuer",
   "taxExcluded8": "Zuzüglich 8 % Steuer",
   "taxExcluded10": "Zuzüglich 10 % Steuer",
-  "taxExempt": "Steuerbefreit"
+  "taxExempt": "Steuerbefreit",
+  "compare": "Vergleichen",
+  "compareTitle": "Artikel vergleichen",
+  "compareDescription": "Stückpreise im Zeitverlauf in Ihrer Basiswährung.",
+  "compareMinTwo": "Wählen Sie mindestens zwei Artikel zum Vergleichen aus.",
+  "mixedUnits": "Diese Artikel verwenden unterschiedliche Einheiten. Vergleichen Sie die Stückpreise mit Bedacht.",
+  "change": "Änderung",
+  "noPricesInRange": "Keine umgerechneten Preise in diesem Zeitraum."
 }

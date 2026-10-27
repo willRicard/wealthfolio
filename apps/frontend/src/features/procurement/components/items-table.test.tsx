@@ -3,6 +3,22 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ItemsTable } from "./items-table";
 import type { ProcurementItemWithStats } from "../types";
 
+vi.mock("./items-compare", () => ({
+  ItemsCompare: ({
+    items,
+    onClose,
+  }: {
+    items: ProcurementItemWithStats[];
+    onClose: () => void;
+  }) => (
+    <div role="dialog" aria-label="compareTitle">
+      {items.map((item) => (
+        <span key={item.id}>{item.name}</span>
+      ))}
+      <button onClick={onClose}>close</button>
+    </div>
+  ),
+}));
 vi.mock("@/hooks", () => ({ useHapticFeedback: () => ({ triggerHaptic: vi.fn() }) }));
 vi.mock("@/hooks/use-taxonomies", () => ({
   useTaxonomy: () => ({ data: { categories: [] } }),
@@ -134,4 +150,19 @@ it("shows selection on a separate line and clears it without deleting items", ()
   expect(screen.getByRole("checkbox", { name: "selectItem Item 1" })).not.toBeChecked();
   expect(screen.getByRole("checkbox", { name: "selectItem Item 2" })).not.toBeChecked();
   expect(onDeleteMany).not.toHaveBeenCalled();
+});
+
+it("compares only the selected items, requiring at least two", () => {
+  render(<ItemsTable {...actions} items={[item(1), item(2), item(3)]} onDeleteMany={vi.fn()} />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "selectItem Item 1" }));
+  expect(screen.getByRole("button", { name: "compare" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "selectItem Item 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "compare" }));
+  const dialog = screen.getByRole("dialog", { name: "compareTitle" });
+  expect(within(dialog).getByText("Item 1")).toBeInTheDocument();
+  expect(within(dialog).getByText("Item 2")).toBeInTheDocument();
+  expect(within(dialog).queryByText("Item 3")).not.toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "close" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "selectItem Item 1" })).toBeChecked();
 });

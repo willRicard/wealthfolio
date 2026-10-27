@@ -61,5 +61,12 @@
   "taxIncluded": "含稅",
   "taxExcluded8": "未稅（8%）",
   "taxExcluded10": "未稅（10%）",
-  "taxExempt": "免稅"
+  "taxExempt": "免稅",
+  "compare": "比較",
+  "compareTitle": "比較商品",
+  "compareDescription": "以基準貨幣顯示單位價格的變化。",
+  "compareMinTwo": "請至少選擇兩件商品進行比較。",
+  "mixedUnits": "這些商品使用不同單位，請謹慎比較單位價格。",
+  "change": "變化",
+  "noPricesInRange": "此時間範圍內沒有已換算的價格。"
 }

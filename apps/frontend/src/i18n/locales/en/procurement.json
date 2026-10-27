@@ -62,5 +62,12 @@
   "taxIncluded": "Tax-included",
   "taxExcluded8": "Tax-excluded 8%",
   "taxExcluded10": "Tax-excluded 10%",
-  "taxExempt": "Tax-exempt"
+  "taxExempt": "Tax-exempt",
+  "compare": "Compare",
+  "compareTitle": "Compare items",
+  "compareDescription": "Unit prices over time in your base currency.",
+  "compareMinTwo": "Select at least two items to compare.",
+  "mixedUnits": "These items use different units. Compare unit prices with care.",
+  "change": "Change",
+  "noPricesInRange": "No converted prices in this range."
 }

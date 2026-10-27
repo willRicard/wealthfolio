@@ -61,5 +61,12 @@
   "taxIncluded": "税込",
   "taxExcluded8": "税抜8%",
   "taxExcluded10": "税抜10%",
-  "taxExempt": "非課税"
+  "taxExempt": "非課税",
+  "compare": "比較",
+  "compareTitle": "商品の比較",
+  "compareDescription": "基準通貨で単価の推移を表示します。",
+  "compareMinTwo": "比較する商品を2つ以上選択してください。",
+  "mixedUnits": "商品の単位が異なります。単価の比較にはご注意ください。",
+  "change": "変化率",
+  "noPricesInRange": "この期間に換算済みの価格はありません。"
 }

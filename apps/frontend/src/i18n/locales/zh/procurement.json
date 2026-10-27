@@ -61,5 +61,12 @@
   "taxIncluded": "含税",
   "taxExcluded8": "未税（8%）",
   "taxExcluded10": "未税（10%）",
-  "taxExempt": "免税"
+  "taxExempt": "免税",
+  "compare": "比较",
+  "compareTitle": "比较商品",
+  "compareDescription": "以基础货币显示单位价格的变化。",
+  "compareMinTwo": "请至少选择两件商品进行比较。",
+  "mixedUnits": "这些商品使用不同单位，请谨慎比较单位价格。",
+  "change": "变化",
+  "noPricesInRange": "此时间范围内没有已换算的价格。"
 }

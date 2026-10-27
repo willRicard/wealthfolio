@@ -33,6 +33,7 @@ import { DataTableToolbar } from "@wealthfolio/ui/components/ui/data-table/data-
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
+import { ItemsCompare } from "./items-compare";
 import { ItemCompact } from "./item-compact";
 import { ItemActions } from "./item-actions";
 import { UnitPrice } from "./unit-price";
@@ -56,6 +57,7 @@ export function ItemsTable(props: ItemsTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
+  const [comparing, setComparing] = useState<ProcurementItemWithStats[]>();
   const [deleting, setDeleting] = useState<ProcurementItemWithStats[]>();
   const toggleItem = (id: string, checked: boolean) =>
     setSelectedIds((previous) => {
@@ -276,6 +278,7 @@ export function ItemsTable(props: ItemsTableProps) {
         <ItemsSelectionActions
           count={selectedItems.length}
           pending={props.pending}
+          onCompare={() => setComparing(selectedItems)}
           onDelete={() => setDeleting(selectedItems)}
           onClear={() => setSelectedIds(new Set())}
         />
@@ -330,6 +333,7 @@ export function ItemsTable(props: ItemsTableProps) {
         isFetchingNextPage={false}
         hasLoadMoreError={false}
       />
+      {comparing && <ItemsCompare items={comparing} onClose={() => setComparing(undefined)} />}
       <AlertDialog
         open={!!deleting}
         onOpenChange={(open) => {
@@ -384,11 +388,13 @@ function ItemsSelectionActions({
   count,
   pending,
   onDelete,
+  onCompare,
   onClear,
 }: {
   count: number;
   pending: boolean;
   onDelete: () => void;
+  onCompare: () => void;
   onClear: () => void;
 }) {
   const { t } = useTranslation("procurement");
@@ -403,6 +409,16 @@ function ItemsSelectionActions({
         <span className="font-medium">{t("selected", { count })}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending || count < 2}
+          title={count < 2 ? t("compareMinTwo") : undefined}
+          onClick={onCompare}
+        >
+          <Icons.ChartBar className="me-1.5 size-3.5" />
+          {t("compare")}
+        </Button>
         <Button
           size="sm"
           variant="outline"

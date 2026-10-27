@@ -61,5 +61,12 @@
   "taxIncluded": "세금 포함",
   "taxExcluded8": "세금 별도 8%",
   "taxExcluded10": "세금 별도 10%",
-  "taxExempt": "면세"
+  "taxExempt": "면세",
+  "compare": "비교",
+  "compareTitle": "품목 비교",
+  "compareDescription": "기준 통화로 시간에 따른 단가를 표시합니다.",
+  "compareMinTwo": "비교할 품목을 두 개 이상 선택하세요.",
+  "mixedUnits": "품목의 단위가 다릅니다. 단가를 비교할 때 주의하세요.",
+  "change": "변동률",
+  "noPricesInRange": "이 기간에 환산된 가격이 없습니다."
 }
