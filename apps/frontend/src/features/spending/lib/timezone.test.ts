@@ -66,4 +66,13 @@ describe("spending timezone helpers", () => {
     expect(result.start).toEqual({ ...expectedEnd, day: 1 });
     expect(result.end).toEqual(expectedEnd);
   });
+
+  it("matches a month further back when given a month offset", () => {
+    const start = { year: 2026, month: 3, day: 1 };
+    const end = { year: 2026, month: 3, day: 31 };
+    const result = matchingPreviousMonthDates(start, end, -2);
+
+    expect(result.start).toEqual({ year: 2026, month: 1, day: 1 });
+    expect(result.end).toEqual({ year: 2026, month: 1, day: 31 });
+  });
 });

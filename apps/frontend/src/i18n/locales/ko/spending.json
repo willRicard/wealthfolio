@@ -550,7 +550,9 @@
     "source": "출처:",
     "sources": "출처:",
     "multiCurrency": "다중 통화:",
-    "multiCurrencyDetail": "{{asOfDate}} 기준 환율로 {{foreign}}에서 환산한 합계를 {{currency}}로 표시합니다."
+    "multiCurrencyDetail": "{{asOfDate}} 기준 환율로 {{foreign}}에서 환산한 합계를 {{currency}}로 표시합니다.",
+    "comparedWith": "비교 대상",
+    "chooseBaseMonth": "비교할 월 선택"
   },
   "whenYouSpend": {
     "title": "지출 시점",

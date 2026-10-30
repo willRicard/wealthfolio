@@ -281,3 +281,31 @@ describe("period shared with the dashboard", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("period=");
   });
 });
+
+describe("comparison base month", () => {
+  const whereRequests = () =>
+    insightQuery.mock.calls
+      .filter(([, enabled]) => enabled === undefined)
+      .map(([request]) => request);
+
+  it("compares a picked month against the month chosen in the base picker", async () => {
+    render(
+      <MemoryRouter initialEntries={["/spending/insights?stage=where&spendingMonth=2026-03"]}>
+        <SpendingInsightsPage />
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    expect(whereRequests().at(-1)).not.toHaveProperty("compareStartDate");
+
+    await user.click(screen.getByRole("button", { name: "Choose comparison month" }));
+    await user.click(screen.getByRole("button", { name: "January" }));
+
+    expect(whereRequests().at(-1)).toEqual(
+      expect.objectContaining({
+        startDate: "2026-03-01T05:00:00.000Z",
+        compareStartDate: "2026-01-01T05:00:00.000Z",
+        compareEndDate: "2026-02-01T04:59:59.999Z",
+      }),
+    );
+  }, 15_000);
+});

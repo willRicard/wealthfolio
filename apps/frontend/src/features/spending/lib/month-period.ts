@@ -41,6 +41,14 @@ export function addMonthsToMonthKey(monthKey: string, months: number): string {
   return monthKeyFromParts(addCalendarMonths({ ...parts, day: 1 }, months));
 }
 
+/** Whole months from `from` to `to`; negative when `to` is earlier. */
+export function monthsBetweenMonthKeys(from: string, to: string): number {
+  const start = parseMonthKey(from);
+  const end = parseMonthKey(to);
+  if (!start || !end) return 0;
+  return (end.year - start.year) * 12 + (end.month - start.month);
+}
+
 export function monthRange(monthKey: string): DateRange {
   const parts = parseMonthKey(monthKey) ?? parseMonthKey(currentMonthKey());
   const month = parts ?? getZonedDateParts(new Date());

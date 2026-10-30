@@ -556,7 +556,9 @@
     "source": "source:",
     "sources": "sources:",
     "multiCurrency": "Multi-currency:",
-    "multiCurrencyDetail": "totals shown in {{currency}}, FX-converted from {{foreign}} using rates from {{asOfDate}}."
+    "multiCurrencyDetail": "totals shown in {{currency}}, FX-converted from {{foreign}} using rates from {{asOfDate}}.",
+    "comparedWith": "Compared with",
+    "chooseBaseMonth": "Choose comparison month"
   },
   "whenYouSpend": {
     "customSubtitle": "Selected period · spending intensity by weekday and hour.",

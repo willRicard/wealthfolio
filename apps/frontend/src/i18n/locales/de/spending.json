@@ -556,7 +556,9 @@
     "source": "Quelle:",
     "sources": "Quellen:",
     "multiCurrency": "Mehrere Währungen:",
-    "multiCurrencyDetail": "Summen angezeigt in {{currency}}, umgerechnet aus {{foreign}} mit Kursen vom {{asOfDate}}."
+    "multiCurrencyDetail": "Summen angezeigt in {{currency}}, umgerechnet aus {{foreign}} mit Kursen vom {{asOfDate}}.",
+    "comparedWith": "Verglichen mit",
+    "chooseBaseMonth": "Vergleichsmonat wählen"
   },
   "whenYouSpend": {
     "title": "Wann Sie ausgeben",

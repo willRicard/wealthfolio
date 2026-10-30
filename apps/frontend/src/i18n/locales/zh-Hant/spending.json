@@ -556,7 +556,9 @@
     "source": "來源：",
     "sources": "來源：",
     "multiCurrency": "多幣別：",
-    "multiCurrencyDetail": "總額以 {{currency}} 顯示，使用 {{asOfDate}} 的匯率從 {{foreign}} 換算得出。"
+    "multiCurrencyDetail": "總額以 {{currency}} 顯示，使用 {{asOfDate}} 的匯率從 {{foreign}} 換算得出。",
+    "comparedWith": "比較對象",
+    "chooseBaseMonth": "選擇比較月份"
   },
   "whenYouSpend": {
     "title": "何時消費",
