@@ -257,8 +257,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoginError(null);
         clearSsoRedirectGuard();
       } catch (error) {
-        setCookieSession(false);
         if (error instanceof PasskeyCancelled) return;
+        setCookieSession(false);
         setLoginError(error instanceof Error ? error.message : t("auth:context.loginFailed"));
         throw error;
       } finally {
