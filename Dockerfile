@@ -110,7 +110,7 @@ RUN case "$TARGETARCH" in \
  && tar -xzf /tmp/pdfium.tgz -C /pdfium lib/libpdfium.so LICENSE
 
 # Final stage
-FROM alpine:3.19 AS runtime
+FROM alpine:3.24 AS runtime
 WORKDIR /app
 COPY --from=pdfium /pdfium/lib/libpdfium.so /usr/local/lib/libpdfium.so
 COPY --from=pdfium /pdfium/LICENSE /usr/share/licenses/pdfium/LICENSE

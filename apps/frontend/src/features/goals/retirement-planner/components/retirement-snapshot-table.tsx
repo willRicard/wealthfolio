@@ -1,16 +1,9 @@
 import type { RetirementTrajectoryPoint } from "@/lib/types";
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  useAmountFormatting,
-} from "@wealthfolio/ui";
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { usePrivateAmountFormatting } from "../hooks/use-private-amount-formatting";
 
 const PAGE_SIZE = 10;
 
@@ -29,7 +22,7 @@ function SnapshotAmount({
   compact?: boolean;
   empty?: string;
 }) {
-  const formatting = useAmountFormatting();
+  const formatting = usePrivateAmountFormatting();
   if (value <= 0) return empty;
   const scaledValue = scaleForModeAtAge(value, age);
   return compact
@@ -54,7 +47,7 @@ export function RetirementSnapshotTable({
   currency: string;
   scaleForModeAtAge: (value: number, age: number) => number;
 }) {
-  const formatting = useAmountFormatting();
+  const formatting = usePrivateAmountFormatting();
   const { t } = useTranslation();
   const [tablePage, setTablePage] = useState(0);
   const totalPages = Math.ceil(snapshots.length / PAGE_SIZE);
@@ -151,7 +144,9 @@ export function RetirementSnapshotTable({
                   </div>
                 </div>
 
-                <div className="text-2xs mt-1.5 grid grid-cols-4 gap-2 ps-[2.75rem]">
+                {/* At least 3rem a column: four on a phone at the default text size,
+                    fewer once larger text would cut the amounts. */}
+                <div className="text-2xs mt-1.5 grid grid-cols-[repeat(auto-fit,minmax(3rem,1fr))] gap-2 ps-[2.75rem]">
                   {mobileMetrics.map((metric) => (
                     <div key={metric.label} className="min-w-0">
                       <div className="text-muted-foreground leading-3">{metric.label}</div>
@@ -167,7 +162,7 @@ export function RetirementSnapshotTable({
                     </div>
                   ))}
                   {hasPensionFunds && (
-                    <div className="col-span-4 min-w-0">
+                    <div className="col-span-full min-w-0">
                       <span className="text-muted-foreground me-1">{t("goals:snapshot.fund")}</span>
                       <span className="font-medium tabular-nums">
                         <SnapshotAmount

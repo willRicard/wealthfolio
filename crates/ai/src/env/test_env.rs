@@ -27,7 +27,7 @@ use wealthfolio_core::{
     errors::DatabaseError,
     goals::{
         AccountValuationMap, Goal, GoalFundingRule, GoalFundingRuleInput, GoalPlan,
-        GoalServiceTrait, NewGoal, PreparedRetirementSimulationInput, SaveGoalPlan,
+        GoalServiceTrait, GoalUpdate, NewGoal, PreparedRetirementSimulationInput, SaveGoalPlan,
     },
     health::{
         checks::{
@@ -853,7 +853,7 @@ impl GoalServiceTrait for MockGoalService {
         unimplemented!("MockGoalService::create_goal")
     }
 
-    async fn update_goal(&self, _goal: Goal) -> CoreResult<Goal> {
+    async fn update_goal(&self, _goal: GoalUpdate) -> CoreResult<Goal> {
         unimplemented!("MockGoalService::update_goal")
     }
 
@@ -885,11 +885,15 @@ impl GoalServiceTrait for MockGoalService {
         unimplemented!("MockGoalService::delete_goal_plan")
     }
 
-    async fn refresh_goal_summary(
-        &self,
-        _goal_id: &str,
-        _valuations: &AccountValuationMap,
-    ) -> CoreResult<Goal> {
+    async fn current_valuation_map(&self) -> CoreResult<AccountValuationMap> {
+        unimplemented!("MockGoalService::current_valuation_map")
+    }
+
+    async fn refresh_all_goal_summaries(&self) -> CoreResult<Vec<Goal>> {
+        unimplemented!("MockGoalService::refresh_all_goal_summaries")
+    }
+
+    async fn refresh_goal_summary(&self, _goal_id: &str) -> CoreResult<Goal> {
         unimplemented!("MockGoalService::refresh_goal_summary")
     }
 
@@ -1792,6 +1796,7 @@ impl MockEnvironment {
     }
 }
 
+#[async_trait::async_trait]
 impl AgentEnvironment for MockEnvironment {
     fn budget_service(&self) -> Arc<dyn wealthfolio_spending::budget::BudgetServiceTrait> {
         unimplemented!("MCP-only service")
@@ -1888,6 +1893,10 @@ impl AgentEnvironment for MockEnvironment {
     fn categorization_rules_service(&self) -> Arc<dyn CategorizationRulesServiceTrait> {
         self.categorization_rules_service.clone()
     }
+
+    async fn run_health_checks(&self) -> CoreResult<HealthStatus> {
+        self.health_service.run_checks(&self.base_currency).await
+    }
 }
 
 impl AiEnvironment for MockEnvironment {
@@ -1909,12 +1918,21 @@ impl AiEnvironment for MockEnvironment {
 #[derive(Default)]
 pub struct MockHealthService {
     pub cached_status: Option<HealthStatus>,
+    /// How many times `run_checks` ran. Each run replaces the cached status,
+    /// as the real service does.
+    pub runs: std::sync::atomic::AtomicUsize,
+    pub last_run: std::sync::Mutex<Option<HealthStatus>>,
 }
 
 #[async_trait::async_trait]
 impl HealthServiceTrait for MockHealthService {
     async fn run_checks(&self, _base_currency: &str) -> CoreResult<HealthStatus> {
-        Ok(HealthStatus::healthy())
+        self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Lets a concurrent refresh start before this run caches its status.
+        tokio::task::yield_now().await;
+        let status = HealthStatus::healthy();
+        *self.last_run.lock().expect("mock lock") = Some(status.clone());
+        Ok(status)
     }
 
     async fn run_checks_with_data(
@@ -1956,7 +1974,8 @@ impl HealthServiceTrait for MockHealthService {
     }
 
     async fn get_cached_status(&self) -> Option<HealthStatus> {
-        self.cached_status.clone()
+        let last_run = self.last_run.lock().expect("mock lock").clone();
+        last_run.or_else(|| self.cached_status.clone())
     }
 
     async fn dismiss_issue(&self, _issue_id: &str, _data_hash: &str) -> CoreResult<()> {

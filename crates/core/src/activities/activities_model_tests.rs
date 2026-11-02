@@ -1027,6 +1027,7 @@ mod tests {
             isin: None,
             force_import: false,
             is_external: None,
+            source_group_id: None,
         };
 
         let converted = NewActivity::from(import);
@@ -1077,6 +1078,7 @@ mod tests {
             isin: None,
             force_import: false,
             is_external: Some(true),
+            source_group_id: None,
         };
 
         let converted = NewActivity::from(import);
@@ -1122,6 +1124,7 @@ mod tests {
                 isin: None,
                 force_import: false,
                 is_external: Some(is_external),
+                source_group_id: None,
             };
 
             let converted = NewActivity::from(import);
@@ -1171,6 +1174,7 @@ mod tests {
             isin: None,
             force_import: false,
             is_external: Some(false),
+            source_group_id: None,
         };
 
         assert!(NewActivity::from(import).metadata.is_none());
@@ -1212,6 +1216,7 @@ mod tests {
             isin: None,
             force_import: false,
             is_external: Some(true),
+            source_group_id: None,
         };
 
         assert!(NewActivity::from(import).metadata.is_none());

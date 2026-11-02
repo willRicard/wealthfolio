@@ -5,9 +5,10 @@ function noop() {
 }
 
 // Treemap heatmap palette, from the theme's --heatmap-* roles: gains blend from
-// --heatmap-positive-low through -mid to -high, losses from --heatmap-negative-low
-// through -mid to -high, and labels use --heatmap-label-dark or -light. The fallback
-// is Classic's (classic.css).
+// --heatmap-gain-low through -mid to -high, losses from --heatmap-loss-low through
+// -mid to -high (the theme's positive and negative ramps, swapped by the Gain and
+// loss colours setting in globals.css), and labels use --heatmap-label-dark or
+// -light. The fallback is Classic's (classic.css).
 export interface TreemapPalette {
   positiveLow: number[];
   positiveMid: number[];
@@ -21,12 +22,12 @@ export interface TreemapPalette {
 }
 
 const paletteTokens = {
-  positiveLow: "heatmap-positive-low",
-  positiveMid: "heatmap-positive-mid",
-  positiveHigh: "heatmap-positive-high",
-  negativeLow: "heatmap-negative-low",
-  negativeMid: "heatmap-negative-mid",
-  negativeHigh: "heatmap-negative-high",
+  positiveLow: "heatmap-gain-low",
+  positiveMid: "heatmap-gain-mid",
+  positiveHigh: "heatmap-gain-high",
+  negativeLow: "heatmap-loss-low",
+  negativeMid: "heatmap-loss-mid",
+  negativeHigh: "heatmap-loss-high",
   labelDark: "heatmap-label-dark",
   labelLight: "heatmap-label-light",
 } as const;
@@ -57,16 +58,12 @@ export function getTreemapPaletteSnapshot(): TreemapPalette {
   const key = JSON.stringify([isDark, colors]);
   if (key === paletteKey) return paletteSnapshot;
 
-  // A canvas resolves any CSS colour syntax (hex, hsl, oklch) to sRGB for the ramp.
-  const context = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  const context = createColorContext();
   const next: TreemapPalette = { ...fallbackPalette, isDark };
   if (context) {
     (Object.keys(paletteTokens) as (keyof typeof paletteTokens)[]).forEach((name, index) => {
       if (!colors[index]) return;
-      context.clearRect(0, 0, 1, 1);
-      context.fillStyle = colors[index];
-      context.fillRect(0, 0, 1, 1);
-      next[name] = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+      next[name] = toSrgb(context, colors[index]);
     });
   }
   paletteKey = key;
@@ -74,7 +71,20 @@ export function getTreemapPaletteSnapshot(): TreemapPalette {
   return paletteSnapshot;
 }
 
-// The palette follows the mode (class) and the theme (data-theme).
+function createColorContext() {
+  return document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+}
+
+// A canvas resolves any CSS colour syntax (hex, hsl, oklch) to sRGB.
+function toSrgb(context: CanvasRenderingContext2D, color: string): number[] {
+  context.clearRect(0, 0, 1, 1);
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+}
+
+// The palette follows the mode (class), the theme (data-theme) and the gain and loss
+// colours (data-gain-colors).
 export function subscribeToTreemapTheme(onStoreChange: () => void): () => void {
   if (typeof document === "undefined" || typeof MutationObserver === "undefined") {
     return noop;
@@ -83,12 +93,13 @@ export function subscribeToTreemapTheme(onStoreChange: () => void): () => void {
   const observer = new MutationObserver(onStoreChange);
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["class", "data-theme"],
+    attributeFilter: ["class", "data-theme", "data-gain-colors"],
   });
   return () => observer.disconnect();
 }
 
 const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+const toCss = (rgb: number[]) => `rgb(${rgb.join(",")})`;
 
 // WCAG contrast ratio between two sRGB colours.
 const luminance = (rgb: number[]) =>
@@ -100,6 +111,33 @@ const contrast = (a: number[], b: number[]) => {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 };
+
+/** The theme's dark or light label, whichever contrasts more with the fill. */
+export function readableLabel(fill: number[], palette: TreemapPalette = fallbackPalette): number[] {
+  return contrast(fill, palette.labelDark) >= contrast(fill, palette.labelLight)
+    ? palette.labelDark
+    : palette.labelLight;
+}
+
+/**
+ * The readable label for each CSS colour, `var()` and `color-mix()` included, as
+ * the page resolves it: an element resolves the colour, a canvas reads its sRGB.
+ * Undefined where there is no canvas.
+ */
+export function readableLabelColors(
+  colors: string[],
+  palette: TreemapPalette,
+): (string | undefined)[] {
+  const context = typeof document === "undefined" ? null : createColorContext();
+  if (!context) return colors.map(() => undefined);
+  const probe = document.body.appendChild(document.createElement("span"));
+  const labels = colors.map((color) => {
+    probe.style.color = color;
+    return toCss(readableLabel(toSrgb(context, getComputedStyle(probe).color), palette));
+  });
+  probe.remove();
+  return labels;
+}
 
 interface TreemapTile {
   fill: string;
@@ -136,7 +174,7 @@ export function getTreemapColor(
       ? lo.map((v, i) => lerp(v, mid[i], t * 2))
       : mid.map((v, i) => lerp(v, hi[i], t * 2 - 1));
   return {
-    fill: `rgb(${c.join(",")})`,
-    isLightTile: contrast(c, palette.labelDark) >= contrast(c, palette.labelLight),
+    fill: toCss(c),
+    isLightTile: readableLabel(c, palette) === palette.labelDark,
   };
 }
