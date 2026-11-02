@@ -26,6 +26,7 @@ import { StageNav, type InsightsStage } from "../components/reports/insights/sta
 import { WhatChangedStage } from "../components/reports/insights/what-changed-stage";
 import { WhenWhereStage } from "../components/reports/insights/when-where-stage";
 import { WhereIAmStage } from "../components/reports/insights/where-i-am-stage";
+import { SpendingBaseMonthPicker } from "../components/spending-base-month-picker";
 import { SpendingPeriodSelector } from "../components/spending-period-toggle";
 import { useCashActivities } from "../hooks/use-cash-activities";
 import { useEventSpendingSummaries } from "../hooks/use-spending-events";
@@ -36,7 +37,9 @@ import { insightToReportProjection, UNCATEGORIZED_CATEGORY_ID } from "../lib/ins
 import {
   addMonthsToMonthKey,
   currentMonthKey,
+  monthKeyFromParts,
   monthReportsRange,
+  monthsBetweenMonthKeys,
   monthLabel,
   parseMonthKey,
   SPENDING_MONTH_PARAM,
@@ -109,10 +112,18 @@ function monthToDateRange(timezone?: string | null): ReportsRange {
   };
 }
 
-function previousMonthMatchingRange(range: ReportsRange, timezone?: string | null): ReportsRange {
+function previousMonthMatchingRange(
+  range: ReportsRange,
+  timezone?: string | null,
+  monthOffset = -1,
+): ReportsRange {
   const currentStart = getZonedDateParts(range.start, timezone);
   const currentEnd = getZonedDateParts(range.end, timezone);
-  const { start: priorStart, end: priorEnd } = matchingPreviousMonthDates(currentStart, currentEnd);
+  const { start: priorStart, end: priorEnd } = matchingPreviousMonthDates(
+    currentStart,
+    currentEnd,
+    monthOffset,
+  );
 
   return {
     start: zonedCalendarDateBoundaryToDate(priorStart, "start", timezone),
@@ -295,14 +306,25 @@ export default function SpendingInsightsPage() {
         : (monthRange ?? periodToReportsRange(period, appTimezone)),
     [customRange, monthRange, period, appTimezone],
   );
+  const singleMonthKey = customRange
+    ? null
+    : range.months === 1
+      ? (customMonth ?? monthKeyFromParts(getZonedDateParts(range.start, appTimezone)))
+      : null;
+  const previousMonthKey = singleMonthKey ? addMonthsToMonthKey(singleMonthKey, -1) : null;
+  const [basePick, setBasePick] = useState<{ forMonth: string; monthKey: string } | null>(null);
+  const baseMonthKey =
+    singleMonthKey && basePick?.forMonth === singleMonthKey ? basePick.monthKey : previousMonthKey;
+  const baseMonthOffset =
+    singleMonthKey && baseMonthKey ? monthsBetweenMonthKeys(singleMonthKey, baseMonthKey) : -1;
   const whatChangedWindow = useMemo(() => {
     if (customRange || customMonth || period !== "MTD") return null;
     const current = monthToDateRange(appTimezone);
     return {
       current,
-      prior: previousMonthMatchingRange(current, appTimezone),
+      prior: previousMonthMatchingRange(current, appTimezone, baseMonthOffset),
     };
-  }, [customRange, customMonth, period, appTimezone]);
+  }, [customRange, customMonth, period, appTimezone, baseMonthOffset]);
   const eventsRange = useMemo(
     () => shiftRangeBack(range, period, eventsWindowOffset, appTimezone, !!customRange),
     [range, period, eventsWindowOffset, appTimezone, customRange],
@@ -319,19 +341,27 @@ export default function SpendingInsightsPage() {
     () => (customRange ? comparisonRange(range, "prior", appTimezone) : null),
     [customRange, range, appTimezone],
   );
+  const pickedBaseRange = useMemo(
+    () =>
+      singleMonthKey && basePick?.forMonth === singleMonthKey
+        ? previousMonthMatchingRange(range, appTimezone, baseMonthOffset)
+        : null,
+    [singleMonthKey, basePick, range, appTimezone, baseMonthOffset],
+  );
+  const comparePriorRange = pickedBaseRange ?? customPriorRange;
   const insightRequest = useMemo(
     () => ({
       startDate: range.start.toISOString(),
       endDate: range.end.toISOString(),
       compare: "prior" as const,
-      ...(customPriorRange
+      ...(comparePriorRange
         ? {
-            compareStartDate: customPriorRange.start.toISOString(),
-            compareEndDate: customPriorRange.end.toISOString(),
+            compareStartDate: comparePriorRange.start.toISOString(),
+            compareEndDate: comparePriorRange.end.toISOString(),
           }
         : {}),
     }),
-    [range, customPriorRange],
+    [range, comparePriorRange],
   );
   const {
     data: insight,
@@ -568,6 +598,16 @@ export default function SpendingInsightsPage() {
         )}
         <StageNav stage={stage} onStageChange={setStageAndUrl} />
 
+        {singleMonthKey && previousMonthKey && baseMonthKey && stage !== "when" && (
+          <div className="flex justify-end">
+            <SpendingBaseMonthPicker
+              value={baseMonthKey}
+              maxMonth={previousMonthKey}
+              onChange={(monthKey) => setBasePick({ forMonth: singleMonthKey, monthKey })}
+            />
+          </div>
+        )}
+
         {insight?.foreignCurrencies && insight.foreignCurrencies.length > 0 && (
           <ForeignCurrencyBanner
             currency={insight.currency}
@@ -602,7 +642,7 @@ export default function SpendingInsightsPage() {
         {stage === "where" && (
           <WhereIAmStage
             range={range}
-            priorRange={customPriorRange ?? undefined}
+            priorRange={comparePriorRange ?? undefined}
             currentReport={insightProjection?.currentReport}
             priorReport={insightProjection?.priorReport}
             months={insightProjection?.months ?? []}
@@ -621,7 +661,7 @@ export default function SpendingInsightsPage() {
         {stage === "changed" && (
           <WhatChangedStage
             range={whatChangedRange}
-            priorRange={whatChangedPriorRange ?? customPriorRange ?? undefined}
+            priorRange={whatChangedPriorRange ?? comparePriorRange ?? undefined}
             timezone={appTimezone}
             currentReport={whatChangedProjection?.currentReport}
             priorReport={whatChangedProjection?.priorReport}

@@ -585,7 +585,9 @@
     "source": "fonte:",
     "sources": "fontes:",
     "multiCurrency": "Multidivisa:",
-    "multiCurrencyDetail": "totais mostrados em {{currency}}, convertidos por câmbio de {{foreign}} usando as taxas de {{asOfDate}}."
+    "multiCurrencyDetail": "totais mostrados em {{currency}}, convertidos por câmbio de {{foreign}} usando as taxas de {{asOfDate}}.",
+    "comparedWith": "Comparado com",
+    "chooseBaseMonth": "Escolher mês de comparação"
   },
   "whenYouSpend": {
     "title": "Quando você gasta",

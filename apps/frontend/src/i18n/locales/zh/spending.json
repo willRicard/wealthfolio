@@ -550,7 +550,9 @@
     "source": "来源：",
     "sources": "来源：",
     "multiCurrency": "多币种：",
-    "multiCurrencyDetail": "总额以 {{currency}} 显示，使用 {{asOfDate}} 的汇率从 {{foreign}} 换算得出。"
+    "multiCurrencyDetail": "总额以 {{currency}} 显示，使用 {{asOfDate}} 的汇率从 {{foreign}} 换算得出。",
+    "comparedWith": "对比",
+    "chooseBaseMonth": "选择对比月份"
   },
   "whenYouSpend": {
     "title": "何时消费",

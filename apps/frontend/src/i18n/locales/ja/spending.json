@@ -550,7 +550,9 @@
     "source": "ソース:",
     "sources": "ソース:",
     "multiCurrency": "複数通貨:",
-    "multiCurrencyDetail": "合計は{{currency}}で表示し、{{asOfDate}}時点のレートで{{foreign}}から換算しています。"
+    "multiCurrencyDetail": "合計は{{currency}}で表示し、{{asOfDate}}時点のレートで{{foreign}}から換算しています。",
+    "comparedWith": "比較対象",
+    "chooseBaseMonth": "比較する月を選択"
   },
   "whenYouSpend": {
     "title": "支出のタイミング",

@@ -161,9 +161,13 @@ export function daysInCalendarMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-export function matchingPreviousMonthDates(start: ZonedCalendarDate, end: ZonedCalendarDate) {
-  const previousStart = addCalendarMonths(start, -1);
-  const previousEnd = addCalendarMonths(end, -1);
+export function matchingPreviousMonthDates(
+  start: ZonedCalendarDate,
+  end: ZonedCalendarDate,
+  monthOffset = -1,
+) {
+  const previousStart = addCalendarMonths(start, monthOffset);
+  const previousEnd = addCalendarMonths(end, monthOffset);
   return {
     start: previousStart,
     end: {

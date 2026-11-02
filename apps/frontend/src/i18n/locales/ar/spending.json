@@ -655,7 +655,9 @@
     "showingZeros": "تُعرض القيم الصفرية أدناه.",
     "source": "المصدر:",
     "sources": "المصادر:",
-    "uncategorized": "غير مصنّف"
+    "uncategorized": "غير مصنّف",
+    "comparedWith": "مقارنة مع",
+    "chooseBaseMonth": "اختر شهر المقارنة"
   },
   "moneyFlow": {
     "action": {
