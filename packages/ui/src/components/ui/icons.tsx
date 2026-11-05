@@ -15,6 +15,7 @@ import {
   BadgeDollarSign,
   BarChart,
   Baseline,
+  Bell,
   Bitcoin,
   Blocks,
   Brain,
@@ -339,6 +340,7 @@ const IconsInternal = {
   Settings2: Settings2,
   // Additional icons for UI components
   Baseline: Baseline,
+  Bell: Bell,
   CalendarIcon: Calendar,
   CaseSensitive: CaseSensitive,
   CheckSquare: CheckSquare,
@@ -983,6 +985,7 @@ export type IconName =
   | "UserSwitch"
   // Additional icons for UI components
   | "Baseline"
+  | "Bell"
   | "CalendarDots"
   | "CalendarIcon"
   | "CaseSensitive"

@@ -40,6 +40,7 @@ async fn connect_test_app() -> (
         auth: None,
         oidc: None,
         webauthn: None,
+        vapid: None,
         mcp_enabled: false,
         mcp_audit_enabled: false,
         mcp_allowed_hosts: None,

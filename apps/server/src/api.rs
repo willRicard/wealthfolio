@@ -60,6 +60,7 @@ pub(crate) mod portable_backups;
 mod portfolio;
 mod portfolios;
 mod procurement;
+mod push;
 mod secrets;
 mod settings;
 pub mod shared;
@@ -220,6 +221,7 @@ fn app_router_with_profiles(
         .merge(procurement::router())
         .merge(transaction_attachments::router())
         .merge(allocation_targets::router())
+        .merge(push::router())
         .merge(agent_access::router());
 
     #[cfg(feature = "device-sync")]

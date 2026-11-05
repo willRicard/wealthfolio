@@ -22,7 +22,7 @@ use wealthfolio_core::portfolio::projection::ProjectionStoreTrait;
 use wealthfolio_core::{
     accounts::AccountService,
     activities::{
-        rebuild_pending_final_cash_accounts, run_final_cash_migration,
+        rebuild_pending_final_cash_accounts, run_final_cash_migration, ActivityRepositoryTrait,
         ActivityService as CoreActivityService, ActivityServiceTrait,
     },
     assets::{
@@ -115,6 +115,7 @@ pub struct AppState {
     pub limits_service: Arc<dyn ContributionLimitServiceTrait + Send + Sync>,
     pub fx_service: Arc<dyn FxServiceTrait + Send + Sync>,
     pub activity_service: Arc<dyn ActivityServiceTrait + Send + Sync>,
+    pub activity_repository: Arc<dyn ActivityRepositoryTrait + Send + Sync>,
     pub asset_service: Arc<dyn AssetServiceTrait + Send + Sync>,
     pub taxonomy_service: Arc<dyn TaxonomyServiceTrait + Send + Sync>,
     pub net_worth_service: Arc<dyn NetWorthServiceTrait + Send + Sync>,
@@ -130,6 +131,7 @@ pub struct AppState {
     pub db_access: db::DbAccess,
     pub database_key: Arc<db::DbEncryptionKey>,
     pub secret_store: Arc<dyn SecretStore>,
+    pub push_service: Option<Arc<crate::push::PushService>>,
     pub event_bus: EventBus,
     pub auth: Option<Arc<AuthManager>>,
     pub oidc: Option<Arc<OidcManager>>,
@@ -1143,6 +1145,14 @@ async fn initialize_profile_state(
     let auth_manager = auth.auth;
     let oidc_manager = auth.oidc;
 
+    let push_service = config.vapid.clone().map(|vapid| {
+        Arc::new(crate::push::PushService::new(
+            vapid,
+            data_root_path.join(crate::push::PUSH_FILE_NAME),
+            config.secrets_encryption_key,
+        ))
+    });
+
     if !final_cash_migration.pending_account_ids.is_empty() {
         // The coordinator serializes and forces a full rebuild per pending
         // account, so the rebuild can run in the background instead of
@@ -1212,6 +1222,7 @@ async fn initialize_profile_state(
         limits_service,
         fx_service: fx_service.clone(),
         activity_service,
+        activity_repository: activity_repository.clone(),
         asset_service,
         taxonomy_service,
         net_worth_service,
@@ -1227,6 +1238,7 @@ async fn initialize_profile_state(
         database_key: Arc::new(db::DbEncryptionKey::from_bytes(&config.database_key)),
         _database_owner: Arc::clone(database_owner),
         secret_store,
+        push_service,
         event_bus,
         auth: auth_manager,
         oidc: oidc_manager,

@@ -34,6 +34,16 @@ export default function SettingsLayout() {
             subtitle: t("settings:nav.subtitles.appearance"),
             icon: <Icons.Monitor className="size-5" />,
           },
+          ...(isTauri
+            ? []
+            : [
+                {
+                  title: t("settings:nav.items.notifications"),
+                  href: "notifications",
+                  subtitle: t("settings:nav.subtitles.notifications"),
+                  icon: <Icons.Bell className="size-5" />,
+                },
+              ]),
         ],
       },
       {

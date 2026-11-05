@@ -7,6 +7,7 @@ use crate::auth::{
 };
 use crate::oidc::OidcConfig;
 use crate::passkeys::WebauthnConfig;
+use crate::push::VapidConfig;
 
 #[derive(Clone)]
 pub struct Config {
@@ -37,6 +38,9 @@ pub struct Config {
     pub oidc: Option<OidcConfig>,
     /// Passkey (WebAuthn) config. Present when `WF_WEBAUTHN_RP_ID` is set.
     pub webauthn: Option<WebauthnConfig>,
+    /// Web Push application server keys. Present when `WF_VAPID_PUBLIC_KEY` and
+    /// `WF_VAPID_PRIVATE_KEY` are both set.
+    pub vapid: Option<VapidConfig>,
     /// Expose the `/mcp` endpoint (WF_MCP_ENABLED, default false).
     pub mcp_enabled: bool,
     /// Write agent tool calls to the audit log (WF_MCP_AUDIT_ENABLED,
@@ -97,6 +101,7 @@ impl Config {
 
         let oidc = OidcConfig::from_env()?;
         let webauthn = WebauthnConfig::from_env()?;
+        let vapid = VapidConfig::from_env()?;
 
         // The session signer is needed whenever ANY auth method is enabled.
         let auth = if password_hash.is_some() || oidc.is_some() {
@@ -211,6 +216,7 @@ impl Config {
             auth,
             oidc,
             webauthn,
+            vapid,
             mcp_enabled,
             mcp_audit_enabled,
             mcp_allowed_hosts,

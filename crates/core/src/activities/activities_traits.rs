@@ -98,6 +98,20 @@ pub trait ActivityRepositoryTrait: Send + Sync {
         });
         Ok(activities)
     }
+    fn get_activities_created_between(
+        &self,
+        start_exclusive: DateTime<Utc>,
+        end_inclusive: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<Activity>> {
+        let mut activities = self.get_activities()?;
+        activities.retain(|activity| {
+            activity.created_at > start_exclusive && activity.created_at <= end_inclusive
+        });
+        activities.sort_by_key(|activity| std::cmp::Reverse(activity.created_at));
+        activities.truncate(limit);
+        Ok(activities)
+    }
     fn get_transfer_activities_touching_account_ids_in_date_range(
         &self,
         account_ids: &[String],

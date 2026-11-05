@@ -1786,6 +1786,28 @@ impl ActivityRepositoryTrait for ActivityRepository {
         Ok(activities_db.into_iter().map(Activity::from).collect())
     }
 
+    fn get_activities_created_between(
+        &self,
+        start_exclusive: DateTime<Utc>,
+        end_inclusive: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<Activity>> {
+        let mut conn = get_connection(&self.pool)?;
+
+        let activities_db = activities::table
+            .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+            .filter(accounts::is_archived.eq(false))
+            .filter(activities::created_at.gt(start_exclusive.to_rfc3339()))
+            .filter(activities::created_at.le(end_inclusive.to_rfc3339()))
+            .select(ActivityDB::as_select())
+            .order(activities::created_at.desc())
+            .limit(limit as i64)
+            .load::<ActivityDB>(&mut conn)
+            .map_err(StorageError::from)?;
+
+        Ok(activities_db.into_iter().map(Activity::from).collect())
+    }
+
     fn get_transfer_activities_touching_account_ids_in_date_range(
         &self,
         account_ids: &[String],

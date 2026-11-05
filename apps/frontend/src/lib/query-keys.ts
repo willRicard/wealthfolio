@@ -179,6 +179,10 @@ export const QueryKeys = {
   // Passkeys (WebAuthn sign-in credentials)
   PASSKEYS: "passkeys",
 
+  // Web Push notifications (web build only)
+  PUSH_CONFIG: "pushConfig",
+  PUSH_PREFERENCES: "pushPreferences",
+
   // Health Center
   HEALTH_STATUS: "healthStatus",
   HEALTH_CONFIG: "healthConfig",

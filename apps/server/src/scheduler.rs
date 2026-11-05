@@ -203,6 +203,14 @@ pub fn start_background_workers(state: Arc<AppState>) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .push(worker);
+
+    if let Some(worker) = crate::push::start_push_worker(state.clone()) {
+        state
+            .workers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(worker);
+    }
 }
 
 #[cfg(all(test, feature = "device-sync"))]

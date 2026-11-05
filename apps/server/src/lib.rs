@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod models;
 pub mod oidc;
 pub mod passkeys;
+pub mod push;
 pub mod scheduler;
 mod secrets;
 pub mod static_files;
