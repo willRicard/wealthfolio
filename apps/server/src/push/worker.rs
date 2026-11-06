@@ -40,12 +40,19 @@ pub(crate) fn plan(previous: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Pass 
     }
 }
 
-pub(crate) fn announcement(bucket: CashFlowBucket) -> (&'static str, bool) {
+pub(crate) fn title_for(bucket: CashFlowBucket) -> &'static str {
     match bucket {
-        CashFlowBucket::Income => ("新しい収入", true),
-        CashFlowBucket::Spending => ("新しい支出", false),
-        CashFlowBucket::Saving => ("新しい貯蓄", false),
-        CashFlowBucket::Neutral => ("新しい取引", false),
+        CashFlowBucket::Income => "新しい収入",
+        CashFlowBucket::Spending => "新しい支出",
+        CashFlowBucket::Saving | CashFlowBucket::Neutral => "新しい取引",
+    }
+}
+
+pub(crate) fn with_sign(net: f64, magnitude: String) -> String {
+    if net > 0.0 {
+        format!("+{magnitude}")
+    } else {
+        magnitude
     }
 }
 
@@ -224,7 +231,6 @@ async fn transaction_payloads(
                         .unwrap_or_else(|| "未分類".to_string())
                 })
                 .unwrap_or_else(|| "未分類".to_string());
-            let (title, plus) = announcement(entry.cash_flow_bucket);
             let magnitude = format_amount(
                 entry
                     .activity
@@ -233,15 +239,11 @@ async fn transaction_payloads(
                     .unwrap_or_default(),
                 &entry.activity.currency,
             );
-            let amount = if plus {
-                format!("+{magnitude}")
-            } else {
-                magnitude
-            };
+            let amount = with_sign(entry.net_amount, magnitude);
 
             PushPayload {
                 kind: KIND_TRANSACTION,
-                title: title.to_string(),
+                title: title_for(entry.cash_flow_bucket).to_string(),
                 body: format!("{merchant}・{category}・{amount}"),
                 tag: format!("wf-activity-{}", entry.activity.id),
                 url: "/spending/transactions".to_string(),
@@ -434,31 +436,20 @@ mod tests {
 
     #[test]
     fn only_money_arriving_is_signed() {
-        assert!(announcement(CashFlowBucket::Income).1);
-        for bucket in [
-            CashFlowBucket::Spending,
-            CashFlowBucket::Saving,
-            CashFlowBucket::Neutral,
-        ] {
-            assert!(
-                !announcement(bucket).1,
-                "{bucket:?} must read as a bare figure, not a minus"
-            );
-        }
+        let figure = || "1200 JPY".to_string();
+        assert_eq!(with_sign(1200.0, figure()), "+1200 JPY");
+        assert_eq!(with_sign(-1200.0, figure()), "1200 JPY");
+        assert_eq!(with_sign(0.0, figure()), "1200 JPY");
     }
 
     #[test]
-    fn each_bucket_announces_itself_distinctly() {
-        let titles: std::collections::HashSet<&str> = [
-            CashFlowBucket::Income,
-            CashFlowBucket::Spending,
-            CashFlowBucket::Saving,
-            CashFlowBucket::Neutral,
-        ]
-        .into_iter()
-        .map(|bucket| announcement(bucket).0)
-        .collect();
-        assert_eq!(titles.len(), 4, "a title must identify the direction");
+    fn income_and_spending_name_themselves_and_the_rest_fall_back() {
+        assert_eq!(title_for(CashFlowBucket::Income), "新しい収入");
+        assert_eq!(title_for(CashFlowBucket::Spending), "新しい支出");
+        let generic = title_for(CashFlowBucket::Neutral);
+        assert_eq!(title_for(CashFlowBucket::Saving), generic);
+        assert_ne!(generic, title_for(CashFlowBucket::Income));
+        assert_ne!(generic, title_for(CashFlowBucket::Spending));
     }
 
     #[test]
