@@ -153,6 +153,12 @@ async fn run_pass(state: &Arc<AppState>) -> anyhow::Result<()> {
     if file.preferences.budgets {
         match budget_crossings(state, &file).await {
             Ok(Some((period_key, levels, mut found))) => {
+                if !found.is_empty() {
+                    tracing::info!(
+                        count = found.len(),
+                        "Push notification pass detected budget threshold crossings"
+                    );
+                }
                 payloads.append(&mut found);
                 budget_update = Some((period_key, levels));
             }
@@ -201,6 +207,11 @@ async fn transaction_payloads(
         return Ok(Vec::new());
     }
 
+    tracing::info!(
+        count = cash.len(),
+        "Push notification pass detected new transactions"
+    );
+
     let category_names = category_names(state)?;
 
     if cash.len() > MAX_TRANSACTION_NOTIFICATIONS {
@@ -210,7 +221,7 @@ async fn transaction_payloads(
             title: format!("新しい取引が{total}件"),
             body: "Wealthfolio を開いて確認してください。".to_string(),
             tag: "wf-transactions".to_string(),
-            url: "/spending/transactions".to_string(),
+            url: "/activities?tab=spending".to_string(),
         }]);
     }
 
@@ -246,7 +257,7 @@ async fn transaction_payloads(
                 title: title_for(entry.cash_flow_bucket).to_string(),
                 body: format!("{merchant}・{category}・{amount}"),
                 tag: format!("wf-activity-{}", entry.activity.id),
-                url: "/spending/transactions".to_string(),
+                url: "/activities?tab=spending".to_string(),
             }
         })
         .collect())

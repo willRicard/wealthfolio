@@ -111,7 +111,10 @@ pub(crate) async fn deliver(
 
 fn classify(status: u16, host: &str) -> Delivery {
     match status {
-        200..=299 => Delivery::Delivered,
+        200..=299 => {
+            tracing::info!(host = %host, status, "Push service accepted a message");
+            Delivery::Delivered
+        }
         404 | 410 => {
             tracing::info!(host = %host, status, "Pruning an expired push subscription");
             Delivery::Expired

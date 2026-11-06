@@ -93,10 +93,6 @@ export function removeSubscription(endpoint: string): Promise<void> {
   });
 }
 
-export function sendTestNotification(): Promise<{ delivered: number }> {
-  return request<{ delivered: number }>(`${BASE}/test`, { method: "POST" });
-}
-
 /**
  * `applicationServerKey` wants raw bytes, while the server sends the key as
  * base64url (the form `web-push generate-vapid-keys` prints).

@@ -35,9 +35,10 @@ export default function NotificationsPage() {
     loading,
     subscribed,
     preferences,
+    preferencesError,
+    reloadPreferences,
     enable,
     disable,
-    sendTest,
     savePreferences,
     setPreference,
   } = usePushNotifications();
@@ -59,32 +60,6 @@ export default function NotificationsPage() {
       onError: (error: Error) => {
         toast({
           title: t("settings:notifications.disable_failed_title"),
-          description: error.message,
-          variant: "destructive",
-        });
-      },
-    });
-  };
-
-  const handleTest = () => {
-    sendTest.mutate(undefined, {
-      onSuccess: ({ delivered }) => {
-        toast(
-          delivered === 0
-            ? {
-                title: t("settings:notifications.test_none_title"),
-                description: t("settings:notifications.test_none_description"),
-                variant: "destructive",
-              }
-            : {
-                title: t("settings:notifications.test_sent_title"),
-                description: t("settings:notifications.test_sent_description"),
-              },
-        );
-      },
-      onError: (error: Error) => {
-        toast({
-          title: t("settings:notifications.test_failed_title"),
           description: error.message,
           variant: "destructive",
         });
@@ -173,24 +148,6 @@ export default function NotificationsPage() {
                   )}
                 </ItemActions>
               </Item>
-
-              {subscribed && (
-                <Item className="p-0">
-                  <ItemContent>
-                    <ItemTitle>
-                      <Label>{t("settings:notifications.test_label")}</Label>
-                    </ItemTitle>
-                    <ItemDescription className="line-clamp-none">
-                      {t("settings:notifications.test_description")}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button variant="outline" onClick={handleTest} disabled={sendTest.isPending}>
-                      {t("settings:notifications.test_action")}
-                    </Button>
-                  </ItemActions>
-                </Item>
-              )}
             </CardContent>
           </Card>
 
@@ -203,6 +160,11 @@ export default function NotificationsPage() {
                 {t("settings:notifications.kinds_description")}
               </ItemDescription>
 
+              {preferencesError && (
+                <Button variant="outline" onClick={() => void reloadPreferences()}>
+                  {t("common:retry")}
+                </Button>
+              )}
               <Item className="p-0">
                 <ItemContent>
                   <ItemTitle>
@@ -215,12 +177,18 @@ export default function NotificationsPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <Switch
-                    id="push-transactions"
-                    checked={preferences?.transactions ?? false}
-                    onCheckedChange={(value) => setPreference("transactions", value)}
-                    disabled={!preferences || savePreferences.isPending}
-                  />
+                  {preferences ? (
+                    <Switch
+                      id="push-transactions"
+                      checked={preferences.transactions}
+                      onCheckedChange={(value) => setPreference("transactions", value)}
+                      disabled={savePreferences.isPending}
+                    />
+                  ) : (
+                    <span role="status" className="text-muted-foreground text-sm">
+                      {t(preferencesError ? "common:error" : "common:loading")}
+                    </span>
+                  )}
                 </ItemActions>
               </Item>
 
@@ -236,12 +204,18 @@ export default function NotificationsPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <Switch
-                    id="push-budgets"
-                    checked={preferences?.budgets ?? false}
-                    onCheckedChange={(value) => setPreference("budgets", value)}
-                    disabled={!preferences || savePreferences.isPending}
-                  />
+                  {preferences ? (
+                    <Switch
+                      id="push-budgets"
+                      checked={preferences.budgets}
+                      onCheckedChange={(value) => setPreference("budgets", value)}
+                      disabled={savePreferences.isPending}
+                    />
+                  ) : (
+                    <span role="status" className="text-muted-foreground text-sm">
+                      {t(preferencesError ? "common:error" : "common:loading")}
+                    </span>
+                  )}
                 </ItemActions>
               </Item>
             </CardContent>

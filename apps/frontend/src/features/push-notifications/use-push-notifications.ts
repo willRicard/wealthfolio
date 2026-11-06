@@ -10,7 +10,6 @@ import {
   registerSubscription,
   removeSubscription,
   requiresHomeScreenInstall,
-  sendTestNotification,
   supportsPushNotifications,
   updatePushPreferences,
   type PushPreferences,
@@ -146,8 +145,6 @@ export function usePushNotifications() {
     },
   });
 
-  const sendTest = useMutation({ mutationFn: sendTestNotification });
-
   const setPreference = useCallback(
     (key: keyof PushPreferences, value: boolean) => {
       const current = preferencesQuery.data;
@@ -169,9 +166,10 @@ export function usePushNotifications() {
     loading: reading || configQuery.isLoading,
     subscribed: subscription !== null,
     preferences: preferencesQuery.data,
+    preferencesError: preferencesQuery.isError,
+    reloadPreferences: preferencesQuery.refetch,
     enable,
     disable,
-    sendTest,
     savePreferences,
     setPreference,
   };
