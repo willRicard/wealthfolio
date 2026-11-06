@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tokio::sync::broadcast::error::RecvError;
+
+use wealthfolio_spending::cash_activities::model::CashFlowBucket;
 
 use super::payload::{PushPayload, KIND_BUDGET, KIND_TRANSACTION};
 use super::store::budget_level_key;
@@ -12,15 +14,40 @@ use crate::main_lib::AppState;
 
 pub(crate) const BUDGET_THRESHOLDS: [u8; 3] = [100, 80, 50];
 
-const DEBOUNCE: Duration = Duration::from_secs(5);
-
 const IDLE_TICK: Duration = Duration::from_secs(15 * 60);
 
-const CATEGORISATION_GRACE_SECS: i64 = 10;
+const WAKE_DEBOUNCE: Duration = Duration::from_secs(2);
 
 const MAX_TRANSACTION_NOTIFICATIONS: usize = 3;
 
 const TRANSACTION_SCAN_LIMIT: usize = 200;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Pass {
+    Start,
+    Scan {
+        since: DateTime<Utc>,
+        until: DateTime<Utc>,
+    },
+    Skip,
+}
+
+pub(crate) fn plan(previous: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Pass {
+    match previous {
+        None => Pass::Start,
+        Some(since) if now > since => Pass::Scan { since, until: now },
+        Some(_) => Pass::Skip,
+    }
+}
+
+pub(crate) fn announcement(bucket: CashFlowBucket) -> (&'static str, bool) {
+    match bucket {
+        CashFlowBucket::Income => ("新しい収入", true),
+        CashFlowBucket::Spending => ("新しい支出", false),
+        CashFlowBucket::Saving => ("新しい貯蓄", false),
+        CashFlowBucket::Neutral => ("新しい取引", false),
+    }
+}
 
 pub(crate) fn budget_level(actual: f64, target: f64) -> u8 {
     if !actual.is_finite() || !target.is_finite() || target <= 0.0 || actual <= 0.0 {
@@ -63,7 +90,7 @@ pub(crate) fn start_push_worker(state: Arc<AppState>) -> Option<tokio::task::Joi
                         if !wakes_evaluator(&event) {
                             continue;
                         }
-                        tokio::time::sleep(DEBOUNCE).await;
+                        tokio::time::sleep(WAKE_DEBOUNCE).await;
                         while events.try_recv().is_ok() {}
                     }
                     Err(RecvError::Lagged(_)) => {}
@@ -91,19 +118,18 @@ async fn run_pass(state: &Arc<AppState>) -> anyhow::Result<()> {
     }
 
     let now = Utc::now();
-    let scan_until = now - chrono::Duration::seconds(CATEGORISATION_GRACE_SECS);
 
     let mut payloads = Vec::new();
 
     let previous_watermark = file.state.last_activity_seen_at;
     let mut next_watermark = previous_watermark;
 
-    match previous_watermark {
-        None => next_watermark = Some(now),
-        Some(since) if scan_until > since => {
-            next_watermark = Some(scan_until);
+    match plan(previous_watermark, now) {
+        Pass::Start => next_watermark = Some(now),
+        Pass::Scan { since, until } => {
+            next_watermark = Some(until);
             if file.preferences.transactions {
-                match transaction_payloads(state, since, scan_until).await {
+                match transaction_payloads(state, since, until).await {
                     Ok(mut found) => payloads.append(&mut found),
                     Err(error) => {
                         next_watermark = previous_watermark;
@@ -112,7 +138,7 @@ async fn run_pass(state: &Arc<AppState>) -> anyhow::Result<()> {
                 }
             }
         }
-        Some(_) => {}
+        Pass::Skip => {}
     }
 
     // ---- budget thresholds ------------------------------------------------
@@ -174,8 +200,8 @@ async fn transaction_payloads(
         let total: usize = cash.len();
         return Ok(vec![PushPayload {
             kind: KIND_TRANSACTION,
-            title: format!("{total} new transactions"),
-            body: "Open Wealthfolio to review them.".to_string(),
+            title: format!("新しい取引が{total}件"),
+            body: "Wealthfolio を開いて確認してください。".to_string(),
             tag: "wf-transactions".to_string(),
             url: "/spending/transactions".to_string(),
         }]);
@@ -195,10 +221,11 @@ async fn transaction_payloads(
                             &assignment.category_id,
                         ))
                         .cloned()
-                        .unwrap_or_else(|| "Uncategorised".to_string())
+                        .unwrap_or_else(|| "未分類".to_string())
                 })
-                .unwrap_or_else(|| "Uncategorised".to_string());
-            let amount = format_amount(
+                .unwrap_or_else(|| "未分類".to_string());
+            let (title, plus) = announcement(entry.cash_flow_bucket);
+            let magnitude = format_amount(
                 entry
                     .activity
                     .amount
@@ -206,11 +233,16 @@ async fn transaction_payloads(
                     .unwrap_or_default(),
                 &entry.activity.currency,
             );
+            let amount = if plus {
+                format!("+{magnitude}")
+            } else {
+                magnitude
+            };
 
             PushPayload {
                 kind: KIND_TRANSACTION,
-                title: "New transaction".to_string(),
-                body: format!("{merchant} · {category} · {amount}"),
+                title: title.to_string(),
+                body: format!("{merchant}・{category}・{amount}"),
                 tag: format!("wf-activity-{}", entry.activity.id),
                 url: "/spending/transactions".to_string(),
             }
@@ -270,11 +302,11 @@ async fn budget_crossings(
         };
         payloads.push(PushPayload {
             kind: KIND_BUDGET,
-            title: format!("{} budget at {level}%", row.name),
+            title: format!("{}の予算が{level}%に到達", row.name),
             body: format!(
-                "{} of {} spent",
-                format_amount_f64(row.actual, &computed.currency),
-                format_amount_f64(row.target, &computed.currency)
+                "{}中{}を使用",
+                format_amount_f64(row.target, &computed.currency),
+                format_amount_f64(row.actual, &computed.currency)
             ),
             tag: format!("wf-budget-{}-{}", computed.period_key, row.category_id),
             url: format!("/spending/budget?month={}", computed.period_key),
@@ -305,7 +337,7 @@ fn merchant_of(entry: &wealthfolio_spending::cash_activities::CashActivity) -> S
         .map(str::trim)
         .filter(|notes| !notes.is_empty())
         .map(|notes| notes.chars().take(60).collect::<String>())
-        .unwrap_or_else(|| "Transaction".to_string())
+        .unwrap_or_else(|| "取引".to_string())
 }
 
 fn format_amount(amount: rust_decimal::Decimal, currency: &str) -> String {
@@ -398,6 +430,57 @@ mod tests {
         assert!(!wakes_evaluator(&ServerEvent::new(
             crate::events::ASSET_ENRICHMENT_PROGRESS
         )));
+    }
+
+    #[test]
+    fn only_money_arriving_is_signed() {
+        assert!(announcement(CashFlowBucket::Income).1);
+        for bucket in [
+            CashFlowBucket::Spending,
+            CashFlowBucket::Saving,
+            CashFlowBucket::Neutral,
+        ] {
+            assert!(
+                !announcement(bucket).1,
+                "{bucket:?} must read as a bare figure, not a minus"
+            );
+        }
+    }
+
+    #[test]
+    fn each_bucket_announces_itself_distinctly() {
+        let titles: std::collections::HashSet<&str> = [
+            CashFlowBucket::Income,
+            CashFlowBucket::Spending,
+            CashFlowBucket::Saving,
+            CashFlowBucket::Neutral,
+        ]
+        .into_iter()
+        .map(|bucket| announcement(bucket).0)
+        .collect();
+        assert_eq!(titles.len(), 4, "a title must identify the direction");
+    }
+
+    #[test]
+    fn a_pass_scans_right_up_to_the_moment_it_started() {
+        let now = Utc::now();
+        let since = now - chrono::Duration::seconds(30);
+        assert_eq!(plan(Some(since), now), Pass::Scan { since, until: now });
+    }
+
+    #[test]
+    fn the_first_pass_only_records_where_to_start() {
+        assert_eq!(plan(None, Utc::now()), Pass::Start);
+    }
+
+    #[test]
+    fn a_clock_that_has_not_advanced_leaves_the_watermark_alone() {
+        let now = Utc::now();
+        assert_eq!(plan(Some(now), now), Pass::Skip);
+        assert_eq!(
+            plan(Some(now + chrono::Duration::seconds(5)), now),
+            Pass::Skip
+        );
     }
 
     #[test]

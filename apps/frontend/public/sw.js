@@ -33,7 +33,7 @@ self.addEventListener("push", (event) => {
       const payload = parsePayload(event);
       if (!payload) {
         await self.registration.showNotification("Wealthfolio", {
-          body: "Something changed in your portfolio.",
+          body: "ポートフォリオに変更がありました。",
           icon: "/app-icon-192.png",
           badge: "/app-icon-192.png",
           tag: "wf-generic",

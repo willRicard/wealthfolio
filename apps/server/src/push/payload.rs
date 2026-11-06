@@ -21,7 +21,7 @@ impl PushPayload {
         Self {
             kind: KIND_TEST,
             title: "Wealthfolio".to_string(),
-            body: "Notifications are working on this device.".to_string(),
+            body: "このデバイスで通知が機能しています。".to_string(),
             tag: "wf-test".to_string(),
             url: "/settings/notifications".to_string(),
         }
