@@ -1113,7 +1113,7 @@ mod migration_tests {
         .unwrap();
 
         conn.batch_execute(include_str!(
-            "../../migrations/2026-08-02-000001_reclaim_storage/up.sql"
+            "../../migrations/2026-08-04-000001_reclaim_storage/up.sql"
         ))
         .unwrap();
 

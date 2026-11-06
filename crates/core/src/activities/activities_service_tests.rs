@@ -4182,6 +4182,7 @@ pub(crate) mod tests {
     /// 51,404.797528, which the broker's statement books as 51,404.80.
     fn statement_buy(id: &str, amount: Option<Decimal>, fee: Decimal) -> NewActivity {
         NewActivity {
+            detailed_notes: None,
             id: Some(id.to_string()),
             account_id: "acc-final".to_string(),
             asset: Some(AssetResolutionInput {
@@ -4267,6 +4268,7 @@ pub(crate) mod tests {
 
         let updated = activity_service
             .update_activity(ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: "buy-edit".to_string(),
@@ -4416,6 +4418,7 @@ pub(crate) mod tests {
 
         let updated = activity_service
             .update_activity(ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: "buy-legacy".to_string(),
@@ -4632,6 +4635,7 @@ pub(crate) mod tests {
 
         let updated = activity_service
             .update_activity(ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: created.id.clone(),
@@ -4691,6 +4695,7 @@ pub(crate) mod tests {
 
         let updated = activity_service
             .update_activity(ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: "buy-to-jpy".to_string(),
@@ -4742,6 +4747,7 @@ pub(crate) mod tests {
 
         let updated = activity_service
             .update_activity(ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: created.id.clone(),
@@ -4791,6 +4797,7 @@ pub(crate) mod tests {
 
         let updated = activity_service
             .update_activity(ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: "buy-to-crypto".to_string(),
@@ -9076,6 +9083,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                detailed_notes: None,
                 id: Some("activity-1".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -16556,6 +16564,7 @@ pub(crate) mod tests {
 
         activity_service
             .update_activity(crate::activities::ActivityUpdate {
+                detailed_notes: None,
                 unlink_transfer_pair_id: None,
                 split_review: None,
                 id: "transfer-out".to_string(),
@@ -17706,6 +17715,7 @@ pub(crate) mod tests {
                 // A grid save echoes the edited leg's date and notes, even
                 // when the deliberate changes are amount and approval only.
                 let mut update = ActivityUpdate {
+                    detailed_notes: None,
                     unlink_transfer_pair_id: None,
                     split_review: None,
                     id: primary.id.clone(),
@@ -17826,6 +17836,7 @@ pub(crate) mod tests {
                     let counterpart = repository.get_activity(counterpart_id).unwrap();
                     let before = stored_snapshot(&repository);
                     let preview = service.preview_activity_update(ActivityUpdate {
+                        detailed_notes: None,
                         unlink_transfer_pair_id: None,
                         split_review: None,
                         id: primary.id.clone(),
@@ -18375,6 +18386,7 @@ pub(crate) mod tests {
 
     fn page_row(id: &str, account_id: &str) -> ActivityDetails {
         ActivityDetails {
+            detailed_notes: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: String::new(),
@@ -18889,6 +18901,7 @@ pub(crate) mod tests {
             amount: None,
             status: None,
             notes: None,
+            detailed_notes: None,
             fx_rate: None,
             metadata: None,
             needs_review: None,

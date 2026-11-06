@@ -124,7 +124,7 @@ export function supportsPushNotifications(): boolean {
 export function requiresHomeScreenInstall(): boolean {
   if (typeof navigator === "undefined" || typeof window === "undefined") return false;
   const isIos =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    ["iPad", "iPhone", "iPod"].some((name) => navigator.userAgent.includes(name)) ||
     // iPadOS 13+ reports itself as a Mac, but still has a touch screen.
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if (!isIos) return false;

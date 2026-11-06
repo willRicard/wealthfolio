@@ -3,7 +3,6 @@ import { getCategoryLabel } from "@/lib/taxonomy-labels";
 import { isActivityEditCancelled, useActivitySplitReview } from "./activity-split-review-provider";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useForm, type Resolver } from "react-hook-form";
-import { isActivityEditCancelled, useActivitySplitReview } from "./activity-split-review-provider";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { zodResolver } from "@hookform/resolvers/zod";

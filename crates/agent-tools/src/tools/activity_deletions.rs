@@ -546,6 +546,7 @@ mod tests {
             currency: "EUR".to_string(),
             fx_rate: None,
             notes: None,
+            detailed_notes: None,
             metadata: None,
             source_system: None,
             source_record_id: None,

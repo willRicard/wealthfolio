@@ -23,26 +23,26 @@ export type PushPermission = NotificationPermission | "unsupported";
 function describeBrowser(): string {
   if (typeof navigator === "undefined") return "Browser";
   const agent = navigator.userAgent;
-  const browser = /Edg\//.test(agent)
+  const browser = agent.includes("Edg/")
     ? "Edge"
-    : /OPR\//.test(agent)
+    : agent.includes("OPR/")
       ? "Opera"
-      : /Chrome\//.test(agent)
+      : agent.includes("Chrome/")
         ? "Chrome"
-        : /Firefox\//.test(agent)
+        : agent.includes("Firefox/")
           ? "Firefox"
-          : /Safari\//.test(agent)
+          : agent.includes("Safari/")
             ? "Safari"
             : "Browser";
-  const platform = /Android/.test(agent)
+  const platform = agent.includes("Android")
     ? "Android"
-    : /iPhone|iPad|iPod/.test(agent)
+    : ["iPhone", "iPad", "iPod"].some((name) => agent.includes(name))
       ? "iOS"
-      : /Mac OS X/.test(agent)
+      : agent.includes("Mac OS X")
         ? "macOS"
-        : /Windows/.test(agent)
+        : agent.includes("Windows")
           ? "Windows"
-          : /Linux/.test(agent)
+          : agent.includes("Linux")
             ? "Linux"
             : "";
   return platform ? `${browser} on ${platform}` : browser;

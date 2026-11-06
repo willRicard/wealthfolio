@@ -12,6 +12,34 @@ fn manager(dir: &std::path::Path) -> PasskeyManager {
     PasskeyManager::new(&config(), dir.join("passkeys.json"), KEY).unwrap()
 }
 
+fn sample_passkey() -> Passkey {
+    serde_json::from_value(serde_json::json!({
+        "cred": {
+            "cred_id": BASE64URL.encode([1u8; 16]),
+            "cred": {
+                "type_": "ES256",
+                "key": {
+                    "EC_EC2": {
+                        "curve": "SECP256R1",
+                        "x": BASE64URL.encode([2u8; 32]),
+                        "y": BASE64URL.encode([3u8; 32]),
+                    }
+                }
+            },
+            "counter": 0,
+            "transports": null,
+            "user_verified": true,
+            "backup_eligible": false,
+            "backup_state": false,
+            "registration_policy": "required",
+            "extensions": {},
+            "attestation": { "data": "None", "metadata": "None" },
+            "attestation_format": "none"
+        }
+    }))
+    .expect("the sample credential matches the Passkey serialisation")
+}
+
 // -- configuration ----------------------------------------------------------
 
 #[test]
@@ -82,7 +110,10 @@ fn an_rp_id_that_is_really_a_url_is_rejected() {
         "folio.example.com/app",
     ] {
         let error = WebauthnConfig::resolve(Some(value.into()), None, None).unwrap_err();
-        assert!(error.to_string().contains("bare domain"), "{value}: {error}");
+        assert!(
+            error.to_string().contains("bare domain"),
+            "{value}: {error}"
+        );
     }
 }
 
@@ -126,7 +157,10 @@ fn the_file_is_encrypted_at_rest_and_needs_the_right_key() {
         Ok(_) => panic!("a file sealed with another key must not open"),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("different WF_SECRET_KEY"), "{error}");
+    assert!(
+        error.to_string().contains("different WF_SECRET_KEY"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -286,7 +320,10 @@ fn registration_carries_a_stable_user_handle() {
     for _ in 0..2 {
         let (options, _) = manager.start_registration().unwrap();
         let json = serde_json::to_value(&options).unwrap();
-        let encoded = json["publicKey"]["user"]["id"].as_str().unwrap().to_string();
+        let encoded = json["publicKey"]["user"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let bytes = BASE64URL.decode(&encoded).unwrap();
         assert_eq!(Uuid::from_slice(&bytes).unwrap(), handle);
     }
@@ -426,7 +463,9 @@ fn cookies_are_read_by_exact_name() {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
         axum::http::header::COOKIE,
-        "other=1; wf_pk_login=sealed; wf_session=jwt".parse().unwrap(),
+        "other=1; wf_pk_login=sealed; wf_session=jwt"
+            .parse()
+            .unwrap(),
     );
     assert_eq!(
         read_cookie(&headers, LOGIN_TX_COOKIE),
@@ -436,9 +475,6 @@ fn cookies_are_read_by_exact_name() {
 
     // An empty value is as good as absent.
     let mut empty = axum::http::HeaderMap::new();
-    empty.insert(
-        axum::http::header::COOKIE,
-        "wf_pk_login=".parse().unwrap(),
-    );
+    empty.insert(axum::http::header::COOKIE, "wf_pk_login=".parse().unwrap());
     assert_eq!(read_cookie(&empty, LOGIN_TX_COOKIE), None);
 }

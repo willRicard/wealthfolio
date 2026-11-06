@@ -146,6 +146,6 @@ mod tests {
 
     #[test]
     fn expiry_stays_within_the_rfc_limit_of_24_hours() {
-        assert!(TOKEN_TTL_SECS <= 24 * 60 * 60);
+        const { assert!(TOKEN_TTL_SECS <= 24 * 60 * 60) };
     }
 }

@@ -26,6 +26,8 @@ fn test_config(db_path: String, addons_root: String) -> Config {
         db_encryption_required: false,
         auth: None,
         oidc: None,
+        vapid: None,
+        webauthn: None,
         mcp_enabled: false,
         mcp_audit_enabled: true,
         mcp_allowed_hosts: None,

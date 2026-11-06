@@ -640,18 +640,17 @@ async fn procurement_tax_type_edits_reinterpret_existing_purchases() {
 
 #[tokio::test]
 async fn procurement_tax_migration_defaults_existing_items_to_included() {
+    use diesel::connection::SimpleConnection;
     let f = fixture().await;
     let saved = f.items.create(item()).await.unwrap();
     let mut conn = db::get_connection(&f.pool).unwrap();
-    diesel::sql_query(include_str!(
-        "../migrations/2026-10-20-000001_procurement_tax_type/down.sql"
+    conn.batch_execute(include_str!(
+        "../migrations/2026-10-19-000001_procurement_units/down.sql"
     ))
-    .execute(&mut conn)
     .unwrap();
-    diesel::sql_query(include_str!(
-        "../migrations/2026-10-20-000001_procurement_tax_type/up.sql"
+    conn.batch_execute(include_str!(
+        "../migrations/2026-10-19-000001_procurement_units/up.sql"
     ))
-    .execute(&mut conn)
     .unwrap();
     assert_eq!(
         f.items.get(&saved.id).unwrap().unwrap().tax_type,
