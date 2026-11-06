@@ -184,7 +184,10 @@ impl PasskeyStore {
             return Ok(PasskeyFile::default());
         }
         let envelope: Envelope = serde_json::from_slice(&raw).map_err(|e| {
-            anyhow::anyhow!("The passkey file at {} is malformed: {e}", self.path.display())
+            anyhow::anyhow!(
+                "The passkey file at {} is malformed: {e}",
+                self.path.display()
+            )
         })?;
         let nonce_bytes = BASE64URL.decode(&envelope.nonce)?;
         let ciphertext = BASE64URL.decode(&envelope.ciphertext)?;
@@ -218,7 +221,10 @@ impl PasskeyStore {
             nonce: BASE64URL.encode(nonce_bytes),
             ciphertext: BASE64URL.encode(ciphertext),
         };
-        write_private(&self.path, serde_json::to_string_pretty(&envelope)?.as_bytes())
+        write_private(
+            &self.path,
+            serde_json::to_string_pretty(&envelope)?.as_bytes(),
+        )
     }
 }
 
@@ -308,11 +314,7 @@ pub struct PasskeyManager {
 }
 
 impl PasskeyManager {
-    pub fn new(
-        config: &WebauthnConfig,
-        path: PathBuf,
-        seal_key: [u8; 32],
-    ) -> anyhow::Result<Self> {
+    pub fn new(config: &WebauthnConfig, path: PathBuf, seal_key: [u8; 32]) -> anyhow::Result<Self> {
         let webauthn = WebauthnBuilder::new(&config.rp_id, &config.rp_origin)
             .map_err(|e| anyhow::anyhow!("Invalid WebAuthn relying party configuration: {e:?}"))?
             .rp_name(&config.rp_name)
@@ -401,9 +403,7 @@ impl PasskeyManager {
 
     // -- registration -------------------------------------------------------
 
-    pub fn start_registration(
-        &self,
-    ) -> Result<(CreationChallengeResponse, String), PasskeyError> {
+    pub fn start_registration(&self) -> Result<(CreationChallengeResponse, String), PasskeyError> {
         let file = self.store.read().map_err(internal)?;
         if file.credentials.len() >= MAX_CREDENTIALS {
             return Err(PasskeyError::Invalid(format!(
@@ -433,10 +433,7 @@ impl PasskeyManager {
             selection.require_resident_key = true;
         }
 
-        let sealed = self.seal(&RegistrationTx {
-            user_handle,
-            state,
-        })?;
+        let sealed = self.seal(&RegistrationTx { user_handle, state })?;
         Ok((options, sealed))
     }
 
@@ -472,44 +469,43 @@ impl PasskeyManager {
                 PasskeyError::Rejected
             })?;
 
-        self
-            .with_file(|file| {
-                if file.credentials.len() >= MAX_CREDENTIALS {
-                    anyhow::bail!("Too many passkeys are registered");
-                }
-                // A handle that moved on between start and finish means this
-                // credential would authenticate as nobody. Refuse rather than
-                // store something that can never sign in.
-                match file.user_handle {
-                    Some(existing) if existing != tx.user_handle => anyhow::bail!(
-                        "The passkeys on this server changed while you were registering. \
+        self.with_file(|file| {
+            if file.credentials.len() >= MAX_CREDENTIALS {
+                anyhow::bail!("Too many passkeys are registered");
+            }
+            // A handle that moved on between start and finish means this
+            // credential would authenticate as nobody. Refuse rather than
+            // store something that can never sign in.
+            match file.user_handle {
+                Some(existing) if existing != tx.user_handle => anyhow::bail!(
+                    "The passkeys on this server changed while you were registering. \
                          Please try again."
-                    ),
-                    _ => {}
-                }
-                // The same authenticator re-registering must not create a
-                // second row that shadows the first.
-                if file
-                    .credentials
-                    .iter()
-                    .any(|c| c.passkey.cred_id() == passkey.cred_id())
-                {
-                    anyhow::bail!("This passkey is already registered");
-                }
-                let record = StoredCredential {
-                    id: Uuid::new_v4(),
-                    name: name.clone(),
-                    passkey: passkey.clone(),
-                    created_at: timestamp(),
-                    last_used_at: None,
-                };
-                let info = PasskeyInfo::from(&record);
-                file.version = CURRENT_VERSION;
-                file.user_handle = Some(tx.user_handle);
-                file.credentials.push(record);
-                Ok(info)
-            })
-            .map_err(|e| PasskeyError::Invalid(e.to_string()))
+                ),
+                _ => {}
+            }
+            // The same authenticator re-registering must not create a
+            // second row that shadows the first.
+            if file
+                .credentials
+                .iter()
+                .any(|c| c.passkey.cred_id() == passkey.cred_id())
+            {
+                anyhow::bail!("This passkey is already registered");
+            }
+            let record = StoredCredential {
+                id: Uuid::new_v4(),
+                name: name.clone(),
+                passkey: passkey.clone(),
+                created_at: timestamp(),
+                last_used_at: None,
+            };
+            let info = PasskeyInfo::from(&record);
+            file.version = CURRENT_VERSION;
+            file.user_handle = Some(tx.user_handle);
+            file.credentials.push(record);
+            Ok(info)
+        })
+        .map_err(|e| PasskeyError::Invalid(e.to_string()))
     }
 
     // -- authentication -----------------------------------------------------
@@ -559,15 +555,14 @@ impl PasskeyManager {
         // moved them; skipping this is what makes cloned-credential detection
         // useless. Re-read under the write lock rather than reusing the copy
         // above, so a concurrent change is not clobbered.
-        self
-            .with_file(|file| {
-                if let Some(record) = file.credentials.iter_mut().find(|c| c.id == record_id) {
-                    record.passkey.update_credential(&result);
-                    record.last_used_at = Some(timestamp());
-                }
-                Ok(())
-            })
-            .map_err(internal)?;
+        self.with_file(|file| {
+            if let Some(record) = file.credentials.iter_mut().find(|c| c.id == record_id) {
+                record.passkey.update_credential(&result);
+                record.last_used_at = Some(timestamp());
+            }
+            Ok(())
+        })
+        .map_err(internal)?;
 
         Ok(())
     }
@@ -576,30 +571,28 @@ impl PasskeyManager {
 
     pub fn rename(&self, id: Uuid, name: &str) -> Result<PasskeyInfo, PasskeyError> {
         let name = normalize_name(name)?;
-        self
-            .with_file(|file| {
-                let record = file
-                    .credentials
-                    .iter_mut()
-                    .find(|c| c.id == id)
-                    .ok_or_else(|| anyhow::anyhow!("not found"))?;
-                record.name = name.clone();
-                Ok(PasskeyInfo::from(&*record))
-            })
-            .map_err(|_| PasskeyError::NotFound)
+        self.with_file(|file| {
+            let record = file
+                .credentials
+                .iter_mut()
+                .find(|c| c.id == id)
+                .ok_or_else(|| anyhow::anyhow!("not found"))?;
+            record.name = name.clone();
+            Ok(PasskeyInfo::from(&*record))
+        })
+        .map_err(|_| PasskeyError::NotFound)
     }
 
     pub fn remove(&self, id: Uuid) -> Result<(), PasskeyError> {
-        self
-            .with_file(|file| {
-                let before = file.credentials.len();
-                file.credentials.retain(|c| c.id != id);
-                if file.credentials.len() == before {
-                    anyhow::bail!("not found");
-                }
-                Ok(())
-            })
-            .map_err(|_| PasskeyError::NotFound)
+        self.with_file(|file| {
+            let before = file.credentials.len();
+            file.credentials.retain(|c| c.id != id);
+            if file.credentials.len() == before {
+                anyhow::bail!("not found");
+            }
+            Ok(())
+        })
+        .map_err(|_| PasskeyError::NotFound)
     }
 }
 
@@ -630,7 +623,9 @@ fn internal<E: std::fmt::Display>(error: E) -> PasskeyError {
 
 pub fn build_tx_cookie(name: &str, path: &str, value: &str, secure: bool) -> String {
     let secure_attr = if secure { "; Secure" } else { "" };
-    format!("{name}={value}; HttpOnly; SameSite=Lax; Path={path}; Max-Age={TX_TTL_SECS}{secure_attr}")
+    format!(
+        "{name}={value}; HttpOnly; SameSite=Lax; Path={path}; Max-Age={TX_TTL_SECS}{secure_attr}"
+    )
 }
 
 pub fn clear_tx_cookie(name: &str, path: &str) -> String {
@@ -638,10 +633,7 @@ pub fn clear_tx_cookie(name: &str, path: &str) -> String {
 }
 
 pub fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
-    let header = headers
-        .get(axum::http::header::COOKIE)?
-        .to_str()
-        .ok()?;
+    let header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
     for pair in header.split(';') {
         if let Some((key, value)) = pair.trim().split_once('=') {
             if key.trim() == name {

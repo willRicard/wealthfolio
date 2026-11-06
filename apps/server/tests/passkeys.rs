@@ -132,7 +132,11 @@ async fn passkey_routes_behave_with_and_without_webauthn_configured() {
     // yet succeed.
     let status = json(
         app.clone()
-            .oneshot(request(Method::GET, "/api/v1/auth/status").body(Body::empty()).unwrap())
+            .oneshot(
+                request(Method::GET, "/api/v1/auth/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap(),
     )
@@ -222,7 +226,9 @@ async fn passkey_routes_behave_with_and_without_webauthn_configured() {
     assert_eq!(rejected.status(), 401);
     let cleared = set_cookies(&rejected);
     assert!(
-        cleared.iter().any(|c| c.starts_with("wf_pk_login=") && c.contains("Max-Age=0")),
+        cleared
+            .iter()
+            .any(|c| c.starts_with("wf_pk_login=") && c.contains("Max-Age=0")),
         "a spent challenge must be cleared even when the assertion fails: {cleared:?}"
     );
     assert!(
@@ -240,7 +246,11 @@ async fn passkey_routes_behave_with_and_without_webauthn_configured() {
             .oneshot(request(method.clone(), uri).body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), 401, "{method} {uri} must require a session");
+        assert_eq!(
+            response.status(),
+            401,
+            "{method} {uri} must require a session"
+        );
     }
 
     let session = sign_in(&app).await;
@@ -250,7 +260,11 @@ async fn passkey_routes_behave_with_and_without_webauthn_configured() {
 
     let listed = app
         .clone()
-        .oneshot(authed(Method::GET, "/api/v1/passkeys").body(Body::empty()).unwrap())
+        .oneshot(
+            authed(Method::GET, "/api/v1/passkeys")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(listed.status(), 200);
@@ -302,7 +316,11 @@ async fn passkey_routes_behave_with_and_without_webauthn_configured() {
 
     let status = json(
         app.clone()
-            .oneshot(request(Method::GET, "/api/v1/auth/status").body(Body::empty()).unwrap())
+            .oneshot(
+                request(Method::GET, "/api/v1/auth/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap(),
     )

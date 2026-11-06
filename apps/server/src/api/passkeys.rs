@@ -65,10 +65,7 @@ async fn list(State(state): State<AuthState>) -> ApiResult<Json<PasskeyStatus>> 
     }))
 }
 
-async fn register_start(
-    State(state): State<AuthState>,
-    headers: HeaderMap,
-) -> ApiResult<Response> {
+async fn register_start(State(state): State<AuthState>, headers: HeaderMap) -> ApiResult<Response> {
     let passkeys_manager = manager(&state)?;
     let (options, sealed) = passkeys_manager.start_registration()?;
 
@@ -106,12 +103,14 @@ async fn register_finish(
 ) -> ApiResult<Response> {
     let passkeys_manager = manager(&state)?;
 
-    let sealed = passkeys::read_cookie(&headers, passkeys::REGISTER_TX_COOKIE).ok_or_else(|| {
-        ApiError::BadRequest("This registration expired. Please try again.".into())
-    })?;
+    let sealed =
+        passkeys::read_cookie(&headers, passkeys::REGISTER_TX_COOKIE).ok_or_else(|| {
+            ApiError::BadRequest("This registration expired. Please try again.".into())
+        })?;
 
     let clear = passkeys::clear_tx_cookie(passkeys::REGISTER_TX_COOKIE, passkeys::REGISTER_TX_PATH);
-    let finished = passkeys_manager.finish_registration(&payload.credential, &sealed, &payload.name);
+    let finished =
+        passkeys_manager.finish_registration(&payload.credential, &sealed, &payload.name);
 
     let mut response = match finished {
         Ok(info) => Json(info).into_response(),
