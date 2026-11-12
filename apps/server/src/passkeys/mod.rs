@@ -11,7 +11,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use chrono::{SecondsFormat, Utc};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use webauthn_rs::prelude::*;
 use webauthn_rs_proto::ResidentKeyRequirement;
@@ -194,8 +194,11 @@ impl PasskeyStore {
         if nonce_bytes.len() != 12 {
             anyhow::bail!("Invalid nonce length in the passkey file");
         }
-        let plaintext = ChaCha20Poly1305::new(Key::from_slice(&self.key))
-            .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
+        let plaintext = ChaCha20Poly1305::new(&Key::from(self.key))
+            .decrypt(
+                &Nonce::try_from(nonce_bytes.as_slice())?,
+                ciphertext.as_ref(),
+            )
             .map_err(|_| {
                 anyhow::anyhow!(
                     "Cannot decrypt {}: it was sealed with a different WF_SECRET_KEY. \
@@ -212,9 +215,9 @@ impl PasskeyStore {
         }
         let serialized = serde_json::to_vec(file)?;
         let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let ciphertext = ChaCha20Poly1305::new(Key::from_slice(&self.key))
-            .encrypt(Nonce::from_slice(&nonce_bytes), serialized.as_ref())
+        UnwrapErr(SysRng).fill_bytes(&mut nonce_bytes);
+        let ciphertext = ChaCha20Poly1305::new(&Key::from(self.key))
+            .encrypt(&Nonce::from(nonce_bytes), serialized.as_ref())
             .map_err(|_| anyhow::anyhow!("Failed to encrypt the passkey file"))?;
         let envelope = Envelope {
             version: CURRENT_VERSION,
@@ -370,9 +373,9 @@ impl PasskeyManager {
         };
         let plaintext = serde_json::to_vec(&payload).map_err(internal)?;
         let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let ciphertext = ChaCha20Poly1305::new(Key::from_slice(&self.seal_key))
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
+        UnwrapErr(SysRng).fill_bytes(&mut nonce_bytes);
+        let ciphertext = ChaCha20Poly1305::new(&Key::from(self.seal_key))
+            .encrypt(&Nonce::from(nonce_bytes), plaintext.as_ref())
             .map_err(|_| PasskeyError::Internal("Failed to seal ceremony state".into()))?;
         let mut out = Vec::with_capacity(12 + ciphertext.len());
         out.extend_from_slice(&nonce_bytes);
@@ -388,8 +391,11 @@ impl PasskeyManager {
             return Err(PasskeyError::Rejected);
         }
         let (nonce_bytes, ciphertext) = raw.split_at(12);
-        let plaintext = ChaCha20Poly1305::new(Key::from_slice(&self.seal_key))
-            .decrypt(Nonce::from_slice(nonce_bytes), ciphertext)
+        let plaintext = ChaCha20Poly1305::new(&Key::from(self.seal_key))
+            .decrypt(
+                &Nonce::try_from(nonce_bytes).map_err(|_| PasskeyError::Rejected)?,
+                ciphertext,
+            )
             .map_err(|_| PasskeyError::Rejected)?;
         let payload: SealedTx<T> =
             serde_json::from_slice(&plaintext).map_err(|_| PasskeyError::Rejected)?;

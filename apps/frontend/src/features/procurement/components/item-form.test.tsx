@@ -129,3 +129,10 @@ it("uploads a dropped photo immediately and shows a spinner until the upload fin
   expect(screen.queryByRole("status", { name: "uploading" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "save" })).toBeEnabled();
 });
+
+it("associates the category field label with its picker button", () => {
+  render(<ItemForm onClose={vi.fn()} onSaved={vi.fn()} />);
+  expect(screen.getByLabelText("category")).toBe(
+    screen.getByRole("button", { name: "category" }),
+  );
+});

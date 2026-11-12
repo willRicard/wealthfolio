@@ -88,11 +88,11 @@ describe("Spending tab period comparisons", () => {
 
     const insightLinks = screen
       .getAllByRole("link")
-      .filter((link) => link.getAttribute("href")?.startsWith("/spending/insights"));
+      .filter((link) => link.getAttribute("href")?.startsWith("/insights?tab=spending"));
     expect(insightLinks.length).toBeGreaterThan(0);
     for (const link of insightLinks) {
       const url = new URL(link.getAttribute("href")!, "http://localhost");
-      expect([...url.searchParams.keys()]).toEqual(["stage"]);
+      expect([...url.searchParams.keys()]).toEqual(["tab", "stage"]);
     }
     expect(JSON.parse(localStorage.getItem("dashboard-period")!)).toEqual(pick);
   });

@@ -39,9 +39,7 @@ for (const compact of [false, true]) {
       (category) => category.id === "cat_shopping_home",
     )!.name;
     await dialog.getByLabel("Category", { exact: true }).click();
-    await page
-      .getByRole("option", { name: `${categoryLabel} / ${subcategoryLabel}`, exact: true })
-      .click();
+    await page.getByRole("option", { name: subcategoryLabel, exact: true }).click();
     await dialog.getByLabel("Memo", { exact: true }).fill("Personal purchase notes");
     await dialog.getByRole("button", { name: "Advanced", exact: true }).click();
     await dialog.getByRole("button", { name: "Add alias", exact: true }).click();
@@ -451,7 +449,10 @@ for (const compact of [false, true]) {
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("combobox", { name: "Account", exact: true }).click();
     await page
-      .getByRole("option", { name: `Purchases ${suffix} (${currency})`, exact: true })
+      .getByRole("option", {
+        name: compact ? new RegExp(`Purchases ${suffix}`) : `Purchases ${suffix} (${currency})`,
+        exact: !compact,
+      })
       .click();
     if (compact) await dialog.getByRole("button", { name: "Next", exact: true }).click();
     await dialog.getByLabel("Amount", { exact: true }).fill("25");

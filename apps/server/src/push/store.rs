@@ -13,7 +13,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use chrono::{DateTime, Utc};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use serde::{Deserialize, Serialize};
 
 const CURRENT_VERSION: u32 = 1;
@@ -140,8 +140,11 @@ impl PushStore {
         if nonce_bytes.len() != 12 {
             anyhow::bail!("Invalid nonce length in the push notification file");
         }
-        let plaintext = ChaCha20Poly1305::new(Key::from_slice(&self.key))
-            .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
+        let plaintext = ChaCha20Poly1305::new(&Key::from(self.key))
+            .decrypt(
+                &Nonce::try_from(nonce_bytes.as_slice())?,
+                ciphertext.as_ref(),
+            )
             .map_err(|_| {
                 anyhow::anyhow!(
                     "Cannot decrypt {}: it was sealed with a different WF_SECRET_KEY. \
@@ -159,9 +162,9 @@ impl PushStore {
         }
         let serialized = serde_json::to_vec(file)?;
         let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let ciphertext = ChaCha20Poly1305::new(Key::from_slice(&self.key))
-            .encrypt(Nonce::from_slice(&nonce_bytes), serialized.as_ref())
+        UnwrapErr(SysRng).fill_bytes(&mut nonce_bytes);
+        let ciphertext = ChaCha20Poly1305::new(&Key::from(self.key))
+            .encrypt(&Nonce::from(nonce_bytes), serialized.as_ref())
             .map_err(|_| anyhow::anyhow!("Failed to encrypt the push notification file"))?;
         let envelope = Envelope {
             version: CURRENT_VERSION,

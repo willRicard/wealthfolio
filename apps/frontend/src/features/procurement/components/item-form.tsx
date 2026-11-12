@@ -343,6 +343,7 @@ export function ItemForm({ item, onClose, onSaved }: ItemFormProps) {
                           <Button
                             type="button"
                             variant="outline"
+                            aria-label={t("category")}
                             className="w-full justify-between"
                           >
                             <span className="flex min-w-0 items-center gap-2">

@@ -2,14 +2,14 @@
 
 use std::net::SocketAddr;
 
-use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+use argon2::{Argon2, PasswordHasher};
 use axum::{
     body::{to_bytes, Body},
     extract::ConnectInfo,
     http::{header, Method, Request, Response},
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use tempfile::tempdir;
 use tower::ServiceExt;
 use wealthfolio_server::{api::app_router, build_state, config::Config};
@@ -21,15 +21,14 @@ async fn build_router(data_dir: &std::path::Path, webauthn: bool) -> axum::Route
     std::env::set_var("WF_DATA_DIR", "");
     std::env::set_var("WF_DB_PATH", data_dir.join("test.db"));
 
-    let salt = SaltString::generate(&mut OsRng);
     let password_hash = Argon2::default()
-        .hash_password(PASSWORD.as_bytes(), &salt)
+        .hash_password(PASSWORD.as_bytes())
         .unwrap()
         .to_string();
     std::env::set_var("WF_AUTH_PASSWORD_HASH", password_hash);
 
     let mut secret_bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut secret_bytes);
+    UnwrapErr(SysRng).fill_bytes(&mut secret_bytes);
     std::env::set_var("WF_SECRET_KEY", BASE64.encode(secret_bytes));
     std::env::set_var("WF_CORS_ALLOW_ORIGINS", "https://folio.example.com");
 

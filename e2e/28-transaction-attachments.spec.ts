@@ -76,12 +76,13 @@ test("Spending saves detailed notes and displays attachment thumbnails", async (
   await panel.screenshot({ path: testInfo.outputPath("transaction-attachments.png") });
   const [original] = await Promise.all([
     page.waitForEvent("popup"),
-    panel.getByRole("button", { name: "Open original: receipt.png" }).click(),
+    panel.getByRole("button", { name: "Open original: receipt.webp" }).click(),
   ]);
   await original.waitForURL(/\/attachments\//);
   await expect
     .poll(() => original.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth))
-    .toBe(941);
+    // The saved image is optimized to WebP with power-of-two resizing.
+    .toBe(470);
   expect(original.url()).toContain("/attachments/");
   expect(original.url()).not.toContain("/thumbnail");
   await original.screenshot({ path: testInfo.outputPath("original-image.png") });
@@ -109,7 +110,7 @@ test("Spending saves detailed notes and displays attachment thumbnails", async (
         )
       ).json()) as { filename: string }[]
     ).map((attachment) => attachment.filename);
-  expect(await storedOrder()).toEqual(["receipt.png", "receipt.pdf"]);
+  expect(await storedOrder()).toEqual(["receipt.webp", "receipt.pdf"]);
 
   const tile = (filename: string) =>
     panel.locator("[data-testid='attachment-thumbnail']").filter({ hasText: filename });
@@ -117,7 +118,7 @@ test("Spending saves detailed notes and displays attachment thumbnails", async (
   await panel.getByRole("button", { name: "Move receipt.pdf left" }).click();
   await panel.getByRole("button", { name: "Update", exact: true }).click();
   await expect(panel).not.toBeVisible({ timeout: 30000 });
-  await expect.poll(storedOrder, { timeout: 20000 }).toEqual(["receipt.pdf", "receipt.png"]);
+  await expect.poll(storedOrder, { timeout: 20000 }).toEqual(["receipt.pdf", "receipt.webp"]);
 
   await row.getByRole("button", { name: "Row actions" }).click();
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click();

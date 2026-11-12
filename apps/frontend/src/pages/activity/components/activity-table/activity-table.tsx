@@ -5,6 +5,7 @@ import {
   calculateActivityValue,
   formatSplitRatio,
   isAssetBackedIncomeActivity,
+  isAssetBackedIncomeSubtype,
   isCashActivity,
   isCashTransfer,
   isConversionRow,
@@ -76,6 +77,7 @@ import {
 import { useActivityMutations } from "../../hooks/use-activity-mutations";
 import { ActivityOperations } from "../activity-operations";
 import { ActivityTypeBadge } from "../activity-type-badge";
+import { calculateIncomeGrossAmount } from "@/lib/activity-final-amount";
 import { flattenDayGroups } from "@/lib/day-groups";
 import { groupActivitiesByDay } from "./activity-day-groups";
 import { ActivityDayHeaderRow } from "./activity-day-header";
@@ -483,11 +485,9 @@ export const ActivityTable = ({
               ? currencyVal
               : row.original.accountCurrency || "USD";
           const assetSymbol = String(row.getValue("assetSymbol"));
-          const isAssetBackedIncome = isAssetBackedIncomeActivity(
-            activityType,
-            assetSymbol,
-            row.original.assetId,
-          );
+          // A cash dividend names its paying asset too; only the subtype says
+          // the income arrived as units with a price.
+          const isIncomeInKind = isAssetBackedIncomeSubtype(activityType, row.original.subtype);
 
           if (activityType === "FEE" || isConversionRow(row.original)) {
             return <div className="pe-4 text-end">-</div>;
@@ -499,12 +499,43 @@ export const ActivityTable = ({
               </div>
             );
           }
+          // Cash income (Dividend/Interest, not asset-backed): Price/Amount shows
+          // the gross amount before charges so the row reads
+          //   Price/Amount (gross) − Tax − Fee = Total (net received).
+          // calculateIncomeGrossAmount uses scaled-integer arithmetic to avoid
+          // float rounding (e.g. 0.60 + 0.28 → 0.88, not 0.8800000000000001).
+          if (isIncomeActivity(activityType) && !isIncomeInKind) {
+            // Use the absolute magnitude so legacy negatively-stored income
+            // amounts still produce the correct positive gross. Null/empty are
+            // passed through unchanged so the missing-amount guard below fires.
+            const absAmount =
+              amount != null && amount !== "" && Number.isFinite(Number(amount))
+                ? Math.abs(Number(amount))
+                : amount;
+            // Mirror the core resolver: gross = received + tax + fee.
+            // The dividend form hides the fee field, so form-created dividends
+            // always have fee = null — their gross is unaffected (null → 0).
+            // Imported dividends may carry a stored fee; including it here keeps
+            // the table gross aligned with the core resolver for those rows.
+            const gross = calculateIncomeGrossAmount({
+              receivedAmount: absAmount,
+              tax: row.original.tax,
+              fee: row.original.fee,
+            });
+            // gross is undefined only when receivedAmount is missing; render
+            // "—" rather than a misleading zero.
+            if (gross === undefined) return <div className="pe-4 text-end">-</div>;
+            return (
+              <div className="text-end whitespace-nowrap tabular-nums">
+                <AmountDisplay value={gross} currency={currency} isHidden={isBalanceHidden} />
+              </div>
+            );
+          }
           if (
             (isCashActivity(activityType) &&
-              !isAssetBackedIncome &&
+              !isIncomeInKind &&
               !isSecuritiesTransfer(activityType, assetSymbol, row.original.assetId)) ||
-            isCashTransfer(activityType, assetSymbol, row.original.assetId) ||
-            (isIncomeActivity(activityType) && !isAssetBackedIncome)
+            isCashTransfer(activityType, assetSymbol, row.original.assetId)
           ) {
             return (
               <div className="text-end whitespace-nowrap tabular-nums">
@@ -744,7 +775,7 @@ export const ActivityTable = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {hideableColumns.map((column) => {
-                    const meta = column.columnDef.meta as { label?: string } | undefined;
+                    const meta = column.columnDef.meta;
                     return (
                       <DropdownMenuCheckboxItem
                         key={column.id}

@@ -217,9 +217,9 @@ fn expired_state_is_rejected_even_when_the_cookie_is_replayed() {
     };
     let plaintext = serde_json::to_vec(&payload).unwrap();
     let mut nonce = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce);
-    let ciphertext = ChaCha20Poly1305::new(Key::from_slice(&KEY))
-        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
+    UnwrapErr(SysRng).fill_bytes(&mut nonce);
+    let ciphertext = ChaCha20Poly1305::new(&Key::from(KEY))
+        .encrypt(&Nonce::from(nonce), plaintext.as_ref())
         .unwrap();
     let mut out = nonce.to_vec();
     out.extend_from_slice(&ciphertext);
