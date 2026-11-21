@@ -213,7 +213,7 @@ pub async fn save_internal_transfer_pair(
         .activity_service()
         .save_internal_transfer_pair(request)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(String::from)?;
     context.health_service().clear_cache().await;
     Ok(pair)
 }
@@ -242,7 +242,7 @@ pub async fn convert_to_internal_transfer(
         .activity_service()
         .convert_to_internal_transfer(request)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(String::from)?;
     context.health_service().clear_cache().await;
     Ok(pair)
 }
@@ -326,7 +326,7 @@ pub async fn save_activities(
         .activity_service()
         .bulk_mutate_activities(request)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(String::from)?;
     let files = wealthfolio_spending::transaction_attachments::storage_for_deleted(
         pending,
         result.deleted.iter().map(|activity| activity.id.as_str()),
@@ -466,7 +466,7 @@ pub async fn import_activities(
         .activity_service()
         .import_activities(activities)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(String::from)?;
     context.health_service().clear_cache().await;
     Ok(result)
 }

@@ -33,7 +33,7 @@ function routeFetch(
   statusBody: Record<string, unknown> = {},
 ) {
   return vi.fn((input: RequestInfo | URL) => {
-    const url = String(input);
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.endsWith("/auth/status")) {
       return Promise.resolve(
         overrides.status?.() ??

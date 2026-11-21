@@ -5,7 +5,7 @@ import { debug, error, info, trace, warn } from "@tauri-apps/plugin-log";
 import { profileScope, revokeProfileSession } from "@/features/profiles/session";
 import { BackendError, backendError } from "@/lib/backend-error";
 import type { Logger } from "../types";
-import { invokeTimeoutMs } from "../invoke-timeout";
+import { InvokeTimeoutError, invokeTimeoutMs } from "../invoke-timeout";
 
 /**
  * Logger implementation using Tauri's log plugin
@@ -37,10 +37,7 @@ async function withTimeout<T>(command: string, run: () => Promise<T>): Promise<T
       run(),
       new Promise<never>(
         (_, reject) =>
-          (timer = setTimeout(
-            () => reject(new Error(`Command "${command}" timed out`)),
-            timeoutMs,
-          )),
+          (timer = setTimeout(() => reject(new InvokeTimeoutError(command)), timeoutMs)),
       ),
     ]);
     return result;
